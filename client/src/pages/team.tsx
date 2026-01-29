@@ -174,37 +174,46 @@ export default function Team() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card>
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Total Members</p>
-              <Users className="h-4 w-4 text-muted-foreground" />
+              <div className="p-2 bg-gradient-to-br from-primary/20 to-primary/5 rounded-xl">
+                <Users className="h-4 w-4 text-primary" />
+              </div>
             </div>
             {isLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black">{team?.length || 0}</p>}
           </CardContent>
         </Card>
-        <Card>
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Active</p>
-              <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+              <div className="p-2 bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 rounded-xl">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+              </div>
             </div>
             {isLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black text-emerald-600">{activeMembers}</p>}
           </CardContent>
         </Card>
-        <Card>
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Admins</p>
-              <Shield className="h-4 w-4 text-muted-foreground" />
+              <div className="p-2 bg-gradient-to-br from-amber-500/20 to-amber-500/5 rounded-xl">
+                <Shield className="h-4 w-4 text-amber-600" />
+              </div>
             </div>
             {isLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black">{team?.filter((m) => m.role === "ADMIN" || m.role === "OWNER").length || 0}</p>}
           </CardContent>
         </Card>
-        <Card>
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Departments</p>
+              <div className="p-2 bg-gradient-to-br from-cyan-500/20 to-cyan-500/5 rounded-xl">
+                <Users className="h-4 w-4 text-cyan-600" />
+              </div>
             </div>
             {isLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black">{new Set(team?.map((m) => m.department)).size || 0}</p>}
           </CardContent>

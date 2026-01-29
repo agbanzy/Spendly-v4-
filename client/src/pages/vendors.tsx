@@ -223,7 +223,7 @@ export default function VendorsPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
-        <Card className="hover-elevate">
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900 text-indigo-600">
@@ -236,7 +236,7 @@ export default function VendorsPage() {
             </div>
           </CardContent>
         </Card>
-        <Card className="hover-elevate">
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900 text-emerald-600">
@@ -249,7 +249,7 @@ export default function VendorsPage() {
             </div>
           </CardContent>
         </Card>
-        <Card className="hover-elevate">
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900 text-amber-600">
@@ -262,7 +262,7 @@ export default function VendorsPage() {
             </div>
           </CardContent>
         </Card>
-        <Card className="hover-elevate">
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-cyan-100 dark:bg-cyan-900 text-cyan-600">

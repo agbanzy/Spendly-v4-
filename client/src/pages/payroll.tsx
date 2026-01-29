@@ -193,7 +193,7 @@ export default function PayrollPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
-        <Card className="hover-elevate" data-testid="card-total-payroll">
+        <Card className="glass card-hover" data-testid="card-total-payroll">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900 text-indigo-600"><Wallet className="h-5 w-5" /></div>
@@ -204,7 +204,7 @@ export default function PayrollPage() {
             </div>
           </CardContent>
         </Card>
-        <Card className="hover-elevate">
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900 text-emerald-600"><CheckCircle2 className="h-5 w-5" /></div>
@@ -215,7 +215,7 @@ export default function PayrollPage() {
             </div>
           </CardContent>
         </Card>
-        <Card className="hover-elevate">
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900 text-amber-600"><Clock className="h-5 w-5" /></div>
@@ -226,7 +226,7 @@ export default function PayrollPage() {
             </div>
           </CardContent>
         </Card>
-        <Card className="hover-elevate">
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-cyan-100 dark:bg-cyan-900 text-cyan-600"><Users className="h-5 w-5" /></div>

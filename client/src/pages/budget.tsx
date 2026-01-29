@@ -156,11 +156,13 @@ export default function BudgetPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="glass card-hover">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Total Spent</p>
-              <TrendingUp className="h-4 w-4 text-emerald-600" />
+              <div className="p-2 bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 rounded-xl">
+                <TrendingUp className="h-4 w-4 text-emerald-600" />
+              </div>
             </div>
             {isLoading ? <Skeleton className="h-8 w-32" /> : (
               <>
@@ -174,7 +176,7 @@ export default function BudgetPage() {
           </CardContent>
         </Card>
 
-        <Card className={overBudget > 0 ? "border-red-200 dark:border-red-900" : ""}>
+        <Card className={`glass card-hover ${overBudget > 0 ? "border-red-200 dark:border-red-900" : ""}`}>
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Over Budget</p>
