@@ -213,7 +213,18 @@ export const paymentService = {
     const provider = getPaymentProvider(countryCode);
     
     if (provider === 'paystack') {
-      const result = await paystackClient.getBanks(countryCode.toLowerCase());
+      // Map country codes to country names for Paystack API
+      const countryNameMap: Record<string, string> = {
+        'NG': 'nigeria',
+        'GH': 'ghana',
+        'ZA': 'south africa',
+        'KE': 'kenya',
+        'EG': 'egypt',
+        'CI': 'cote d\'ivoire',
+        'RW': 'rwanda'
+      };
+      const countryName = countryNameMap[countryCode.toUpperCase()] || countryCode.toLowerCase();
+      const result = await paystackClient.getBanks(countryName);
       return result.data.map((bank: any) => ({
         name: bank.name,
         code: bank.code,
