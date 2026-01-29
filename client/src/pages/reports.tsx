@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { 
   FileText, 
   Download, 
@@ -37,60 +38,52 @@ interface Report {
 export default function ReportsPage() {
   const { toast } = useToast();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
   const [newReport, setNewReport] = useState({
     name: "",
     type: "expense",
     dateRange: "last_30_days"
   });
 
-  const reports: Report[] = [
-    {
-      id: "1",
-      name: "Monthly Expense Report - January 2026",
-      type: "Expense Summary",
-      dateRange: "Jan 1 - Jan 31, 2026",
-      createdAt: "2026-01-28",
-      status: "completed",
-      fileSize: "2.4 MB"
+  const { data: reports = [], isLoading, refetch } = useQuery<Report[]>({
+    queryKey: ['/api/reports'],
+    refetchInterval: 5000,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (data: { name: string; type: string; dateRange: string }) => {
+      const res = await apiRequest('POST', '/api/reports', data);
+      return res.json();
     },
-    {
-      id: "2",
-      name: "Q4 2025 Budget Analysis",
-      type: "Budget Report",
-      dateRange: "Oct 1 - Dec 31, 2025",
-      createdAt: "2026-01-15",
-      status: "completed",
-      fileSize: "5.1 MB"
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/reports'] });
+      toast({
+        title: "Report created",
+        description: "Your report is being generated and will be ready shortly."
+      });
+      setIsCreateOpen(false);
+      setNewReport({ name: "", type: "expense", dateRange: "last_30_days" });
     },
-    {
-      id: "3",
-      name: "Team Spending Report",
-      type: "Team Analytics",
-      dateRange: "Jan 1 - Jan 28, 2026",
-      createdAt: "2026-01-28",
-      status: "processing",
-      fileSize: "--"
-    },
-    {
-      id: "4",
-      name: "Vendor Payments Summary",
-      type: "Vendor Report",
-      dateRange: "Jan 1 - Jan 28, 2026",
-      createdAt: "2026-01-27",
-      status: "completed",
-      fileSize: "1.8 MB"
-    },
-    {
-      id: "5",
-      name: "Weekly Expense Digest",
-      type: "Expense Summary",
-      dateRange: "Every Monday",
-      createdAt: "Scheduled",
-      status: "scheduled",
-      fileSize: "--"
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to create report.",
+        variant: "destructive"
+      });
     }
-  ];
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await apiRequest('DELETE', `/api/reports/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/reports'] });
+      toast({
+        title: "Report deleted",
+        description: "The report has been removed."
+      });
+    }
+  });
 
   const reportTypes = [
     { value: "expense", label: "Expense Summary", icon: FileText, description: "Overview of all expenses" },
@@ -120,24 +113,44 @@ export default function ReportsPage() {
       return;
     }
 
-    setIsGenerating(true);
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    toast({
-      title: "Report created",
-      description: "Your report is being generated and will be ready shortly."
-    });
-    
-    setIsGenerating(false);
-    setIsCreateOpen(false);
-    setNewReport({ name: "", type: "expense", dateRange: "last_30_days" });
+    createMutation.mutate(newReport);
   };
 
-  const handleDownload = (report: Report) => {
-    toast({
-      title: "Downloading...",
-      description: `Downloading ${report.name}`
-    });
+  const handleDownload = async (report: Report) => {
+    try {
+      toast({
+        title: "Downloading...",
+        description: `Preparing ${report.name}`
+      });
+      
+      const response = await fetch(`/api/reports/${report.id}/download`);
+      if (!response.ok) throw new Error('Download failed');
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${report.name.replace(/\s+/g, '_')}.json`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      toast({
+        title: "Downloaded",
+        description: `${report.name} has been downloaded.`
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to download report.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleDelete = (report: Report) => {
+    deleteMutation.mutate(report.id);
   };
 
   const getStatusBadge = (status: Report["status"]) => {
@@ -260,8 +273,8 @@ export default function ReportsPage() {
               <Button variant="outline" onClick={() => setIsCreateOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleCreateReport} disabled={isGenerating} data-testid="button-generate-report">
-                {isGenerating ? (
+              <Button onClick={handleCreateReport} disabled={createMutation.isPending} data-testid="button-generate-report">
+                {createMutation.isPending ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Generating...
@@ -336,37 +349,51 @@ export default function ReportsPage() {
           <CardDescription>View and download your generated reports</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {reports.map((report, index) => (
-              <div 
-                key={report.id} 
-                className="flex items-center justify-between p-4 rounded-lg border hover:bg-muted/50 transition-colors"
-                data-testid={`report-row-${index}`}
-              >
-                <div className="flex items-center gap-4">
-                  <div className="p-2 rounded-lg bg-muted text-muted-foreground">
-                    {getTypeIcon(report.type)}
-                  </div>
-                  <div>
-                    <p className="font-medium">{report.name}</p>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <span>{report.type}</span>
-                      <span>•</span>
-                      <span>{report.dateRange}</span>
-                      {report.fileSize !== "--" && (
-                        <>
-                          <span>•</span>
-                          <span>{report.fileSize}</span>
-                        </>
-                      )}
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : reports.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <FileText className="h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="font-medium text-lg">No reports yet</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Create your first report to get started with financial insights.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {reports.map((report, index) => (
+                <div 
+                  key={report.id} 
+                  className="flex items-center justify-between p-4 rounded-lg border hover:bg-muted/50 transition-colors"
+                  data-testid={`report-row-${index}`}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="p-2 rounded-lg bg-muted text-muted-foreground">
+                      {getTypeIcon(report.type)}
+                    </div>
+                    <div>
+                      <p className="font-medium">{report.name}</p>
+                      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                        <span>{report.type}</span>
+                        <span>•</span>
+                        <span>{report.dateRange}</span>
+                        {report.fileSize !== "--" && (
+                          <>
+                            <span>•</span>
+                            <span>{report.fileSize}</span>
+                          </>
+                        )}
+                        <span>•</span>
+                        <span>{report.createdAt}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  {getStatusBadge(report.status)}
-                  <div className="flex items-center gap-1">
-                    {report.status === "completed" && (
-                      <>
+                  <div className="flex items-center gap-3">
+                    {getStatusBadge(report.status)}
+                    <div className="flex items-center gap-1">
+                      {report.status === "completed" && (
                         <Button 
                           variant="ghost" 
                           size="icon" 
@@ -375,19 +402,21 @@ export default function ReportsPage() {
                         >
                           <Download className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon">
-                          <Share2 className="h-4 w-4" />
-                        </Button>
-                      </>
-                    )}
-                    <Button variant="ghost" size="icon">
-                      <Eye className="h-4 w-4" />
-                    </Button>
+                      )}
+                      <Button 
+                        variant="ghost" 
+                        size="icon"
+                        onClick={() => handleDelete(report)}
+                        data-testid={`button-delete-${index}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

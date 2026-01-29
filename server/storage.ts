@@ -1,4 +1,14 @@
 import { type User, type InsertUser, type Expense, type Transaction, type Bill, type Budget, type VirtualCard, type TeamMember, type CompanyBalances, type AIInsight, type PayrollEntry, type Invoice, type Vendor, type CompanySettings } from "@shared/schema";
+
+export interface Report {
+  id: string;
+  name: string;
+  type: string;
+  dateRange: string;
+  createdAt: string;
+  status: "completed" | "processing" | "scheduled";
+  fileSize: string;
+}
 import { randomUUID } from "crypto";
 
 export interface IStorage {
@@ -55,6 +65,12 @@ export interface IStorage {
   // AI Insights
   getInsights(): Promise<AIInsight[]>;
   
+  // Reports
+  getReports(): Promise<Report[]>;
+  createReport(report: Report): Promise<Report>;
+  updateReport(id: string, report: Partial<Report>): Promise<Report | undefined>;
+  deleteReport(id: string): Promise<boolean>;
+  
   // Payroll
   getPayroll(): Promise<PayrollEntry[]>;
   getPayrollEntry(id: string): Promise<PayrollEntry | undefined>;
@@ -92,6 +108,7 @@ export class MemStorage implements IStorage {
   private payrollEntries: Map<string, PayrollEntry>;
   private invoices: Map<string, Invoice>;
   private vendors: Map<string, Vendor>;
+  private reports: Map<string, Report>;
   private balances: CompanyBalances;
   private settings: CompanySettings;
 
@@ -106,6 +123,7 @@ export class MemStorage implements IStorage {
     this.payrollEntries = new Map();
     this.invoices = new Map();
     this.vendors = new Map();
+    this.reports = new Map();
     this.balances = {
       local: 45850,
       usd: 78500,
@@ -496,6 +514,30 @@ export class MemStorage implements IStorage {
         type: 'info',
       },
     ];
+  }
+
+  // ==================== REPORTS ====================
+  async getReports(): Promise<Report[]> {
+    return Array.from(this.reports.values()).sort((a, b) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
+  async createReport(report: Report): Promise<Report> {
+    this.reports.set(report.id, report);
+    return report;
+  }
+
+  async updateReport(id: string, data: Partial<Report>): Promise<Report | undefined> {
+    const report = this.reports.get(id);
+    if (!report) return undefined;
+    const updated = { ...report, ...data };
+    this.reports.set(id, updated);
+    return updated;
+  }
+
+  async deleteReport(id: string): Promise<boolean> {
+    return this.reports.delete(id);
   }
 
   // ==================== PAYROLL ====================

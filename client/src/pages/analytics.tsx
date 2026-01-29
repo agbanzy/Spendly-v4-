@@ -93,14 +93,42 @@ export default function AnalyticsPage() {
   }, [expenses]);
 
   const monthlyTrendData = useMemo(() => {
-    const months = ["Aug", "Sep", "Oct", "Nov", "Dec", "Jan"];
-    return months.map((month, i) => ({
-      month,
-      expenses: Math.round(Math.random() * 15000 + 8000),
-      income: Math.round(Math.random() * 25000 + 15000),
-      budget: 20000,
-    }));
-  }, []);
+    if (!expenses || !transactions) return [];
+    
+    const now = new Date();
+    const months: { month: string; expenses: number; income: number; budget: number }[] = [];
+    
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthName = date.toLocaleString('default', { month: 'short' });
+      const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+      const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+      
+      const monthExpenses = expenses
+        .filter(e => {
+          const expDate = new Date(e.date);
+          return expDate >= monthStart && expDate <= monthEnd;
+        })
+        .reduce((sum, e) => sum + e.amount, 0);
+      
+      const monthIncome = transactions
+        .filter(t => {
+          const tDate = new Date(t.date);
+          return tDate >= monthStart && tDate <= monthEnd && 
+                 (t.type === 'Deposit' || t.type === 'Funding' || t.type === 'Refund');
+        })
+        .reduce((sum, t) => sum + t.amount, 0);
+      
+      months.push({
+        month: monthName,
+        expenses: monthExpenses,
+        income: monthIncome,
+        budget: totalBudget / 12,
+      });
+    }
+    
+    return months;
+  }, [expenses, transactions, totalBudget]);
 
   const cashFlowData = useMemo(() => {
     if (!transactions) return [];
@@ -125,18 +153,45 @@ export default function AnalyticsPage() {
   }, [budgets]);
 
   const weeklySpendingData = useMemo(() => {
+    if (!expenses) return [];
+    
+    const now = new Date();
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay() + 1);
+    
     const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    return days.map(day => ({
-      day,
-      amount: Math.round(Math.random() * 2000 + 500),
-    }));
-  }, []);
+    return days.map((day, i) => {
+      const dayDate = new Date(startOfWeek);
+      dayDate.setDate(startOfWeek.getDate() + i);
+      const dayStr = dayDate.toISOString().split('T')[0];
+      
+      const dayExpenses = expenses
+        .filter(e => e.date === dayStr)
+        .reduce((sum, e) => sum + e.amount, 0);
+      
+      return { day, amount: dayExpenses };
+    });
+  }, [expenses]);
+
+  const savingsRate = useMemo(() => {
+    if (!transactions) return 0;
+    const income = transactions
+      .filter(t => t.type === 'Deposit' || t.type === 'Funding')
+      .reduce((sum, t) => sum + t.amount, 0);
+    const outflow = transactions
+      .filter(t => t.type === 'Payout' || t.type === 'Bill')
+      .reduce((sum, t) => sum + t.amount, 0);
+    if (income === 0) return 0;
+    return Math.round(((income - outflow) / income) * 100);
+  }, [transactions]);
+
+  const budgetUtilization = totalBudget > 0 ? Math.round((budgetUsed / totalBudget) * 100) : 0;
 
   const statsCards = [
     {
       title: "Total Expenses",
       value: `$${totalSpent.toLocaleString()}`,
-      change: "+12.5%",
+      change: `${expenses?.length || 0} items`,
       trend: "up" as const,
       icon: DollarSign,
       color: "text-emerald-600",
@@ -144,9 +199,9 @@ export default function AnalyticsPage() {
     },
     {
       title: "Budget Utilization",
-      value: `${totalBudget > 0 ? Math.round((budgetUsed / totalBudget) * 100) : 0}%`,
-      change: "-5.2%",
-      trend: "down" as const,
+      value: `${budgetUtilization}%`,
+      change: budgetUtilization > 80 ? "Over limit" : "On track",
+      trend: budgetUtilization > 80 ? "up" as const : "down" as const,
       icon: Target,
       color: "text-indigo-600",
       bgColor: "bg-indigo-100 dark:bg-indigo-900/30"
@@ -154,7 +209,7 @@ export default function AnalyticsPage() {
     {
       title: "Pending Approvals",
       value: pendingExpenses.toString(),
-      change: pendingExpenses > 5 ? "+3" : "-2",
+      change: `${approvedExpenses} approved`,
       trend: pendingExpenses > 5 ? "up" as const : "down" as const,
       icon: Receipt,
       color: "text-amber-600",
@@ -162,9 +217,9 @@ export default function AnalyticsPage() {
     },
     {
       title: "Savings Rate",
-      value: "23%",
-      change: "+4.1%",
-      trend: "up" as const,
+      value: `${savingsRate}%`,
+      change: savingsRate > 0 ? "Positive" : "Negative",
+      trend: savingsRate > 0 ? "up" as const : "down" as const,
       icon: Wallet,
       color: "text-cyan-600",
       bgColor: "bg-cyan-100 dark:bg-cyan-900/30"
@@ -563,46 +618,62 @@ export default function AnalyticsPage() {
                 <CardDescription>Based on spending habits and budget adherence</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col items-center justify-center py-8">
-                <div className="relative w-40 h-40">
-                  <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="40"
-                      fill="none"
-                      stroke="hsl(var(--muted))"
-                      strokeWidth="12"
-                    />
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="40"
-                      fill="none"
-                      stroke="#10b981"
-                      strokeWidth="12"
-                      strokeDasharray={`${78 * 2.51} ${100 * 2.51}`}
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex items-center justify-center flex-col">
-                    <span className="text-4xl font-bold text-emerald-600">78</span>
-                    <span className="text-sm text-muted-foreground">Good</span>
-                  </div>
-                </div>
-                <div className="mt-6 grid grid-cols-3 gap-4 text-center w-full">
-                  <div>
-                    <p className="text-lg font-bold text-emerald-600">A-</p>
-                    <p className="text-xs text-muted-foreground">Budget</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-bold text-amber-600">B+</p>
-                    <p className="text-xs text-muted-foreground">Savings</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-bold text-indigo-600">A</p>
-                    <p className="text-xs text-muted-foreground">Spending</p>
-                  </div>
-                </div>
+                {(() => {
+                  const budgetScore = totalBudget > 0 ? Math.max(0, 100 - budgetUtilization) : 50;
+                  const savingsScore = Math.max(0, Math.min(100, savingsRate + 50));
+                  const spendingScore = approvedExpenses > 0 ? Math.min(100, (approvedExpenses / (expenses?.length || 1)) * 100) : 50;
+                  const healthScore = Math.round((budgetScore + savingsScore + spendingScore) / 3);
+                  const healthLabel = healthScore >= 80 ? "Excellent" : healthScore >= 60 ? "Good" : healthScore >= 40 ? "Fair" : "Needs Work";
+                  const healthColor = healthScore >= 80 ? "#10b981" : healthScore >= 60 ? "#3b82f6" : healthScore >= 40 ? "#f59e0b" : "#ef4444";
+                  const budgetGrade = budgetScore >= 90 ? "A+" : budgetScore >= 80 ? "A" : budgetScore >= 70 ? "B+" : budgetScore >= 60 ? "B" : "C";
+                  const savingsGrade = savingsScore >= 90 ? "A+" : savingsScore >= 80 ? "A" : savingsScore >= 70 ? "B+" : savingsScore >= 60 ? "B" : "C";
+                  const spendingGrade = spendingScore >= 90 ? "A+" : spendingScore >= 80 ? "A" : spendingScore >= 70 ? "B+" : spendingScore >= 60 ? "B" : "C";
+                  
+                  return (
+                    <>
+                      <div className="relative w-40 h-40">
+                        <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                          <circle
+                            cx="50"
+                            cy="50"
+                            r="40"
+                            fill="none"
+                            stroke="hsl(var(--muted))"
+                            strokeWidth="12"
+                          />
+                          <circle
+                            cx="50"
+                            cy="50"
+                            r="40"
+                            fill="none"
+                            stroke={healthColor}
+                            strokeWidth="12"
+                            strokeDasharray={`${healthScore * 2.51} ${100 * 2.51}`}
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                        <div className="absolute inset-0 flex items-center justify-center flex-col">
+                          <span className="text-4xl font-bold" style={{ color: healthColor }}>{healthScore}</span>
+                          <span className="text-sm text-muted-foreground">{healthLabel}</span>
+                        </div>
+                      </div>
+                      <div className="mt-6 grid grid-cols-3 gap-4 text-center w-full">
+                        <div>
+                          <p className="text-lg font-bold text-emerald-600">{budgetGrade}</p>
+                          <p className="text-xs text-muted-foreground">Budget</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-bold text-amber-600">{savingsGrade}</p>
+                          <p className="text-xs text-muted-foreground">Savings</p>
+                        </div>
+                        <div>
+                          <p className="text-lg font-bold text-indigo-600">{spendingGrade}</p>
+                          <p className="text-xs text-muted-foreground">Spending</p>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </CardContent>
             </Card>
           </div>
@@ -616,24 +687,48 @@ export default function AnalyticsPage() {
             </CardHeader>
             <CardContent>
               <div className="grid gap-4 md:grid-cols-3">
-                <div className="p-4 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
-                  <h4 className="font-semibold text-emerald-700 dark:text-emerald-400">Positive Trend</h4>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Your software spending decreased by 15% this month. Keep it up!
-                  </p>
-                </div>
-                <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-                  <h4 className="font-semibold text-amber-700 dark:text-amber-400">Budget Alert</h4>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Marketing budget is at 85% utilization with 10 days remaining.
-                  </p>
-                </div>
-                <div className="p-4 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800">
-                  <h4 className="font-semibold text-indigo-700 dark:text-indigo-400">Opportunity</h4>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Consider consolidating vendor payments to save on transaction fees.
-                  </p>
-                </div>
+                {(() => {
+                  const overBudgetCategories = budgets?.filter(b => b.spent > b.limit * 0.8) || [];
+                  const topCategory = categoryBreakdown[0];
+                  const pendingCount = expenses?.filter(e => e.status === 'PENDING').length || 0;
+                  
+                  return (
+                    <>
+                      <div className="p-4 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
+                        <h4 className="font-semibold text-emerald-700 dark:text-emerald-400">
+                          {savingsRate > 0 ? "Positive Savings" : "Spending Analysis"}
+                        </h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {savingsRate > 0 
+                            ? `You're saving ${savingsRate}% of your income. Great job maintaining positive cash flow!`
+                            : `Your total expenses are $${totalSpent.toLocaleString()} across ${expenses?.length || 0} transactions.`}
+                        </p>
+                      </div>
+                      <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                        <h4 className="font-semibold text-amber-700 dark:text-amber-400">
+                          {overBudgetCategories.length > 0 ? "Budget Alert" : "Budget Status"}
+                        </h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {overBudgetCategories.length > 0 
+                            ? `${overBudgetCategories.length} budget${overBudgetCategories.length > 1 ? 's are' : ' is'} at 80%+ utilization: ${overBudgetCategories.map(b => b.category).join(', ')}`
+                            : `All ${budgets?.length || 0} budgets are within healthy limits. Keep tracking!`}
+                        </p>
+                      </div>
+                      <div className="p-4 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800">
+                        <h4 className="font-semibold text-indigo-700 dark:text-indigo-400">
+                          {pendingCount > 0 ? "Action Required" : "Top Category"}
+                        </h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {pendingCount > 0 
+                            ? `You have ${pendingCount} expense${pendingCount > 1 ? 's' : ''} pending approval. Review them soon.`
+                            : topCategory 
+                              ? `Highest spending: ${topCategory.name} at $${topCategory.value.toLocaleString()}`
+                              : "No expense data available yet."}
+                        </p>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </CardContent>
           </Card>

@@ -736,6 +736,102 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== REPORTS ====================
+  app.get("/api/reports", async (req, res) => {
+    try {
+      const reports = await storage.getReports();
+      res.json(reports);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch reports" });
+    }
+  });
+
+  app.post("/api/reports", async (req, res) => {
+    try {
+      const { name, type, dateRange } = req.body;
+      if (!name || !type || !dateRange) {
+        return res.status(400).json({ error: "Name, type, and dateRange are required" });
+      }
+      
+      const now = new Date();
+      const report = await storage.createReport({
+        id: `RPT${Date.now()}`,
+        name,
+        type,
+        dateRange,
+        createdAt: now.toISOString().split('T')[0],
+        status: "processing",
+        fileSize: "--"
+      });
+      
+      // Simulate report generation - mark as completed after short delay
+      setTimeout(async () => {
+        await storage.updateReport(report.id, { 
+          status: "completed", 
+          fileSize: `${(Math.random() * 5 + 0.5).toFixed(1)} MB` 
+        });
+      }, 3000);
+      
+      res.status(201).json(report);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create report" });
+    }
+  });
+
+  app.delete("/api/reports/:id", async (req, res) => {
+    try {
+      await storage.deleteReport(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete report" });
+    }
+  });
+
+  app.get("/api/reports/:id/download", async (req, res) => {
+    try {
+      const reports = await storage.getReports();
+      const report = reports.find(r => r.id === req.params.id);
+      
+      if (!report) {
+        return res.status(404).json({ error: "Report not found" });
+      }
+      
+      if (report.status !== "completed") {
+        return res.status(400).json({ error: "Report is not ready for download" });
+      }
+      
+      // Generate report data based on type
+      const expenses = await storage.getExpenses();
+      const transactions = await storage.getTransactions();
+      const budgets = await storage.getBudgets();
+      
+      let reportData: any = { generatedAt: new Date().toISOString(), report: report.name };
+      
+      if (report.type === "expense" || report.type === "Expense Summary") {
+        reportData.expenses = expenses;
+        reportData.totalAmount = expenses.reduce((sum, e) => sum + e.amount, 0);
+        reportData.count = expenses.length;
+      } else if (report.type === "budget" || report.type === "Budget Report") {
+        reportData.budgets = budgets;
+        reportData.totalBudget = budgets.reduce((sum, b) => sum + b.limit, 0);
+        reportData.totalSpent = budgets.reduce((sum, b) => sum + b.spent, 0);
+      } else if (report.type === "transaction" || report.type === "Transaction Report") {
+        reportData.transactions = transactions;
+        reportData.totalAmount = transactions.reduce((sum, t) => sum + t.amount, 0);
+      } else {
+        reportData.expenses = expenses;
+        reportData.transactions = transactions;
+        reportData.budgets = budgets;
+      }
+      
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="${report.name.replace(/\s+/g, '_')}.json"`);
+      res.json(reportData);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to download report" });
+    }
+  });
+
   // ==================== PAYROLL ====================
   app.get("/api/payroll", async (req, res) => {
     try {

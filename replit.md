@@ -12,7 +12,13 @@ Spendly is a comprehensive financial operating system for high-growth teams. It 
 - Created comprehensive dashboard with balance cards and AI insights
 - Added Finance section: Analytics, Reports, Payroll, Invoices, Vendors
 - Implemented Quick Actions FAB for rapid actions
-- Backend API with in-memory storage and demo data
+- Backend API with in-memory storage and live data
+- **Enhanced Analytics**: Real-time charts (area, bar, pie, line, composed) using recharts with live data from expenses/transactions APIs
+- **Reports System**: Full CRUD API for reports with create, download (JSON export), and delete functionality
+- **Paystack Auto-Debit**: Subscription plans, charge authorization, recurring payments endpoints
+- **Live Data Only**: Removed all mock/hardcoded data - all statistics calculated from real API data
+- **Financial Health Score**: Dynamic calculation based on budget utilization, savings rate, and spending patterns
+- **Smart Insights**: Context-aware recommendations generated from actual expense and budget data
 
 ## Architecture
 
@@ -72,12 +78,22 @@ Spendly is a comprehensive financial operating system for high-growth teams. It 
 - `GET /api/balances` - Company balances
 - `GET /api/expenses` - List expenses
 - `POST /api/expenses` - Create expense
+- `PUT /api/expenses/:id` - Update expense (including approve/reject)
+- `DELETE /api/expenses/:id` - Delete expense
 - `GET /api/transactions` - List transactions
 - `GET /api/bills` - List bills
 - `GET /api/budgets` - List budgets
 - `GET /api/cards` - List virtual cards
 - `GET /api/team` - List team members
 - `GET /api/insights` - AI-generated insights
+- `GET /api/reports` - List reports
+- `POST /api/reports` - Create report
+- `DELETE /api/reports/:id` - Delete report
+- `GET /api/reports/:id/download` - Download report as JSON
+- `GET /api/analytics/summary` - Analytics summary with breakdowns
+- `POST /api/paystack/subscriptions` - Create Paystack subscription plan
+- `POST /api/paystack/charge/authorization` - Charge saved authorization
+- `GET /api/paystack/authorizations` - List saved authorizations
 
 ## Components
 - **AppSidebar** - Main navigation with sections (Main, Finance, Management)
