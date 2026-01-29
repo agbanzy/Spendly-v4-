@@ -168,6 +168,153 @@
   }
 }
 
+/* Modern texture backgrounds */
+.texture-grid {
+  background-image: 
+    linear-gradient(rgba(99, 102, 241, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 102, 241, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.dark .texture-grid {
+  background-image: 
+    linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px);
+}
+
+.texture-dots {
+  background-image: radial-gradient(rgba(99, 102, 241, 0.08) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.dark .texture-dots {
+  background-image: radial-gradient(rgba(99, 102, 241, 0.12) 1px, transparent 1px);
+}
+
+.texture-gradient {
+  background: linear-gradient(135deg, 
+    hsl(var(--background)) 0%, 
+    hsl(239 84% 67% / 0.03) 50%, 
+    hsl(var(--background)) 100%);
+}
+
+.dark .texture-gradient {
+  background: linear-gradient(135deg, 
+    hsl(var(--background)) 0%, 
+    hsl(239 84% 67% / 0.08) 50%, 
+    hsl(var(--background)) 100%);
+}
+
+.texture-mesh {
+  background-color: hsl(var(--background));
+  background-image: 
+    radial-gradient(at 40% 20%, hsl(239 84% 67% / 0.05) 0px, transparent 50%),
+    radial-gradient(at 80% 0%, hsl(280 65% 60% / 0.04) 0px, transparent 50%),
+    radial-gradient(at 0% 50%, hsl(160 84% 39% / 0.03) 0px, transparent 50%),
+    radial-gradient(at 80% 50%, hsl(38 92% 50% / 0.04) 0px, transparent 50%),
+    radial-gradient(at 0% 100%, hsl(239 84% 67% / 0.03) 0px, transparent 50%);
+}
+
+.dark .texture-mesh {
+  background-image: 
+    radial-gradient(at 40% 20%, hsl(239 84% 67% / 0.08) 0px, transparent 50%),
+    radial-gradient(at 80% 0%, hsl(280 65% 60% / 0.06) 0px, transparent 50%),
+    radial-gradient(at 0% 50%, hsl(160 84% 39% / 0.05) 0px, transparent 50%),
+    radial-gradient(at 80% 50%, hsl(38 92% 50% / 0.06) 0px, transparent 50%),
+    radial-gradient(at 0% 100%, hsl(239 84% 67% / 0.05) 0px, transparent 50%);
+}
+
+/* Glass morphism effect */
+.glass {
+  background: hsl(var(--card) / 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid hsl(var(--border) / 0.5);
+}
+
+.dark .glass {
+  background: hsl(var(--card) / 0.6);
+}
+
+/* Gradient borders */
+.gradient-border {
+  position: relative;
+  background: hsl(var(--card));
+  border-radius: var(--radius);
+}
+
+.gradient-border::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: calc(var(--radius) + 1px);
+  padding: 1px;
+  background: linear-gradient(135deg, hsl(239 84% 67% / 0.3), hsl(280 65% 60% / 0.3), hsl(160 84% 39% / 0.3));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Animated gradient background */
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.animated-gradient {
+  background: linear-gradient(-45deg, hsl(239 84% 67%), hsl(280 65% 60%), hsl(160 84% 39%), hsl(38 92% 50%));
+  background-size: 400% 400%;
+  animation: gradient-shift 15s ease infinite;
+}
+
+/* Shimmer effect for loading */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, 
+    hsl(var(--muted)) 25%, 
+    hsl(var(--muted-foreground) / 0.1) 50%, 
+    hsl(var(--muted)) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Modern card hover effect */
+.card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px -12px hsl(239 84% 67% / 0.15);
+}
+
+.dark .card-hover:hover {
+  box-shadow: 0 12px 40px -12px hsl(239 84% 67% / 0.25);
+}
+
+/* Utility button styles */
+.utility-btn {
+  @apply relative overflow-hidden transition-all duration-200;
+}
+
+.utility-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, transparent 40%, hsl(var(--primary) / 0.1) 100%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.utility-btn:hover::before {
+  opacity: 1;
+}
+
 /**
  * Using the elevate system.
  * Automatic contrast adjustment.

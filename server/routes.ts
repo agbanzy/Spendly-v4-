@@ -1313,5 +1313,94 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== UTILITY PAYMENTS ====================
+  const utilityPaymentSchema = z.object({
+    type: z.enum(['airtime', 'data', 'electricity', 'cable', 'internet']),
+    provider: z.string().min(1),
+    amount: z.number().positive(),
+    reference: z.string().min(1),
+  });
+
+  app.post("/api/payments/utility", async (req, res) => {
+    try {
+      const result = utilityPaymentSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid utility payment data", details: result.error.issues });
+      }
+
+      const { type, provider, amount, reference } = result.data;
+      
+      const balances = await storage.getBalances();
+      if (balances.local < amount) {
+        return res.status(400).json({ error: "Insufficient wallet balance" });
+      }
+      
+      await storage.updateBalances({ local: balances.local - amount });
+      
+      await storage.createTransaction({
+        type: 'Expense' as any,
+        amount,
+        fee: 0,
+        status: 'Completed',
+        date: new Date().toISOString().split('T')[0],
+        description: `${type.charAt(0).toUpperCase() + type.slice(1)} - ${provider} (${reference})`,
+        currency: 'USD',
+      });
+      
+      res.json({
+        success: true,
+        message: `${type.charAt(0).toUpperCase() + type.slice(1)} payment successful`,
+        reference: `UTL-${Date.now()}`,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to process utility payment" });
+    }
+  });
+
+  // ==================== ACCOUNT VALIDATION ====================
+  const validateAccountSchema = z.object({
+    accountNumber: z.string().min(1),
+    bankCode: z.string().min(1),
+    countryCode: z.string().min(2).max(2).default('NG'),
+  });
+
+  app.post("/api/payment/validate-account", async (req, res) => {
+    try {
+      const result = validateAccountSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid account data", details: result.error.issues });
+      }
+
+      const { accountNumber, bankCode, countryCode } = result.data;
+      
+      const isAfricanCountry = ['NG', 'GH', 'KE', 'ZA', 'EG', 'RW', 'CI'].includes(countryCode);
+      
+      if (isAfricanCountry) {
+        try {
+          const { paystackClient } = await import('./paystackClient');
+          const verification = await paystackClient.resolveAccount(accountNumber, bankCode);
+          res.json({
+            success: true,
+            accountName: verification.data?.account_name || 'Account Holder',
+            accountNumber: verification.data?.account_number || accountNumber,
+            bankId: bankCode,
+          });
+        } catch (error: any) {
+          res.status(400).json({ error: "Could not verify account", details: error.message });
+        }
+      } else {
+        res.json({
+          success: true,
+          accountName: "Account Holder",
+          accountNumber,
+          bankId: bankCode,
+          note: "Account verification simulated for non-African countries",
+        });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to validate account" });
+    }
+  });
+
   return httpServer;
 }

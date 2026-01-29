@@ -103,4 +103,8 @@ export const paystackClient = {
   async listTransactions(perPage: number = 50, page: number = 1) {
     return paystackRequest(`/transaction?perPage=${perPage}&page=${page}`);
   },
+
+  async resolveAccount(accountNumber: string, bankCode: string) {
+    return paystackRequest(`/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`);
+  },
 };
