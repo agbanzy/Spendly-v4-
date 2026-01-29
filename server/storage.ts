@@ -4,10 +4,12 @@ import {
   users, expenses, transactions, bills, budgets, virtualCards, 
   teamMembers, payrollEntries, invoices, vendors, reports,
   cardTransactions, virtualAccounts, companyBalances, companySettings,
+  userProfiles, kycSubmissions,
   type User, type InsertUser, type Expense, type Transaction, type Bill, 
   type Budget, type VirtualCard, type TeamMember, type PayrollEntry, 
   type Invoice, type Vendor, type Report, type CardTransaction, 
-  type VirtualAccount, type CompanyBalances, type CompanySettings, type AIInsight
+  type VirtualAccount, type CompanyBalances, type CompanySettings, type AIInsight,
+  type UserProfile, type InsertUserProfile, type KycSubmission, type InsertKycSubmission
 } from "@shared/schema";
 
 export interface IStorage {
@@ -89,6 +91,15 @@ export interface IStorage {
   
   getSettings(): Promise<CompanySettings>;
   updateSettings(settings: Partial<CompanySettings>): Promise<CompanySettings>;
+  
+  // KYC & User Profiles
+  getUserProfile(firebaseUid: string): Promise<UserProfile | undefined>;
+  createUserProfile(profile: InsertUserProfile): Promise<UserProfile>;
+  updateUserProfile(firebaseUid: string, profile: Partial<UserProfile>): Promise<UserProfile | undefined>;
+  
+  getKycSubmission(userProfileId: string): Promise<KycSubmission | undefined>;
+  createKycSubmission(submission: InsertKycSubmission): Promise<KycSubmission>;
+  updateKycSubmission(id: string, submission: Partial<KycSubmission>): Promise<KycSubmission | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -507,6 +518,46 @@ export class DatabaseStorage implements IStorage {
     if (result.length === 0) {
       return this.getSettings();
     }
+    return result[0];
+  }
+
+  // ==================== USER PROFILES (KYC) ====================
+  async getUserProfile(firebaseUid: string): Promise<UserProfile | undefined> {
+    const result = await db.select().from(userProfiles).where(eq(userProfiles.firebaseUid, firebaseUid)).limit(1);
+    return result[0];
+  }
+
+  async createUserProfile(profile: InsertUserProfile): Promise<UserProfile> {
+    const result = await db.insert(userProfiles).values(profile as any).returning();
+    return result[0];
+  }
+
+  async updateUserProfile(firebaseUid: string, profileData: Partial<UserProfile>): Promise<UserProfile | undefined> {
+    const now = new Date().toISOString();
+    const result = await db.update(userProfiles).set({
+      ...profileData,
+      updatedAt: now,
+    } as any).where(eq(userProfiles.firebaseUid, firebaseUid)).returning();
+    return result[0];
+  }
+
+  // ==================== KYC SUBMISSIONS ====================
+  async getKycSubmission(userProfileId: string): Promise<KycSubmission | undefined> {
+    const result = await db.select().from(kycSubmissions).where(eq(kycSubmissions.userProfileId, userProfileId)).limit(1);
+    return result[0];
+  }
+
+  async createKycSubmission(submission: InsertKycSubmission): Promise<KycSubmission> {
+    const result = await db.insert(kycSubmissions).values(submission as any).returning();
+    return result[0];
+  }
+
+  async updateKycSubmission(id: string, submissionData: Partial<KycSubmission>): Promise<KycSubmission | undefined> {
+    const now = new Date().toISOString();
+    const result = await db.update(kycSubmissions).set({
+      ...submissionData,
+      updatedAt: now,
+    } as any).where(eq(kycSubmissions.id, id)).returning();
     return result[0];
   }
 }

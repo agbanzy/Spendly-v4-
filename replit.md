@@ -4,8 +4,12 @@
 Spendly is a comprehensive financial operating system for high-growth teams. It provides expense tracking, budget management, virtual cards, team management, payroll, invoicing, vendor management, and transaction monitoring in a unified platform.
 
 ## Recent Changes (January 29, 2026)
+- **KYC & Onboarding Flow**: Complete multi-step verification system with personal info, address, identity documents, and business information
+- **User Profiles**: New userProfiles table linked to Firebase UID for extended user data and KYC status tracking
+- **KYC Submissions**: kycSubmissions table for storing verification documents and personal details
+- **KYC Status Banner**: Dashboard shows dynamic status (not started, pending review, rejected, approved)
 - **PostgreSQL Database**: Migrated from in-memory storage to real PostgreSQL database (Neon-backed)
-- **Database Schema**: Full Drizzle ORM schema with 14 tables (users, expenses, transactions, bills, budgets, virtual_cards, team_members, payroll_entries, invoices, vendors, reports, card_transactions, virtual_accounts, company_settings)
+- **Database Schema**: Full Drizzle ORM schema with 17 tables (added userProfiles, kycSubmissions)
 - Integrated Firebase authentication (email/password + Google sign-in)
 - Added Stripe and Paystack payment gateway configurations
 - Full application build from GitHub repository (https://github.com/agbanzy/spendly-g)
@@ -60,6 +64,7 @@ Spendly is a comprehensive financial operating system for high-growth teams. It 
 4. **Forgot Password** (`/forgot-password`) - Firebase password reset
 5. **Terms of Service** (`/terms`) - Legal terms page
 6. **Privacy Policy** (`/privacy`) - Privacy policy page
+7. **Onboarding** (`/onboarding`) - Multi-step KYC verification flow (5 steps)
 
 ### App Pages (After Login)
 1. **Dashboard** (`/dashboard`) - Financial overview with balance cards, AI insights, recent activity

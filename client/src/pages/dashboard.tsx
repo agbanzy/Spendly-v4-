@@ -49,8 +49,9 @@ import {
   BadgeCheck,
 } from "lucide-react";
 import { Link } from "wouter";
-import type { Expense, Transaction, CompanyBalances, AIInsight, CompanySettings } from "@shared/schema";
+import type { Expense, Transaction, CompanyBalances, AIInsight, CompanySettings, UserProfile } from "@shared/schema";
 import { isPaystackRegion } from "@/lib/constants";
+import { useAuth } from "@/lib/auth";
 
 interface Bank {
   code: string;
@@ -59,6 +60,7 @@ interface Bank {
 
 export default function Dashboard() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const searchParams = useSearch();
   const [isFundingOpen, setIsFundingOpen] = useState(false);
   const [isWithdrawalOpen, setIsWithdrawalOpen] = useState(false);
@@ -137,6 +139,17 @@ export default function Dashboard() {
       return res.json();
     },
     enabled: isPaystack,
+  });
+
+  const { data: userProfile } = useQuery<UserProfile>({
+    queryKey: ["/api/user-profile", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      const res = await fetch(`/api/user-profile/${user.id}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!user?.id,
   });
 
   const fundWalletMutation = useMutation({
@@ -280,8 +293,80 @@ export default function Dashboard() {
     toast({ title: "Copied to clipboard" });
   };
 
+  const showKycBanner = userProfile && userProfile.kycStatus !== 'approved';
+
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500 texture-mesh min-h-screen">
+      {showKycBanner && (
+        <Card className={`${
+          userProfile?.kycStatus === 'pending_review' 
+            ? 'border-blue-200 dark:border-blue-800 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/50 dark:to-indigo-950/50'
+            : userProfile?.kycStatus === 'rejected'
+            ? 'border-red-200 dark:border-red-800 bg-gradient-to-r from-red-50 to-rose-50 dark:from-red-950/50 dark:to-rose-950/50'
+            : 'border-amber-200 dark:border-amber-800 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/50 dark:to-orange-950/50'
+        }`}>
+          <CardContent className="p-4 flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-full ${
+                userProfile?.kycStatus === 'pending_review' 
+                  ? 'bg-blue-100 dark:bg-blue-900'
+                  : userProfile?.kycStatus === 'rejected'
+                  ? 'bg-red-100 dark:bg-red-900'
+                  : 'bg-amber-100 dark:bg-amber-900'
+              }`}>
+                {userProfile?.kycStatus === 'pending_review' ? (
+                  <Loader2 className="h-5 w-5 text-blue-600 dark:text-blue-400 animate-spin" />
+                ) : userProfile?.kycStatus === 'rejected' ? (
+                  <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                ) : (
+                  <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                )}
+              </div>
+              <div>
+                <p className={`font-semibold ${
+                  userProfile?.kycStatus === 'pending_review' 
+                    ? 'text-blue-900 dark:text-blue-100'
+                    : userProfile?.kycStatus === 'rejected'
+                    ? 'text-red-900 dark:text-red-100'
+                    : 'text-amber-900 dark:text-amber-100'
+                }`}>
+                  {userProfile?.kycStatus === 'pending_review' 
+                    ? 'Verification In Progress'
+                    : userProfile?.kycStatus === 'rejected'
+                    ? 'Verification Rejected'
+                    : 'Complete Your Verification'}
+                </p>
+                <p className={`text-sm ${
+                  userProfile?.kycStatus === 'pending_review' 
+                    ? 'text-blue-700 dark:text-blue-300'
+                    : userProfile?.kycStatus === 'rejected'
+                    ? 'text-red-700 dark:text-red-300'
+                    : 'text-amber-700 dark:text-amber-300'
+                }`}>
+                  {userProfile?.kycStatus === 'pending_review' 
+                    ? 'Your verification is under review. This usually takes 24-48 hours.'
+                    : userProfile?.kycStatus === 'rejected'
+                    ? 'Your verification was rejected. Please resubmit with correct documents.'
+                    : 'Verify your identity to unlock all features and increase transaction limits.'}
+                </p>
+              </div>
+            </div>
+            {userProfile?.kycStatus !== 'pending_review' && (
+              <Link href="/onboarding">
+                <Button className={`${
+                  userProfile?.kycStatus === 'rejected' 
+                    ? 'bg-red-600 hover:bg-red-700' 
+                    : 'bg-amber-600 hover:bg-amber-700'
+                } text-white`} data-testid="button-complete-kyc">
+                  <Shield className="h-4 w-4 mr-2" />
+                  {userProfile?.kycStatus === 'rejected' ? 'Resubmit KYC' : 'Complete KYC'}
+                </Button>
+              </Link>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-2">

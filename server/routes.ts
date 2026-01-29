@@ -2159,5 +2159,215 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== KYC & ONBOARDING API ====================
+  
+  // Get user profile by Firebase UID
+  app.get("/api/user-profile/:firebaseUid", async (req, res) => {
+    try {
+      const { firebaseUid } = req.params;
+      const profile = await storage.getUserProfile(firebaseUid);
+      if (!profile) {
+        return res.status(404).json({ error: "Profile not found" });
+      }
+      res.json(profile);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch profile" });
+    }
+  });
+
+  // Create user profile
+  app.post("/api/user-profile", async (req, res) => {
+    try {
+      const { firebaseUid, email, displayName, photoUrl } = req.body;
+      if (!firebaseUid || !email) {
+        return res.status(400).json({ error: "firebaseUid and email are required" });
+      }
+      
+      const existing = await storage.getUserProfile(firebaseUid);
+      if (existing) {
+        return res.json(existing);
+      }
+      
+      const now = new Date().toISOString();
+      const profile = await storage.createUserProfile({
+        firebaseUid,
+        email,
+        displayName: displayName || null,
+        photoUrl: photoUrl || null,
+        phoneNumber: null,
+        dateOfBirth: null,
+        nationality: null,
+        address: null,
+        city: null,
+        state: null,
+        country: null,
+        postalCode: null,
+        kycStatus: 'not_started',
+        onboardingCompleted: false,
+        onboardingStep: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      res.status(201).json(profile);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to create profile" });
+    }
+  });
+
+  // Update user profile
+  app.patch("/api/user-profile/:firebaseUid", async (req, res) => {
+    try {
+      const { firebaseUid } = req.params;
+      const profile = await storage.updateUserProfile(firebaseUid, req.body);
+      if (!profile) {
+        return res.status(404).json({ error: "Profile not found" });
+      }
+      res.json(profile);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to update profile" });
+    }
+  });
+
+  // Get KYC submission
+  app.get("/api/kyc/:userProfileId", async (req, res) => {
+    try {
+      const { userProfileId } = req.params;
+      const submission = await storage.getKycSubmission(userProfileId);
+      if (!submission) {
+        return res.status(404).json({ error: "KYC submission not found" });
+      }
+      res.json(submission);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch KYC submission" });
+    }
+  });
+
+  // KYC submission validation schema
+  const kycSubmissionSchema = z.object({
+    firebaseUid: z.string().min(1, "Firebase UID is required"),
+    firstName: z.string().min(1, "First name is required"),
+    lastName: z.string().min(1, "Last name is required"),
+    middleName: z.string().optional(),
+    dateOfBirth: z.string().min(1, "Date of birth is required"),
+    gender: z.string().optional(),
+    nationality: z.string().min(1, "Nationality is required"),
+    phoneNumber: z.string().min(1, "Phone number is required"),
+    alternatePhone: z.string().optional(),
+    addressLine1: z.string().min(1, "Address is required"),
+    addressLine2: z.string().optional(),
+    city: z.string().min(1, "City is required"),
+    state: z.string().min(1, "State is required"),
+    country: z.string().min(1, "Country is required"),
+    postalCode: z.string().min(1, "Postal code is required"),
+    idType: z.string().min(1, "ID type is required"),
+    idNumber: z.string().min(1, "ID number is required"),
+    idExpiryDate: z.string().optional(),
+    idFrontUrl: z.string().optional(),
+    idBackUrl: z.string().optional(),
+    selfieUrl: z.string().optional(),
+    proofOfAddressUrl: z.string().optional(),
+    isBusinessAccount: z.boolean().optional().default(false),
+    businessName: z.string().optional(),
+    businessType: z.string().optional(),
+    businessRegistrationNumber: z.string().optional(),
+    businessAddress: z.string().optional(),
+    businessDocumentUrl: z.string().optional(),
+  });
+
+  // Submit KYC
+  app.post("/api/kyc", async (req, res) => {
+    try {
+      const parseResult = kycSubmissionSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ error: parseResult.error.errors[0]?.message || "Invalid request data" });
+      }
+
+      const data = parseResult.data;
+      
+      // Get user profile by firebaseUid to get the profile ID
+      const userProfile = await storage.getUserProfile(data.firebaseUid);
+      if (!userProfile) {
+        return res.status(404).json({ error: "User profile not found. Please complete registration first." });
+      }
+
+      const now = new Date().toISOString();
+      const submission = await storage.createKycSubmission({
+        userProfileId: userProfile.id,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        middleName: data.middleName || null,
+        dateOfBirth: data.dateOfBirth,
+        gender: data.gender || null,
+        nationality: data.nationality,
+        phoneNumber: data.phoneNumber,
+        alternatePhone: data.alternatePhone || null,
+        addressLine1: data.addressLine1,
+        addressLine2: data.addressLine2 || null,
+        city: data.city,
+        state: data.state,
+        country: data.country,
+        postalCode: data.postalCode,
+        idType: data.idType,
+        idNumber: data.idNumber,
+        idExpiryDate: data.idExpiryDate || null,
+        idFrontUrl: data.idFrontUrl || null,
+        idBackUrl: data.idBackUrl || null,
+        selfieUrl: data.selfieUrl || null,
+        proofOfAddressUrl: data.proofOfAddressUrl || null,
+        isBusinessAccount: data.isBusinessAccount || false,
+        businessName: data.businessName || null,
+        businessType: data.businessType || null,
+        businessRegistrationNumber: data.businessRegistrationNumber || null,
+        businessAddress: data.businessAddress || null,
+        businessDocumentUrl: data.businessDocumentUrl || null,
+        status: 'pending_review',
+        reviewNotes: null,
+        reviewedBy: null,
+        reviewedAt: null,
+        submittedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      // Update user profile KYC status using firebaseUid
+      await storage.updateUserProfile(data.firebaseUid, { 
+        kycStatus: 'pending_review',
+        onboardingCompleted: true,
+        onboardingStep: 5,
+      });
+
+      res.status(201).json(submission);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to submit KYC" });
+    }
+  });
+
+  // Update KYC submission
+  app.patch("/api/kyc/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const submission = await storage.updateKycSubmission(id, req.body);
+      if (!submission) {
+        return res.status(404).json({ error: "KYC submission not found" });
+      }
+      res.json(submission);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to update KYC submission" });
+    }
+  });
+
+  // Upload KYC document
+  app.post("/api/kyc/upload", upload.single('document'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+      const fileUrl = `/uploads/${req.file.filename}`;
+      res.json({ url: fileUrl, filename: req.file.filename });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to upload document" });
+    }
+  });
+
   return httpServer;
 }

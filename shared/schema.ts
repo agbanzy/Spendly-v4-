@@ -281,6 +281,92 @@ export const companySettings = pgTable("company_settings", {
   stripeEnabled: boolean("stripe_enabled").notNull().default(true),
 });
 
+// KYC Verification Status enum
+export const KycStatus = {
+  NOT_STARTED: 'not_started',
+  IN_PROGRESS: 'in_progress',
+  PENDING_REVIEW: 'pending_review',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+} as const;
+export type KycStatus = typeof KycStatus[keyof typeof KycStatus];
+
+// User Profiles table (extended user data for KYC)
+export const userProfiles = pgTable("user_profiles", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  firebaseUid: text("firebase_uid").notNull().unique(),
+  email: text("email").notNull(),
+  displayName: text("display_name"),
+  photoUrl: text("photo_url"),
+  phoneNumber: text("phone_number"),
+  dateOfBirth: text("date_of_birth"),
+  nationality: text("nationality"),
+  address: text("address"),
+  city: text("city"),
+  state: text("state"),
+  country: text("country"),
+  postalCode: text("postal_code"),
+  kycStatus: text("kyc_status").notNull().default('not_started'),
+  onboardingCompleted: boolean("onboarding_completed").notNull().default(false),
+  onboardingStep: integer("onboarding_step").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+// KYC Submissions table
+export const kycSubmissions = pgTable("kyc_submissions", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  userProfileId: text("user_profile_id").notNull(),
+  
+  // Personal Information
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name").notNull(),
+  middleName: text("middle_name"),
+  dateOfBirth: text("date_of_birth").notNull(),
+  gender: text("gender"),
+  nationality: text("nationality").notNull(),
+  
+  // Contact Information
+  phoneNumber: text("phone_number").notNull(),
+  alternatePhone: text("alternate_phone"),
+  
+  // Address Information
+  addressLine1: text("address_line_1").notNull(),
+  addressLine2: text("address_line_2"),
+  city: text("city").notNull(),
+  state: text("state").notNull(),
+  country: text("country").notNull(),
+  postalCode: text("postal_code").notNull(),
+  
+  // Identity Documents
+  idType: text("id_type").notNull(), // passport, drivers_license, national_id
+  idNumber: text("id_number").notNull(),
+  idExpiryDate: text("id_expiry_date"),
+  idFrontUrl: text("id_front_url"),
+  idBackUrl: text("id_back_url"),
+  selfieUrl: text("selfie_url"),
+  proofOfAddressUrl: text("proof_of_address_url"),
+  
+  // Business Information (for business accounts)
+  isBusinessAccount: boolean("is_business_account").notNull().default(false),
+  businessName: text("business_name"),
+  businessType: text("business_type"),
+  businessRegistrationNumber: text("business_registration_number"),
+  businessAddress: text("business_address"),
+  businessDocumentUrl: text("business_document_url"),
+  
+  // Verification Status
+  status: text("status").notNull().default('pending_review'),
+  reviewNotes: text("review_notes"),
+  reviewedBy: text("reviewed_by"),
+  reviewedAt: text("reviewed_at"),
+  
+  // Timestamps
+  submittedAt: text("submitted_at").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 // ==================== INSERT SCHEMAS ====================
 
 export const insertUserSchema = createInsertSchema(users).pick({
@@ -304,6 +390,8 @@ export const insertVendorSchema = createInsertSchema(vendors).omit({ id: true })
 export const insertReportSchema = createInsertSchema(reports).omit({ id: true });
 export const insertCardTransactionSchema = createInsertSchema(cardTransactions).omit({ id: true });
 export const insertVirtualAccountSchema = createInsertSchema(virtualAccounts).omit({ id: true });
+export const insertUserProfileSchema = createInsertSchema(userProfiles).omit({ id: true });
+export const insertKycSubmissionSchema = createInsertSchema(kycSubmissions).omit({ id: true });
 
 // ==================== TYPES ====================
 
@@ -345,6 +433,12 @@ export type CardTransaction = typeof cardTransactions.$inferSelect;
 
 export type InsertVirtualAccount = z.infer<typeof insertVirtualAccountSchema>;
 export type VirtualAccount = typeof virtualAccounts.$inferSelect;
+
+export type InsertUserProfile = z.infer<typeof insertUserProfileSchema>;
+export type UserProfile = typeof userProfiles.$inferSelect;
+
+export type InsertKycSubmission = z.infer<typeof insertKycSubmissionSchema>;
+export type KycSubmission = typeof kycSubmissions.$inferSelect;
 
 export type CompanyBalances = typeof companyBalances.$inferSelect;
 export type CompanySettings = typeof companySettings.$inferSelect;

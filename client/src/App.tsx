@@ -30,6 +30,7 @@ import Vendors from "@/pages/vendors";
 import ForgotPassword from "@/pages/forgot-password";
 import Terms from "@/pages/terms";
 import Privacy from "@/pages/privacy";
+import Onboarding from "@/pages/onboarding";
 
 function AuthLoading() {
   return (
@@ -126,7 +127,7 @@ function AppContent() {
   const [location] = useLocation();
   const { isAuthenticated, isLoading } = useAuth();
   
-  const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/terms", "/privacy"];
+  const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/terms", "/privacy", "/onboarding"];
   const isPublicRoute = publicRoutes.includes(location);
 
   if (isLoading) {
@@ -142,6 +143,7 @@ function AppContent() {
         <Route path="/forgot-password">{() => <PublicRoute component={ForgotPassword} />}</Route>
         <Route path="/terms" component={Terms} />
         <Route path="/privacy" component={Privacy} />
+        <Route path="/onboarding">{() => isAuthenticated ? <Onboarding /> : <Redirect to="/login" />}</Route>
       </Switch>
     );
   }
