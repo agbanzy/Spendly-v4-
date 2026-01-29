@@ -4,6 +4,8 @@
 Spendly is a comprehensive financial operating system for high-growth teams. It provides expense tracking, budget management, virtual cards, team management, payroll, invoicing, vendor management, and transaction monitoring in a unified platform.
 
 ## Recent Changes (January 29, 2026)
+- Integrated Firebase authentication (email/password + Google sign-in)
+- Added Stripe and Paystack payment gateway configurations
 - Full application build from GitHub repository (https://github.com/agbanzy/spendly-g)
 - Implemented complete React frontend with 15+ pages
 - Added landing page, login/signup authentication flows
@@ -21,6 +23,9 @@ Spendly is a comprehensive financial operating system for high-growth teams. It 
 - Shadcn/ui components with Tailwind CSS
 - Dark/light theme support with ThemeProvider
 - Responsive sidebar navigation
+- Firebase authentication (client/src/lib/firebase.ts)
+- Stripe SDK integration (client/src/lib/stripe.ts)
+- Paystack SDK integration (client/src/lib/paystack.ts)
 
 ### Backend (server/)
 - Express.js server
@@ -33,10 +38,16 @@ Spendly is a comprehensive financial operating system for high-growth teams. It 
 
 ## Key Features
 
+### Authentication
+- Firebase Authentication with email/password and Google sign-in
+- Auth state managed by AuthProvider with loading states
+- Protected routes redirect to login if not authenticated
+- User profile photos displayed from Google sign-in
+
 ### Public Pages
 1. **Landing Page** (`/`) - Marketing page with features, pricing, testimonials
-2. **Login** (`/login`) - Email/password and Google login
-3. **Signup** (`/signup`) - New user registration
+2. **Login** (`/login`) - Email/password and Google login (Firebase)
+3. **Signup** (`/signup`) - New user registration (Firebase)
 
 ### App Pages (After Login)
 1. **Dashboard** (`/dashboard`) - Financial overview with balance cards, AI insights, recent activity
@@ -88,3 +99,13 @@ The app runs on port 5000 with `npm run dev`.
 - Background: Slate tones
 - Cards: White/dark backgrounds with subtle borders
 - Shadows: Minimal, for elevation only
+
+## Environment Variables
+- VITE_FIREBASE_API_KEY - Firebase API key
+- VITE_FIREBASE_AUTH_DOMAIN - Firebase auth domain
+- VITE_FIREBASE_PROJECT_ID - Firebase project ID
+- VITE_FIREBASE_STORAGE_BUCKET - Firebase storage bucket
+- VITE_FIREBASE_MESSAGING_SENDER_ID - Firebase messaging sender ID
+- VITE_FIREBASE_APP_ID - Firebase app ID
+- VITE_STRIPE_PUBLISHABLE_KEY - Stripe publishable key
+- VITE_PAYSTACK_PUBLIC_KEY - Paystack public key
