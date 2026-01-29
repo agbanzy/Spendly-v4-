@@ -4,15 +4,17 @@
 Spendly is a comprehensive financial operating system for high-growth teams. It provides expense tracking, budget management, virtual cards, team management, payroll, invoicing, vendor management, and transaction monitoring in a unified platform.
 
 ## Recent Changes (January 29, 2026)
+- **PostgreSQL Database**: Migrated from in-memory storage to real PostgreSQL database (Neon-backed)
+- **Database Schema**: Full Drizzle ORM schema with 14 tables (users, expenses, transactions, bills, budgets, virtual_cards, team_members, payroll_entries, invoices, vendors, reports, card_transactions, virtual_accounts, company_settings)
 - Integrated Firebase authentication (email/password + Google sign-in)
 - Added Stripe and Paystack payment gateway configurations
 - Full application build from GitHub repository (https://github.com/agbanzy/spendly-g)
-- Implemented complete React frontend with 15+ pages
-- Added landing page, login/signup authentication flows
+- Implemented complete React frontend with 18+ pages
+- Added Forgot Password page with Firebase password reset
+- Added Terms of Service and Privacy Policy pages
 - Created comprehensive dashboard with balance cards and AI insights
 - Added Finance section: Analytics, Reports, Payroll, Invoices, Vendors
 - Implemented Quick Actions FAB for rapid actions
-- Backend API with in-memory storage and live data
 - **Enhanced Analytics**: Real-time charts (area, bar, pie, line, composed) using recharts with live data from expenses/transactions APIs
 - **Reports System**: Full CRUD API for reports with create, download (JSON export), and delete functionality
 - **Paystack Auto-Debit**: Subscription plans, charge authorization, recurring payments endpoints
@@ -35,8 +37,9 @@ Spendly is a comprehensive financial operating system for high-growth teams. It 
 
 ### Backend (server/)
 - Express.js server
-- In-memory storage (MemStorage)
+- PostgreSQL database with Drizzle ORM (DatabaseStorage)
 - RESTful API endpoints
+- Neon serverless PostgreSQL driver
 
 ### Shared (shared/)
 - TypeScript types and schemas
@@ -54,6 +57,9 @@ Spendly is a comprehensive financial operating system for high-growth teams. It 
 1. **Landing Page** (`/`) - Marketing page with features, pricing, testimonials
 2. **Login** (`/login`) - Email/password and Google login (Firebase)
 3. **Signup** (`/signup`) - New user registration (Firebase)
+4. **Forgot Password** (`/forgot-password`) - Firebase password reset
+5. **Terms of Service** (`/terms`) - Legal terms page
+6. **Privacy Policy** (`/privacy`) - Privacy policy page
 
 ### App Pages (After Login)
 1. **Dashboard** (`/dashboard`) - Financial overview with balance cards, AI insights, recent activity

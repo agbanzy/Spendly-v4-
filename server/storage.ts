@@ -1,582 +1,514 @@
-import { type User, type InsertUser, type Expense, type Transaction, type Bill, type Budget, type VirtualCard, type TeamMember, type CompanyBalances, type AIInsight, type PayrollEntry, type Invoice, type Vendor, type CompanySettings } from "@shared/schema";
-
-export interface Report {
-  id: string;
-  name: string;
-  type: string;
-  dateRange: string;
-  createdAt: string;
-  status: "completed" | "processing" | "scheduled";
-  fileSize: string;
-}
-
-export interface CardTransaction {
-  id: string;
-  cardId: string;
-  amount: number;
-  merchant: string;
-  category: string;
-  description: string;
-  status: "pending" | "completed" | "declined";
-  date: string;
-}
-
-export interface VirtualAccount {
-  id: string;
-  name: string;
-  accountNumber: string;
-  bankName: string;
-  bankCode: string;
-  currency: string;
-  balance: number;
-  type: "collection" | "disbursement";
-  status: "active" | "inactive";
-  createdAt: string;
-}
-import { randomUUID } from "crypto";
+import { db } from "./db";
+import { eq, desc } from "drizzle-orm";
+import { 
+  users, expenses, transactions, bills, budgets, virtualCards, 
+  teamMembers, payrollEntries, invoices, vendors, reports,
+  cardTransactions, virtualAccounts, companyBalances, companySettings,
+  type User, type InsertUser, type Expense, type Transaction, type Bill, 
+  type Budget, type VirtualCard, type TeamMember, type PayrollEntry, 
+  type Invoice, type Vendor, type Report, type CardTransaction, 
+  type VirtualAccount, type CompanyBalances, type CompanySettings, type AIInsight
+} from "@shared/schema";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   
-  // Expenses
   getExpenses(): Promise<Expense[]>;
   getExpense(id: string): Promise<Expense | undefined>;
   createExpense(expense: Omit<Expense, 'id'>): Promise<Expense>;
   updateExpense(id: string, expense: Partial<Omit<Expense, 'id'>>): Promise<Expense | undefined>;
   deleteExpense(id: string): Promise<boolean>;
   
-  // Transactions
   getTransactions(): Promise<Transaction[]>;
   getTransaction(id: string): Promise<Transaction | undefined>;
   createTransaction(transaction: Omit<Transaction, 'id'>): Promise<Transaction>;
   updateTransaction(id: string, transaction: Partial<Omit<Transaction, 'id'>>): Promise<Transaction | undefined>;
   deleteTransaction(id: string): Promise<boolean>;
   
-  // Bills
   getBills(): Promise<Bill[]>;
   getBill(id: string): Promise<Bill | undefined>;
   createBill(bill: Omit<Bill, 'id'>): Promise<Bill>;
   updateBill(id: string, bill: Partial<Omit<Bill, 'id'>>): Promise<Bill | undefined>;
   deleteBill(id: string): Promise<boolean>;
   
-  // Budgets
   getBudgets(): Promise<Budget[]>;
   getBudget(id: string): Promise<Budget | undefined>;
   createBudget(budget: Omit<Budget, 'id'>): Promise<Budget>;
   updateBudget(id: string, budget: Partial<Omit<Budget, 'id'>>): Promise<Budget | undefined>;
   deleteBudget(id: string): Promise<boolean>;
   
-  // Cards
   getCards(): Promise<VirtualCard[]>;
   getCard(id: string): Promise<VirtualCard | undefined>;
   createCard(card: Omit<VirtualCard, 'id'>): Promise<VirtualCard>;
   updateCard(id: string, card: Partial<Omit<VirtualCard, 'id'>>): Promise<VirtualCard | undefined>;
   deleteCard(id: string): Promise<boolean>;
   
-  // Card Transactions
   getCardTransactions(cardId: string): Promise<CardTransaction[]>;
   createCardTransaction(tx: Omit<CardTransaction, 'id'>): Promise<CardTransaction>;
   
-  // Virtual Accounts
   getVirtualAccounts(): Promise<VirtualAccount[]>;
   getVirtualAccount(id: string): Promise<VirtualAccount | undefined>;
-  createVirtualAccount(account: VirtualAccount): Promise<VirtualAccount>;
+  createVirtualAccount(account: Omit<VirtualAccount, 'id'>): Promise<VirtualAccount>;
   updateVirtualAccount(id: string, data: Partial<VirtualAccount>): Promise<VirtualAccount | undefined>;
   
-  // Team
   getTeam(): Promise<TeamMember[]>;
   getTeamMember(id: string): Promise<TeamMember | undefined>;
   createTeamMember(member: Omit<TeamMember, 'id'>): Promise<TeamMember>;
   updateTeamMember(id: string, member: Partial<Omit<TeamMember, 'id'>>): Promise<TeamMember | undefined>;
   deleteTeamMember(id: string): Promise<boolean>;
   
-  // Balances
   getBalances(): Promise<CompanyBalances>;
   updateBalances(balances: Partial<CompanyBalances>): Promise<CompanyBalances>;
   
-  // AI Insights
   getInsights(): Promise<AIInsight[]>;
   
-  // Reports
-  getReports(): Promise<Report[]>;
-  createReport(report: Report): Promise<Report>;
-  updateReport(id: string, report: Partial<Report>): Promise<Report | undefined>;
-  deleteReport(id: string): Promise<boolean>;
-  
-  // Payroll
   getPayroll(): Promise<PayrollEntry[]>;
   getPayrollEntry(id: string): Promise<PayrollEntry | undefined>;
   createPayrollEntry(entry: Omit<PayrollEntry, 'id'>): Promise<PayrollEntry>;
   updatePayrollEntry(id: string, entry: Partial<Omit<PayrollEntry, 'id'>>): Promise<PayrollEntry | undefined>;
   deletePayrollEntry(id: string): Promise<boolean>;
   
-  // Invoices
   getInvoices(): Promise<Invoice[]>;
   getInvoice(id: string): Promise<Invoice | undefined>;
   createInvoice(invoice: Omit<Invoice, 'id'>): Promise<Invoice>;
   updateInvoice(id: string, invoice: Partial<Omit<Invoice, 'id'>>): Promise<Invoice | undefined>;
   deleteInvoice(id: string): Promise<boolean>;
   
-  // Vendors
   getVendors(): Promise<Vendor[]>;
   getVendor(id: string): Promise<Vendor | undefined>;
   createVendor(vendor: Omit<Vendor, 'id'>): Promise<Vendor>;
   updateVendor(id: string, vendor: Partial<Omit<Vendor, 'id'>>): Promise<Vendor | undefined>;
   deleteVendor(id: string): Promise<boolean>;
   
-  // Settings
+  getReports(): Promise<Report[]>;
+  getReport(id: string): Promise<Report | undefined>;
+  createReport(report: Omit<Report, 'id'>): Promise<Report>;
+  deleteReport(id: string): Promise<boolean>;
+  
   getSettings(): Promise<CompanySettings>;
   updateSettings(settings: Partial<CompanySettings>): Promise<CompanySettings>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-  private expenses: Map<string, Expense>;
-  private transactions: Map<string, Transaction>;
-  private bills: Map<string, Bill>;
-  private budgets: Map<string, Budget>;
-  private cards: Map<string, VirtualCard>;
-  private cardTransactions: Map<string, CardTransaction>;
-  private virtualAccounts: Map<string, VirtualAccount>;
-  private teamMembers: Map<string, TeamMember>;
-  private payrollEntries: Map<string, PayrollEntry>;
-  private invoices: Map<string, Invoice>;
-  private vendors: Map<string, Vendor>;
-  private reports: Map<string, Report>;
-  private balances: CompanyBalances;
-  private settings: CompanySettings;
-
-  constructor() {
-    this.users = new Map();
-    this.expenses = new Map();
-    this.transactions = new Map();
-    this.bills = new Map();
-    this.budgets = new Map();
-    this.cards = new Map();
-    this.cardTransactions = new Map();
-    this.virtualAccounts = new Map();
-    this.teamMembers = new Map();
-    this.payrollEntries = new Map();
-    this.invoices = new Map();
-    this.vendors = new Map();
-    this.reports = new Map();
-    this.balances = {
-      local: 0,
-      usd: 0,
-      escrow: 0,
-      localCurrency: 'USD',
-    };
-    this.settings = {
-      companyName: 'Spendly',
-      companyEmail: 'finance@spendly.com',
-      companyPhone: '+1 (555) 123-4567',
-      companyAddress: '123 Business Ave, San Francisco, CA 94105',
-      currency: 'USD',
-      timezone: 'America/Los_Angeles',
-      fiscalYearStart: 'January',
-      dateFormat: 'MM/DD/YYYY',
-      language: 'en',
-      notificationsEnabled: true,
-      twoFactorEnabled: false,
-      autoApproveBelow: 100,
-      requireReceipts: true,
-      expenseCategories: ['Software', 'Travel', 'Office', 'Marketing', 'Food', 'Equipment', 'Utilities', 'Legal', 'Other'],
-      countryCode: 'US',
-      region: 'North America',
-      paymentProvider: 'stripe',
-      paystackEnabled: true,
-      stripeEnabled: true,
-    };
-  }
-
+export class DatabaseStorage implements IStorage {
+  
+  // ==================== USERS ====================
   async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+    const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    return result[0];
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+    const result = await db.select().from(users).where(eq(users.username, username)).limit(1);
+    return result[0];
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { 
-      ...insertUser, 
-      id, 
+    const result = await db.insert(users).values({
+      ...insertUser,
       permissions: [],
       avatar: null,
       department: insertUser.department || 'General',
       role: insertUser.role || 'EMPLOYEE',
-    };
-    this.users.set(id, user);
-    return user;
+    }).returning();
+    return result[0];
   }
 
   // ==================== EXPENSES ====================
   async getExpenses(): Promise<Expense[]> {
-    return Array.from(this.expenses.values()).sort((a, b) => 
-      new Date(b.date).getTime() - new Date(a.date).getTime()
-    );
+    const result = await db.select().from(expenses).orderBy(desc(expenses.date));
+    return result;
   }
 
   async getExpense(id: string): Promise<Expense | undefined> {
-    return this.expenses.get(id);
+    const result = await db.select().from(expenses).where(eq(expenses.id, id)).limit(1);
+    return result[0];
   }
 
   async createExpense(expense: Omit<Expense, 'id'>): Promise<Expense> {
-    const id = randomUUID();
-    const newExpense: Expense = { ...expense, id };
-    this.expenses.set(id, newExpense);
-    return newExpense;
+    const result = await db.insert(expenses).values(expense as any).returning();
+    return result[0];
   }
 
   async updateExpense(id: string, expense: Partial<Omit<Expense, 'id'>>): Promise<Expense | undefined> {
-    const existing = this.expenses.get(id);
-    if (!existing) return undefined;
-    const updated = { ...existing, ...expense };
-    this.expenses.set(id, updated);
-    return updated;
+    const result = await db.update(expenses).set(expense as any).where(eq(expenses.id, id)).returning();
+    return result[0];
   }
 
   async deleteExpense(id: string): Promise<boolean> {
-    return this.expenses.delete(id);
+    const result = await db.delete(expenses).where(eq(expenses.id, id)).returning();
+    return result.length > 0;
   }
 
   // ==================== TRANSACTIONS ====================
   async getTransactions(): Promise<Transaction[]> {
-    return Array.from(this.transactions.values()).sort((a, b) => 
-      new Date(b.date).getTime() - new Date(a.date).getTime()
-    );
+    const result = await db.select().from(transactions).orderBy(desc(transactions.date));
+    return result;
   }
 
   async getTransaction(id: string): Promise<Transaction | undefined> {
-    return this.transactions.get(id);
+    const result = await db.select().from(transactions).where(eq(transactions.id, id)).limit(1);
+    return result[0];
   }
 
   async createTransaction(transaction: Omit<Transaction, 'id'>): Promise<Transaction> {
-    const id = randomUUID();
-    const newTransaction: Transaction = { ...transaction, id };
-    this.transactions.set(id, newTransaction);
-    return newTransaction;
+    const result = await db.insert(transactions).values(transaction as any).returning();
+    return result[0];
   }
 
   async updateTransaction(id: string, transaction: Partial<Omit<Transaction, 'id'>>): Promise<Transaction | undefined> {
-    const existing = this.transactions.get(id);
-    if (!existing) return undefined;
-    const updated = { ...existing, ...transaction };
-    this.transactions.set(id, updated);
-    return updated;
+    const result = await db.update(transactions).set(transaction as any).where(eq(transactions.id, id)).returning();
+    return result[0];
   }
 
   async deleteTransaction(id: string): Promise<boolean> {
-    return this.transactions.delete(id);
+    const result = await db.delete(transactions).where(eq(transactions.id, id)).returning();
+    return result.length > 0;
   }
 
   // ==================== BILLS ====================
   async getBills(): Promise<Bill[]> {
-    return Array.from(this.bills.values()).sort((a, b) => 
-      new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
-    );
+    const result = await db.select().from(bills).orderBy(desc(bills.dueDate));
+    return result;
   }
 
   async getBill(id: string): Promise<Bill | undefined> {
-    return this.bills.get(id);
+    const result = await db.select().from(bills).where(eq(bills.id, id)).limit(1);
+    return result[0];
   }
 
   async createBill(bill: Omit<Bill, 'id'>): Promise<Bill> {
-    const id = randomUUID();
-    const newBill: Bill = { ...bill, id };
-    this.bills.set(id, newBill);
-    return newBill;
+    const result = await db.insert(bills).values(bill as any).returning();
+    return result[0];
   }
 
   async updateBill(id: string, bill: Partial<Omit<Bill, 'id'>>): Promise<Bill | undefined> {
-    const existing = this.bills.get(id);
-    if (!existing) return undefined;
-    const updated = { ...existing, ...bill };
-    this.bills.set(id, updated);
-    return updated;
+    const result = await db.update(bills).set(bill as any).where(eq(bills.id, id)).returning();
+    return result[0];
   }
 
   async deleteBill(id: string): Promise<boolean> {
-    return this.bills.delete(id);
+    const result = await db.delete(bills).where(eq(bills.id, id)).returning();
+    return result.length > 0;
   }
 
   // ==================== BUDGETS ====================
   async getBudgets(): Promise<Budget[]> {
-    return Array.from(this.budgets.values());
+    const result = await db.select().from(budgets);
+    return result;
   }
 
   async getBudget(id: string): Promise<Budget | undefined> {
-    return this.budgets.get(id);
+    const result = await db.select().from(budgets).where(eq(budgets.id, id)).limit(1);
+    return result[0];
   }
 
   async createBudget(budget: Omit<Budget, 'id'>): Promise<Budget> {
-    const id = randomUUID();
-    const newBudget: Budget = { ...budget, id };
-    this.budgets.set(id, newBudget);
-    return newBudget;
+    const result = await db.insert(budgets).values(budget as any).returning();
+    return result[0];
   }
 
   async updateBudget(id: string, budget: Partial<Omit<Budget, 'id'>>): Promise<Budget | undefined> {
-    const existing = this.budgets.get(id);
-    if (!existing) return undefined;
-    const updated = { ...existing, ...budget };
-    this.budgets.set(id, updated);
-    return updated;
+    const result = await db.update(budgets).set(budget as any).where(eq(budgets.id, id)).returning();
+    return result[0];
   }
 
   async deleteBudget(id: string): Promise<boolean> {
-    return this.budgets.delete(id);
+    const result = await db.delete(budgets).where(eq(budgets.id, id)).returning();
+    return result.length > 0;
   }
 
   // ==================== CARDS ====================
   async getCards(): Promise<VirtualCard[]> {
-    return Array.from(this.cards.values());
+    const result = await db.select().from(virtualCards);
+    return result;
   }
 
   async getCard(id: string): Promise<VirtualCard | undefined> {
-    return this.cards.get(id);
+    const result = await db.select().from(virtualCards).where(eq(virtualCards.id, id)).limit(1);
+    return result[0];
   }
 
   async createCard(card: Omit<VirtualCard, 'id'>): Promise<VirtualCard> {
-    const id = randomUUID();
-    const newCard: VirtualCard = { ...card, id };
-    this.cards.set(id, newCard);
-    return newCard;
+    const result = await db.insert(virtualCards).values(card as any).returning();
+    return result[0];
   }
 
   async updateCard(id: string, card: Partial<Omit<VirtualCard, 'id'>>): Promise<VirtualCard | undefined> {
-    const existing = this.cards.get(id);
-    if (!existing) return undefined;
-    const updated = { ...existing, ...card };
-    this.cards.set(id, updated);
-    return updated;
+    const result = await db.update(virtualCards).set(card as any).where(eq(virtualCards.id, id)).returning();
+    return result[0];
   }
 
   async deleteCard(id: string): Promise<boolean> {
-    return this.cards.delete(id);
+    const result = await db.delete(virtualCards).where(eq(virtualCards.id, id)).returning();
+    return result.length > 0;
   }
 
   // ==================== CARD TRANSACTIONS ====================
   async getCardTransactions(cardId: string): Promise<CardTransaction[]> {
-    return Array.from(this.cardTransactions.values())
-      .filter(tx => tx.cardId === cardId)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const result = await db.select().from(cardTransactions)
+      .where(eq(cardTransactions.cardId, cardId))
+      .orderBy(desc(cardTransactions.date));
+    return result;
   }
 
   async createCardTransaction(tx: Omit<CardTransaction, 'id'>): Promise<CardTransaction> {
-    const id = randomUUID();
-    const newTx: CardTransaction = { ...tx, id };
-    this.cardTransactions.set(id, newTx);
-    return newTx;
+    const result = await db.insert(cardTransactions).values(tx as any).returning();
+    return result[0];
   }
 
   // ==================== VIRTUAL ACCOUNTS ====================
   async getVirtualAccounts(): Promise<VirtualAccount[]> {
-    return Array.from(this.virtualAccounts.values());
+    const result = await db.select().from(virtualAccounts);
+    return result;
   }
 
   async getVirtualAccount(id: string): Promise<VirtualAccount | undefined> {
-    return this.virtualAccounts.get(id);
+    const result = await db.select().from(virtualAccounts).where(eq(virtualAccounts.id, id)).limit(1);
+    return result[0];
   }
 
-  async createVirtualAccount(account: VirtualAccount): Promise<VirtualAccount> {
-    this.virtualAccounts.set(account.id, account);
-    return account;
+  async createVirtualAccount(account: Omit<VirtualAccount, 'id'>): Promise<VirtualAccount> {
+    const result = await db.insert(virtualAccounts).values(account as any).returning();
+    return result[0];
   }
 
   async updateVirtualAccount(id: string, data: Partial<VirtualAccount>): Promise<VirtualAccount | undefined> {
-    const existing = this.virtualAccounts.get(id);
-    if (!existing) return undefined;
-    const updated = { ...existing, ...data };
-    this.virtualAccounts.set(id, updated);
-    return updated;
+    const result = await db.update(virtualAccounts).set(data as any).where(eq(virtualAccounts.id, id)).returning();
+    return result[0];
   }
 
   // ==================== TEAM ====================
   async getTeam(): Promise<TeamMember[]> {
-    return Array.from(this.teamMembers.values());
+    const result = await db.select().from(teamMembers);
+    return result;
   }
 
   async getTeamMember(id: string): Promise<TeamMember | undefined> {
-    return this.teamMembers.get(id);
+    const result = await db.select().from(teamMembers).where(eq(teamMembers.id, id)).limit(1);
+    return result[0];
   }
 
   async createTeamMember(member: Omit<TeamMember, 'id'>): Promise<TeamMember> {
-    const id = randomUUID();
-    const newMember: TeamMember = { ...member, id };
-    this.teamMembers.set(id, newMember);
-    return newMember;
+    const result = await db.insert(teamMembers).values(member as any).returning();
+    return result[0];
   }
 
   async updateTeamMember(id: string, member: Partial<Omit<TeamMember, 'id'>>): Promise<TeamMember | undefined> {
-    const existing = this.teamMembers.get(id);
-    if (!existing) return undefined;
-    const updated = { ...existing, ...member };
-    this.teamMembers.set(id, updated);
-    return updated;
+    const result = await db.update(teamMembers).set(member as any).where(eq(teamMembers.id, id)).returning();
+    return result[0];
   }
 
   async deleteTeamMember(id: string): Promise<boolean> {
-    return this.teamMembers.delete(id);
+    const result = await db.delete(teamMembers).where(eq(teamMembers.id, id)).returning();
+    return result.length > 0;
   }
 
   // ==================== BALANCES ====================
   async getBalances(): Promise<CompanyBalances> {
-    return this.balances;
+    const result = await db.select().from(companyBalances).where(eq(companyBalances.id, 1)).limit(1);
+    if (result.length === 0) {
+      const newBalances = await db.insert(companyBalances).values({
+        id: 1,
+        local: '0',
+        usd: '0',
+        escrow: '0',
+        localCurrency: 'USD'
+      }).returning();
+      return newBalances[0];
+    }
+    return result[0];
   }
 
-  async updateBalances(balances: Partial<CompanyBalances>): Promise<CompanyBalances> {
-    this.balances = { ...this.balances, ...balances };
-    return this.balances;
+  async updateBalances(balancesData: Partial<CompanyBalances>): Promise<CompanyBalances> {
+    const result = await db.update(companyBalances).set(balancesData as any).where(eq(companyBalances.id, 1)).returning();
+    if (result.length === 0) {
+      return this.getBalances();
+    }
+    return result[0];
   }
 
-  // ==================== AI INSIGHTS ====================
+  // ==================== INSIGHTS ====================
   async getInsights(): Promise<AIInsight[]> {
-    return [
-      {
-        title: 'Reduce Software Spending',
-        description: 'Your software budget is at 75% utilization. Consider consolidating tools to save $2,500/month.',
-        type: 'saving',
-      },
-      {
-        title: 'Marketing Budget Alert',
-        description: 'Marketing spend is trending 20% higher than last month. Review campaign ROI.',
-        type: 'warning',
-      },
-      {
-        title: 'Cash Flow Positive',
-        description: 'Your business has maintained positive cash flow for 6 consecutive months.',
-        type: 'info',
-      },
-    ];
-  }
-
-  // ==================== REPORTS ====================
-  async getReports(): Promise<Report[]> {
-    return Array.from(this.reports.values()).sort((a, b) => 
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-  }
-
-  async createReport(report: Report): Promise<Report> {
-    this.reports.set(report.id, report);
-    return report;
-  }
-
-  async updateReport(id: string, data: Partial<Report>): Promise<Report | undefined> {
-    const report = this.reports.get(id);
-    if (!report) return undefined;
-    const updated = { ...report, ...data };
-    this.reports.set(id, updated);
-    return updated;
-  }
-
-  async deleteReport(id: string): Promise<boolean> {
-    return this.reports.delete(id);
+    const allExpenses = await this.getExpenses();
+    const allBudgets = await this.getBudgets();
+    const insights: AIInsight[] = [];
+    
+    const totalSpent = allExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+    const pendingExpenses = allExpenses.filter(e => e.status === 'PENDING');
+    
+    if (pendingExpenses.length > 0) {
+      const pendingTotal = pendingExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+      insights.push({
+        title: 'Pending Approvals',
+        description: `You have ${pendingExpenses.length} expense${pendingExpenses.length > 1 ? 's' : ''} totaling $${pendingTotal.toLocaleString()} awaiting approval.`,
+        type: 'warning'
+      });
+    }
+    
+    const overBudget = allBudgets.filter(b => Number(b.spent) > Number(b.limit));
+    if (overBudget.length > 0) {
+      insights.push({
+        title: 'Budget Alert',
+        description: `${overBudget.length} budget${overBudget.length > 1 ? 's have' : ' has'} exceeded the limit. Review spending in ${overBudget.map(b => b.category).join(', ')}.`,
+        type: 'warning'
+      });
+    }
+    
+    const nearLimit = allBudgets.filter(b => {
+      const utilization = Number(b.spent) / Number(b.limit);
+      return utilization >= 0.8 && utilization < 1;
+    });
+    if (nearLimit.length > 0) {
+      insights.push({
+        title: 'Approaching Budget Limits',
+        description: `${nearLimit.length} budget${nearLimit.length > 1 ? 's are' : ' is'} above 80% utilization.`,
+        type: 'info'
+      });
+    }
+    
+    if (totalSpent > 0 && allBudgets.length > 0) {
+      const totalBudget = allBudgets.reduce((sum, b) => sum + Number(b.limit), 0);
+      const savingsRate = ((totalBudget - totalSpent) / totalBudget * 100).toFixed(1);
+      if (Number(savingsRate) > 10) {
+        insights.push({
+          title: 'Good Savings Rate',
+          description: `You're ${savingsRate}% under budget this period. Great financial discipline!`,
+          type: 'saving'
+        });
+      }
+    }
+    
+    if (insights.length === 0) {
+      insights.push({
+        title: 'All Clear',
+        description: 'No issues detected. Your finances are in good shape!',
+        type: 'info'
+      });
+    }
+    
+    return insights;
   }
 
   // ==================== PAYROLL ====================
   async getPayroll(): Promise<PayrollEntry[]> {
-    return Array.from(this.payrollEntries.values()).sort((a, b) => 
-      new Date(b.payDate).getTime() - new Date(a.payDate).getTime()
-    );
+    const result = await db.select().from(payrollEntries).orderBy(desc(payrollEntries.payDate));
+    return result;
   }
 
   async getPayrollEntry(id: string): Promise<PayrollEntry | undefined> {
-    return this.payrollEntries.get(id);
+    const result = await db.select().from(payrollEntries).where(eq(payrollEntries.id, id)).limit(1);
+    return result[0];
   }
 
   async createPayrollEntry(entry: Omit<PayrollEntry, 'id'>): Promise<PayrollEntry> {
-    const id = randomUUID();
-    const newEntry: PayrollEntry = { ...entry, id };
-    this.payrollEntries.set(id, newEntry);
-    return newEntry;
+    const result = await db.insert(payrollEntries).values(entry as any).returning();
+    return result[0];
   }
 
   async updatePayrollEntry(id: string, entry: Partial<Omit<PayrollEntry, 'id'>>): Promise<PayrollEntry | undefined> {
-    const existing = this.payrollEntries.get(id);
-    if (!existing) return undefined;
-    const updated = { ...existing, ...entry };
-    this.payrollEntries.set(id, updated);
-    return updated;
+    const result = await db.update(payrollEntries).set(entry as any).where(eq(payrollEntries.id, id)).returning();
+    return result[0];
   }
 
   async deletePayrollEntry(id: string): Promise<boolean> {
-    return this.payrollEntries.delete(id);
+    const result = await db.delete(payrollEntries).where(eq(payrollEntries.id, id)).returning();
+    return result.length > 0;
   }
 
   // ==================== INVOICES ====================
   async getInvoices(): Promise<Invoice[]> {
-    return Array.from(this.invoices.values()).sort((a, b) => 
-      new Date(b.issuedDate).getTime() - new Date(a.issuedDate).getTime()
-    );
+    const result = await db.select().from(invoices).orderBy(desc(invoices.issuedDate));
+    return result;
   }
 
   async getInvoice(id: string): Promise<Invoice | undefined> {
-    return this.invoices.get(id);
+    const result = await db.select().from(invoices).where(eq(invoices.id, id)).limit(1);
+    return result[0];
   }
 
   async createInvoice(invoice: Omit<Invoice, 'id'>): Promise<Invoice> {
-    const id = randomUUID();
-    const newInvoice: Invoice = { ...invoice, id };
-    this.invoices.set(id, newInvoice);
-    return newInvoice;
+    const result = await db.insert(invoices).values(invoice as any).returning();
+    return result[0];
   }
 
   async updateInvoice(id: string, invoice: Partial<Omit<Invoice, 'id'>>): Promise<Invoice | undefined> {
-    const existing = this.invoices.get(id);
-    if (!existing) return undefined;
-    const updated = { ...existing, ...invoice };
-    this.invoices.set(id, updated);
-    return updated;
+    const result = await db.update(invoices).set(invoice as any).where(eq(invoices.id, id)).returning();
+    return result[0];
   }
 
   async deleteInvoice(id: string): Promise<boolean> {
-    return this.invoices.delete(id);
+    const result = await db.delete(invoices).where(eq(invoices.id, id)).returning();
+    return result.length > 0;
   }
 
   // ==================== VENDORS ====================
   async getVendors(): Promise<Vendor[]> {
-    return Array.from(this.vendors.values());
+    const result = await db.select().from(vendors);
+    return result;
   }
 
   async getVendor(id: string): Promise<Vendor | undefined> {
-    return this.vendors.get(id);
+    const result = await db.select().from(vendors).where(eq(vendors.id, id)).limit(1);
+    return result[0];
   }
 
   async createVendor(vendor: Omit<Vendor, 'id'>): Promise<Vendor> {
-    const id = randomUUID();
-    const newVendor: Vendor = { ...vendor, id };
-    this.vendors.set(id, newVendor);
-    return newVendor;
+    const result = await db.insert(vendors).values(vendor as any).returning();
+    return result[0];
   }
 
   async updateVendor(id: string, vendor: Partial<Omit<Vendor, 'id'>>): Promise<Vendor | undefined> {
-    const existing = this.vendors.get(id);
-    if (!existing) return undefined;
-    const updated = { ...existing, ...vendor };
-    this.vendors.set(id, updated);
-    return updated;
+    const result = await db.update(vendors).set(vendor as any).where(eq(vendors.id, id)).returning();
+    return result[0];
   }
 
   async deleteVendor(id: string): Promise<boolean> {
-    return this.vendors.delete(id);
+    const result = await db.delete(vendors).where(eq(vendors.id, id)).returning();
+    return result.length > 0;
+  }
+
+  // ==================== REPORTS ====================
+  async getReports(): Promise<Report[]> {
+    const result = await db.select().from(reports).orderBy(desc(reports.createdAt));
+    return result;
+  }
+
+  async getReport(id: string): Promise<Report | undefined> {
+    const result = await db.select().from(reports).where(eq(reports.id, id)).limit(1);
+    return result[0];
+  }
+
+  async createReport(report: Omit<Report, 'id'>): Promise<Report> {
+    const result = await db.insert(reports).values(report as any).returning();
+    return result[0];
+  }
+
+  async deleteReport(id: string): Promise<boolean> {
+    const result = await db.delete(reports).where(eq(reports.id, id)).returning();
+    return result.length > 0;
   }
 
   // ==================== SETTINGS ====================
   async getSettings(): Promise<CompanySettings> {
-    return this.settings;
+    const result = await db.select().from(companySettings).where(eq(companySettings.id, 1)).limit(1);
+    if (result.length === 0) {
+      const newSettings = await db.insert(companySettings).values({
+        id: 1,
+      }).returning();
+      return newSettings[0];
+    }
+    return result[0];
   }
 
-  async updateSettings(settings: Partial<CompanySettings>): Promise<CompanySettings> {
-    this.settings = { ...this.settings, ...settings };
-    return this.settings;
+  async updateSettings(settingsData: Partial<CompanySettings>): Promise<CompanySettings> {
+    const result = await db.update(companySettings).set(settingsData as any).where(eq(companySettings.id, 1)).returning();
+    if (result.length === 0) {
+      return this.getSettings();
+    }
+    return result[0];
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, jsonb, decimal } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, jsonb, decimal, serial } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -77,9 +77,11 @@ export const CardStatus = {
 } as const;
 export type CardStatus = typeof CardStatus[keyof typeof CardStatus];
 
-// Tables
+// ==================== DATABASE TABLES ====================
+
+// Users table
 export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
   name: text("name").notNull(),
@@ -90,7 +92,197 @@ export const users = pgTable("users", {
   permissions: jsonb("permissions").$type<string[]>().default([]),
 });
 
-// Insert schemas
+// Expenses table
+export const expenses = pgTable("expenses", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  merchant: text("merchant").notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  currency: text("currency").notNull().default('USD'),
+  date: text("date").notNull(),
+  category: text("category").notNull(),
+  status: text("status").notNull().default('PENDING'),
+  user: text("user_name").notNull(),
+  userId: text("user_id").notNull(),
+  department: text("department").notNull().default('General'),
+  note: text("note"),
+  receiptUrl: text("receipt_url"),
+});
+
+// Transactions table
+export const transactions = pgTable("transactions", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  type: text("type").notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  fee: decimal("fee", { precision: 12, scale: 2 }).notNull().default('0'),
+  status: text("status").notNull().default('Pending'),
+  date: text("date").notNull(),
+  description: text("description").notNull(),
+  currency: text("currency").notNull().default('USD'),
+});
+
+// Bills table
+export const bills = pgTable("bills", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  provider: text("provider").notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  dueDate: text("due_date").notNull(),
+  category: text("category").notNull(),
+  status: text("status").notNull().default('Unpaid'),
+  currency: text("currency").notNull().default('USD'),
+  logo: text("logo"),
+});
+
+// Budgets table
+export const budgets = pgTable("budgets", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  category: text("category").notNull(),
+  limit: decimal("budget_limit", { precision: 12, scale: 2 }).notNull(),
+  spent: decimal("spent", { precision: 12, scale: 2 }).notNull().default('0'),
+  currency: text("currency").notNull().default('USD'),
+  period: text("period").notNull().default('monthly'),
+});
+
+// Virtual Cards table
+export const virtualCards = pgTable("virtual_cards", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  last4: text("last4").notNull(),
+  balance: decimal("balance", { precision: 12, scale: 2 }).notNull().default('0'),
+  limit: decimal("card_limit", { precision: 12, scale: 2 }).notNull(),
+  type: text("type").notNull().default('Visa'),
+  color: text("color").notNull().default('indigo'),
+  currency: text("currency").notNull().default('USD'),
+  status: text("status").notNull().default('Active'),
+});
+
+// Team Members table
+export const teamMembers = pgTable("team_members", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  role: text("role").notNull().default('EMPLOYEE'),
+  department: text("department").notNull().default('General'),
+  avatar: text("avatar"),
+  status: text("status").notNull().default('Active'),
+  joinedAt: text("joined_at").notNull(),
+  permissions: jsonb("permissions").$type<string[]>().default([]),
+});
+
+// Payroll table
+export const payrollEntries = pgTable("payroll_entries", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  employeeId: text("employee_id").notNull(),
+  employeeName: text("employee_name").notNull(),
+  department: text("department").notNull(),
+  salary: decimal("salary", { precision: 12, scale: 2 }).notNull(),
+  bonus: decimal("bonus", { precision: 12, scale: 2 }).notNull().default('0'),
+  deductions: decimal("deductions", { precision: 12, scale: 2 }).notNull().default('0'),
+  netPay: decimal("net_pay", { precision: 12, scale: 2 }).notNull(),
+  status: text("status").notNull().default('pending'),
+  payDate: text("pay_date").notNull(),
+});
+
+// Invoices table
+export const invoices = pgTable("invoices", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  invoiceNumber: text("invoice_number").notNull(),
+  client: text("client").notNull(),
+  clientEmail: text("client_email").notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  dueDate: text("due_date").notNull(),
+  issuedDate: text("issued_date").notNull(),
+  status: text("status").notNull().default('pending'),
+  items: jsonb("items").$type<{ description: string; quantity: number; rate: number }[]>().default([]),
+});
+
+// Vendors table
+export const vendors = pgTable("vendors", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  phone: text("phone").notNull(),
+  address: text("address").notNull(),
+  category: text("category").notNull(),
+  status: text("status").notNull().default('active'),
+  totalPaid: decimal("total_paid", { precision: 12, scale: 2 }).notNull().default('0'),
+  pendingPayments: decimal("pending_payments", { precision: 12, scale: 2 }).notNull().default('0'),
+  lastPayment: text("last_payment"),
+});
+
+// Reports table
+export const reports = pgTable("reports", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  type: text("type").notNull(),
+  dateRange: text("date_range").notNull(),
+  createdAt: text("created_at").notNull(),
+  status: text("status").notNull().default('completed'),
+  fileSize: text("file_size").notNull().default('0 KB'),
+});
+
+// Card Transactions table
+export const cardTransactions = pgTable("card_transactions", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  cardId: text("card_id").notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  merchant: text("merchant").notNull(),
+  category: text("category").notNull(),
+  description: text("description").notNull(),
+  status: text("status").notNull().default('pending'),
+  date: text("date").notNull(),
+});
+
+// Virtual Accounts table
+export const virtualAccounts = pgTable("virtual_accounts", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  accountNumber: text("account_number").notNull(),
+  bankName: text("bank_name").notNull(),
+  bankCode: text("bank_code").notNull(),
+  currency: text("currency").notNull().default('USD'),
+  balance: decimal("balance", { precision: 12, scale: 2 }).notNull().default('0'),
+  type: text("type").notNull().default('collection'),
+  status: text("status").notNull().default('active'),
+  createdAt: text("created_at").notNull(),
+});
+
+// Company Balances table (single row)
+export const companyBalances = pgTable("company_balances", {
+  id: integer("id").primaryKey().default(1),
+  local: decimal("local", { precision: 12, scale: 2 }).notNull().default('0'),
+  usd: decimal("usd", { precision: 12, scale: 2 }).notNull().default('0'),
+  escrow: decimal("escrow", { precision: 12, scale: 2 }).notNull().default('0'),
+  localCurrency: text("local_currency").notNull().default('USD'),
+});
+
+// Company Settings table (single row)
+export const companySettings = pgTable("company_settings", {
+  id: integer("id").primaryKey().default(1),
+  companyName: text("company_name").notNull().default('Spendly'),
+  companyEmail: text("company_email").notNull().default('finance@spendly.com'),
+  companyPhone: text("company_phone").notNull().default('+1 (555) 123-4567'),
+  companyAddress: text("company_address").notNull().default('123 Business Ave, San Francisco, CA 94105'),
+  currency: text("currency").notNull().default('USD'),
+  timezone: text("timezone").notNull().default('America/Los_Angeles'),
+  fiscalYearStart: text("fiscal_year_start").notNull().default('January'),
+  dateFormat: text("date_format").notNull().default('MM/DD/YYYY'),
+  language: text("language").notNull().default('en'),
+  notificationsEnabled: boolean("notifications_enabled").notNull().default(true),
+  twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
+  autoApproveBelow: decimal("auto_approve_below", { precision: 12, scale: 2 }).notNull().default('100'),
+  requireReceipts: boolean("require_receipts").notNull().default(true),
+  expenseCategories: jsonb("expense_categories").$type<string[]>().default(['Software', 'Travel', 'Office', 'Marketing', 'Food', 'Equipment', 'Utilities', 'Legal', 'Other']),
+  countryCode: text("country_code").notNull().default('US'),
+  region: text("region").notNull().default('North America'),
+  paymentProvider: text("payment_provider").notNull().default('stripe'),
+  paystackEnabled: boolean("paystack_enabled").notNull().default(true),
+  stripeEnabled: boolean("stripe_enabled").notNull().default(true),
+});
+
+// ==================== INSERT SCHEMAS ====================
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -100,153 +292,68 @@ export const insertUserSchema = createInsertSchema(users).pick({
   department: true,
 });
 
+export const insertExpenseSchema = createInsertSchema(expenses).omit({ id: true });
+export const insertTransactionSchema = createInsertSchema(transactions).omit({ id: true });
+export const insertBillSchema = createInsertSchema(bills).omit({ id: true });
+export const insertBudgetSchema = createInsertSchema(budgets).omit({ id: true });
+export const insertVirtualCardSchema = createInsertSchema(virtualCards).omit({ id: true });
+export const insertTeamMemberSchema = createInsertSchema(teamMembers).omit({ id: true });
+export const insertPayrollSchema = createInsertSchema(payrollEntries).omit({ id: true });
+export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true });
+export const insertVendorSchema = createInsertSchema(vendors).omit({ id: true });
+export const insertReportSchema = createInsertSchema(reports).omit({ id: true });
+export const insertCardTransactionSchema = createInsertSchema(cardTransactions).omit({ id: true });
+export const insertVirtualAccountSchema = createInsertSchema(virtualAccounts).omit({ id: true });
+
+// ==================== TYPES ====================
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
-// In-memory types (not DB tables for MVP)
-export interface Expense {
-  id: string;
-  merchant: string;
-  amount: number;
-  currency: string;
-  date: string;
-  category: string;
-  status: ExpenseStatus;
-  user: string;
-  userId: string;
-  department: Department;
-  note?: string;
-  receiptUrl?: string;
-}
+export type InsertExpense = z.infer<typeof insertExpenseSchema>;
+export type Expense = typeof expenses.$inferSelect;
 
-export interface Transaction {
-  id: string;
-  type: TransactionType;
-  amount: number;
-  fee: number;
-  status: TransactionStatus;
-  date: string;
-  description: string;
-  currency: string;
-}
+export type InsertTransaction = z.infer<typeof insertTransactionSchema>;
+export type Transaction = typeof transactions.$inferSelect;
 
-export interface Bill {
-  id: string;
-  name: string;
-  provider: string;
-  amount: number;
-  dueDate: string;
-  category: string;
-  status: BillStatus;
-  currency: string;
-  logo?: string;
-}
+export type InsertBill = z.infer<typeof insertBillSchema>;
+export type Bill = typeof bills.$inferSelect;
 
-export interface VirtualCard {
-  id: string;
-  name: string;
-  last4: string;
-  balance: number;
-  limit: number;
-  type: 'Visa' | 'Mastercard';
-  color: string;
-  currency: string;
-  status: CardStatus;
-}
+export type InsertBudget = z.infer<typeof insertBudgetSchema>;
+export type Budget = typeof budgets.$inferSelect;
 
-export interface Budget {
-  id: string;
-  name: string;
-  category: string;
-  limit: number;
-  spent: number;
-  currency: string;
-  period: 'weekly' | 'monthly' | 'quarterly' | 'yearly';
-}
+export type InsertVirtualCard = z.infer<typeof insertVirtualCardSchema>;
+export type VirtualCard = typeof virtualCards.$inferSelect;
 
-export interface TeamMember {
-  id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-  department: Department;
-  avatar?: string;
-  status: 'Active' | 'Inactive';
-  joinedAt: string;
-  permissions: Permission[];
-}
+export type InsertTeamMember = z.infer<typeof insertTeamMemberSchema>;
+export type TeamMember = typeof teamMembers.$inferSelect;
 
-export interface CompanyBalances {
-  local: number;
-  usd: number;
-  escrow: number;
-  localCurrency: string;
-}
+export type InsertPayroll = z.infer<typeof insertPayrollSchema>;
+export type PayrollEntry = typeof payrollEntries.$inferSelect;
 
+export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
+export type Invoice = typeof invoices.$inferSelect;
+
+export type InsertVendor = z.infer<typeof insertVendorSchema>;
+export type Vendor = typeof vendors.$inferSelect;
+
+export type InsertReport = z.infer<typeof insertReportSchema>;
+export type Report = typeof reports.$inferSelect;
+
+export type InsertCardTransaction = z.infer<typeof insertCardTransactionSchema>;
+export type CardTransaction = typeof cardTransactions.$inferSelect;
+
+export type InsertVirtualAccount = z.infer<typeof insertVirtualAccountSchema>;
+export type VirtualAccount = typeof virtualAccounts.$inferSelect;
+
+export type CompanyBalances = typeof companyBalances.$inferSelect;
+export type CompanySettings = typeof companySettings.$inferSelect;
+
+// Legacy interface for AI Insights (computed, not stored)
 export interface AIInsight {
   title: string;
   description: string;
   type: 'saving' | 'warning' | 'info';
-}
-
-export interface PayrollEntry {
-  id: string;
-  employeeId: string;
-  employeeName: string;
-  department: string;
-  salary: number;
-  bonus: number;
-  deductions: number;
-  netPay: number;
-  status: 'paid' | 'pending' | 'processing';
-  payDate: string;
-}
-
-export interface Invoice {
-  id: string;
-  invoiceNumber: string;
-  client: string;
-  clientEmail: string;
-  amount: number;
-  dueDate: string;
-  issuedDate: string;
-  status: 'paid' | 'pending' | 'overdue' | 'draft';
-  items: { description: string; quantity: number; rate: number }[];
-}
-
-export interface Vendor {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  address: string;
-  category: string;
-  status: 'active' | 'inactive' | 'pending';
-  totalPaid: number;
-  pendingPayments: number;
-  lastPayment: string;
-}
-
-export interface CompanySettings {
-  companyName: string;
-  companyEmail: string;
-  companyPhone: string;
-  companyAddress: string;
-  currency: string;
-  timezone: string;
-  fiscalYearStart: string;
-  dateFormat: string;
-  language: string;
-  notificationsEnabled: boolean;
-  twoFactorEnabled: boolean;
-  autoApproveBelow: number;
-  requireReceipts: boolean;
-  expenseCategories: string[];
-  countryCode: string;
-  region: string;
-  paymentProvider: 'stripe' | 'paystack';
-  paystackEnabled: boolean;
-  stripeEnabled: boolean;
 }
 
 // Category icons mapping
