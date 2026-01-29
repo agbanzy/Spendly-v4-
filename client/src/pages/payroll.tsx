@@ -12,9 +12,9 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { 
   Users, 
-  Calendar, 
   Plus, 
   Search,
   Clock,
@@ -27,14 +27,27 @@ import {
   MoreVertical,
   Pencil,
   Trash2,
+  FileText,
+  DollarSign,
+  Building2,
+  CalendarDays,
+  Eye,
+  Mail,
+  Printer,
+  X,
 } from "lucide-react";
-import type { TeamMember, PayrollEntry } from "@shared/schema";
+import type { PayrollEntry } from "@shared/schema";
 
 export default function PayrollPage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
+  const [departmentFilter, setDepartmentFilter] = useState("all");
   const [isRunPayrollOpen, setIsRunPayrollOpen] = useState(false);
   const [isAddEmployeeOpen, setIsAddEmployeeOpen] = useState(false);
+  const [isPayIndividualOpen, setIsPayIndividualOpen] = useState(false);
+  const [isViewPayslipOpen, setIsViewPayslipOpen] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [selectedEntry, setSelectedEntry] = useState<PayrollEntry | null>(null);
   const [editingEntry, setEditingEntry] = useState<PayrollEntry | null>(null);
   const [formData, setFormData] = useState({
     employeeName: "",
@@ -55,7 +68,7 @@ export default function PayrollPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/payroll"] });
-      toast({ title: "Employee added to payroll" });
+      toast({ title: "Employee added to payroll", description: "The employee has been successfully added." });
       setIsAddEmployeeOpen(false);
       resetForm();
     },
@@ -87,6 +100,8 @@ export default function PayrollPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/payroll"] });
       toast({ title: "Payroll entry deleted" });
+      setIsDeleteConfirmOpen(false);
+      setSelectedEntry(null);
     },
     onError: () => {
       toast({ title: "Failed to delete payroll entry", variant: "destructive" });
@@ -106,6 +121,23 @@ export default function PayrollPage() {
     },
     onError: () => {
       toast({ title: "Failed to process payroll", variant: "destructive" });
+    },
+  });
+
+  const payIndividualMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("POST", `/api/payroll/${id}/pay`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/payroll"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/balances"] });
+      toast({ title: "Payment processed", description: `Payment to ${selectedEntry?.employeeName} completed.` });
+      setIsPayIndividualOpen(false);
+      setSelectedEntry(null);
+    },
+    onError: () => {
+      toast({ title: "Failed to process payment", variant: "destructive" });
     },
   });
 
@@ -138,6 +170,15 @@ export default function PayrollPage() {
     const bonus = parseFloat(formData.bonus) || 0;
     const deductions = parseFloat(formData.deductions) || 0;
     
+    if (!formData.employeeName.trim()) {
+      toast({ title: "Employee name is required", variant: "destructive" });
+      return;
+    }
+    if (salary <= 0) {
+      toast({ title: "Salary must be greater than 0", variant: "destructive" });
+      return;
+    }
+    
     if (editingEntry) {
       updateMutation.mutate({ 
         id: editingEntry.id, 
@@ -154,14 +195,141 @@ export default function PayrollPage() {
     }
   };
 
-  const totalPayroll = payrollEntries.reduce((sum, entry) => sum + entry.netPay, 0);
-  const pendingPayroll = payrollEntries.filter(e => e.status === "pending").reduce((sum, e) => sum + e.netPay, 0);
-  const paidThisMonth = payrollEntries.filter(e => e.status === "paid").reduce((sum, e) => sum + e.netPay, 0);
+  const handleExport = (format: 'csv' | 'json') => {
+    const dataToExport = filteredEntries.map(entry => ({
+      employeeName: entry.employeeName,
+      department: entry.department,
+      salary: entry.salary,
+      bonus: entry.bonus,
+      deductions: entry.deductions,
+      netPay: entry.netPay,
+      status: entry.status,
+      payDate: entry.payDate,
+    }));
 
-  const filteredEntries = payrollEntries.filter(entry =>
-    entry.employeeName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    entry.department.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+    if (format === 'json') {
+      const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `payroll-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      const headers = ['Employee Name', 'Department', 'Salary', 'Bonus', 'Deductions', 'Net Pay', 'Status', 'Pay Date'];
+      const csvContent = [
+        headers.join(','),
+        ...dataToExport.map(row => [
+          `"${row.employeeName}"`,
+          `"${row.department}"`,
+          row.salary,
+          row.bonus,
+          row.deductions,
+          row.netPay,
+          `"${row.status}"`,
+          `"${row.payDate}"`,
+        ].join(','))
+      ].join('\n');
+      
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `payroll-${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+    
+    toast({ title: "Export successful", description: `Payroll data exported as ${format.toUpperCase()}` });
+  };
+
+  const handlePrintPayslip = () => {
+    if (!selectedEntry) return;
+    
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+    
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Payslip - ${selectedEntry.employeeName}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 40px; max-width: 600px; margin: 0 auto; }
+          .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
+          .header h1 { margin: 0; color: #4f46e5; }
+          .header p { margin: 5px 0; color: #666; }
+          .employee-info { margin-bottom: 30px; }
+          .employee-info h2 { margin: 0 0 10px 0; }
+          .details { border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
+          .row { display: flex; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #eee; }
+          .row:last-child { border-bottom: none; }
+          .row.total { background: #f5f5f5; font-weight: bold; font-size: 1.1em; }
+          .label { color: #666; }
+          .value { font-weight: 500; }
+          .bonus { color: #10b981; }
+          .deduction { color: #ef4444; }
+          .footer { margin-top: 40px; text-align: center; color: #999; font-size: 12px; }
+          @media print { body { padding: 20px; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>SPENDLY</h1>
+          <p>Payslip for ${new Date(selectedEntry.payDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
+        </div>
+        <div class="employee-info">
+          <h2>${selectedEntry.employeeName}</h2>
+          <p>Department: ${selectedEntry.department}</p>
+          <p>Employee ID: ${selectedEntry.employeeId}</p>
+          <p>Pay Date: ${new Date(selectedEntry.payDate).toLocaleDateString()}</p>
+        </div>
+        <div class="details">
+          <div class="row">
+            <span class="label">Basic Salary</span>
+            <span class="value">$${Number(selectedEntry.salary).toLocaleString()}</span>
+          </div>
+          <div class="row">
+            <span class="label">Bonus</span>
+            <span class="value bonus">+$${Number(selectedEntry.bonus).toLocaleString()}</span>
+          </div>
+          <div class="row">
+            <span class="label">Deductions</span>
+            <span class="value deduction">-$${Number(selectedEntry.deductions).toLocaleString()}</span>
+          </div>
+          <div class="row total">
+            <span class="label">Net Pay</span>
+            <span class="value">$${Number(selectedEntry.netPay).toLocaleString()}</span>
+          </div>
+        </div>
+        <div class="footer">
+          <p>This is a computer-generated payslip. No signature required.</p>
+          <p>Generated on ${new Date().toLocaleDateString()}</p>
+        </div>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.print();
+  };
+
+  const totalPayroll = payrollEntries.reduce((sum, entry) => sum + Number(entry.netPay), 0);
+  const pendingPayroll = payrollEntries.filter(e => e.status === "pending").reduce((sum, e) => sum + Number(e.netPay), 0);
+  const paidThisMonth = payrollEntries.filter(e => e.status === "paid").reduce((sum, e) => sum + Number(e.netPay), 0);
+  
+  const departments = Array.from(new Set(payrollEntries.map(e => e.department)));
+  const departmentStats = departments.map(dept => ({
+    name: dept,
+    count: payrollEntries.filter(e => e.department === dept).length,
+    total: payrollEntries.filter(e => e.department === dept).reduce((sum, e) => sum + Number(e.netPay), 0),
+  }));
+
+  const filteredEntries = payrollEntries.filter(entry => {
+    const matchesSearch = entry.employeeName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      entry.department.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesDepartment = departmentFilter === "all" || entry.department === departmentFilter;
+    return matchesSearch && matchesDepartment;
+  });
 
   const getStatusBadge = (status: PayrollEntry["status"]) => {
     switch (status) {
@@ -171,22 +339,48 @@ export default function PayrollPage() {
         return <Badge variant="outline"><Clock className="mr-1 h-3 w-3" />Pending</Badge>;
       case "processing":
         return <Badge variant="secondary"><Loader2 className="mr-1 h-3 w-3 animate-spin" />Processing</Badge>;
+      default:
+        return <Badge variant="outline">{status}</Badge>;
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6">
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold" data-testid="text-payroll-title">Payroll</h1>
-          <p className="text-muted-foreground">Manage employee salaries and payments</p>
+          <h1 className="text-2xl font-bold" data-testid="text-payroll-title">Payroll Management</h1>
+          <p className="text-muted-foreground">Manage employee salaries, bonuses, and payments</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" data-testid="button-export-payroll"><Download className="mr-2 h-4 w-4" />Export</Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" data-testid="button-export-payroll">
+                <Download className="mr-2 h-4 w-4" />Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => handleExport('csv')} data-testid="button-export-csv">
+                <FileText className="mr-2 h-4 w-4" />Export as CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('json')} data-testid="button-export-json">
+                <FileText className="mr-2 h-4 w-4" />Export as JSON
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" onClick={() => { resetForm(); setEditingEntry(null); setIsAddEmployeeOpen(true); }} data-testid="button-add-employee">
             <Plus className="mr-2 h-4 w-4" />Add Employee
           </Button>
-          <Button onClick={() => setIsRunPayrollOpen(true)} data-testid="button-run-payroll">
+          <Button onClick={() => setIsRunPayrollOpen(true)} disabled={pendingPayroll === 0} data-testid="button-run-payroll">
             <Send className="mr-2 h-4 w-4" />Run Payroll
           </Button>
         </div>
@@ -239,17 +433,52 @@ export default function PayrollPage() {
         </Card>
       </div>
 
+      {departments.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Building2 className="h-5 w-5" />
+              Department Breakdown
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
+              {departmentStats.map((dept, index) => (
+                <div key={dept.name} className="p-3 rounded-lg border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => setDepartmentFilter(dept.name)} data-testid={`button-department-${index}`}>
+                  <p className="font-medium text-sm" data-testid={`text-department-name-${index}`}>{dept.name}</p>
+                  <p className="text-2xl font-bold" data-testid={`text-department-count-${index}`}>{dept.count}</p>
+                  <p className="text-xs text-muted-foreground">${dept.total.toLocaleString()}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Tabs defaultValue="all" className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <TabsList>
-            <TabsTrigger value="all" data-testid="tab-all">All</TabsTrigger>
-            <TabsTrigger value="paid" data-testid="tab-paid">Paid</TabsTrigger>
-            <TabsTrigger value="pending" data-testid="tab-pending">Pending</TabsTrigger>
+            <TabsTrigger value="all" data-testid="tab-all">All ({payrollEntries.length})</TabsTrigger>
+            <TabsTrigger value="paid" data-testid="tab-paid">Paid ({payrollEntries.filter(e => e.status === "paid").length})</TabsTrigger>
+            <TabsTrigger value="pending" data-testid="tab-pending">Pending ({payrollEntries.filter(e => e.status === "pending").length})</TabsTrigger>
             <TabsTrigger value="processing" data-testid="tab-processing">Processing</TabsTrigger>
           </TabsList>
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search employees..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" data-testid="input-search-payroll" />
+          <div className="flex items-center gap-2">
+            <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+              <SelectTrigger className="w-40" data-testid="select-department-filter">
+                <SelectValue placeholder="Department" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Departments</SelectItem>
+                {departments.map((dept) => (
+                  <SelectItem key={dept} value={dept}>{dept}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input placeholder="Search employees..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" data-testid="input-search-payroll" />
+            </div>
           </div>
         </div>
 
@@ -269,26 +498,44 @@ export default function PayrollPage() {
                         </div>
                       </div>
                       <div className="hidden md:flex items-center gap-8">
-                        <div className="text-right"><p className="text-sm text-muted-foreground">Salary</p><p className="font-medium">${entry.salary.toLocaleString()}</p></div>
-                        <div className="text-right"><p className="text-sm text-muted-foreground">Bonus</p><p className="font-medium text-emerald-600">+${entry.bonus.toLocaleString()}</p></div>
-                        <div className="text-right"><p className="text-sm text-muted-foreground">Deductions</p><p className="font-medium text-rose-600">-${entry.deductions.toLocaleString()}</p></div>
+                        <div className="text-right"><p className="text-sm text-muted-foreground">Salary</p><p className="font-medium">${Number(entry.salary).toLocaleString()}</p></div>
+                        <div className="text-right"><p className="text-sm text-muted-foreground">Bonus</p><p className="font-medium text-emerald-600">+${Number(entry.bonus).toLocaleString()}</p></div>
+                        <div className="text-right"><p className="text-sm text-muted-foreground">Deductions</p><p className="font-medium text-rose-600">-${Number(entry.deductions).toLocaleString()}</p></div>
                       </div>
                       <div className="flex items-center gap-4">
-                        <div className="text-right"><p className="text-sm text-muted-foreground">Net Pay</p><p className="text-lg font-bold">${entry.netPay.toLocaleString()}</p></div>
+                        <div className="text-right"><p className="text-sm text-muted-foreground">Net Pay</p><p className="text-lg font-bold">${Number(entry.netPay).toLocaleString()}</p></div>
                         {getStatusBadge(entry.status)}
                         <DropdownMenu>
-                          <DropdownMenuTrigger asChild><Button variant="ghost" size="icon"><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                          <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" data-testid={`button-payroll-menu-${entry.id}`}><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => openEditDialog(entry)}><Pencil className="h-4 w-4 mr-2" />Edit</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => { setSelectedEntry(entry); setIsViewPayslipOpen(true); }} data-testid={`button-view-payslip-${entry.id}`}>
+                              <Eye className="h-4 w-4 mr-2" />View Payslip
+                            </DropdownMenuItem>
+                            {entry.status === "pending" && (
+                              <DropdownMenuItem onClick={() => { setSelectedEntry(entry); setIsPayIndividualOpen(true); }} data-testid={`button-pay-now-${entry.id}`}>
+                                <DollarSign className="h-4 w-4 mr-2" />Pay Now
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem onClick={() => openEditDialog(entry)} data-testid={`button-edit-payroll-${entry.id}`}>
+                              <Pencil className="h-4 w-4 mr-2" />Edit
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem className="text-red-600" onClick={() => deleteMutation.mutate(entry.id)}><Trash2 className="h-4 w-4 mr-2" />Delete</DropdownMenuItem>
+                            <DropdownMenuItem className="text-red-600" onClick={() => { setSelectedEntry(entry); setIsDeleteConfirmOpen(true); }} data-testid={`button-delete-payroll-${entry.id}`}>
+                              <Trash2 className="h-4 w-4 mr-2" />Delete
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
                     </div>
                   ))}
                   {(tab === "all" ? filteredEntries : filteredEntries.filter(e => e.status === tab)).length === 0 && (
-                    <div className="text-center py-8 text-muted-foreground">No payroll entries found</div>
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Users className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                      <p>No payroll entries found</p>
+                      <Button variant="outline" className="mt-4" onClick={() => { resetForm(); setEditingEntry(null); setIsAddEmployeeOpen(true); }}>
+                        <Plus className="mr-2 h-4 w-4" />Add First Employee
+                      </Button>
+                    </div>
                   )}
                 </div>
               </CardContent>
@@ -314,6 +561,17 @@ export default function PayrollPage() {
                 <span>{payrollEntries.filter(e => e.status === "pending").length} pending</span>
               </div>
             </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Pending Employees:</p>
+              <div className="max-h-40 overflow-y-auto space-y-2">
+                {payrollEntries.filter(e => e.status === "pending").map((entry) => (
+                  <div key={entry.id} className="flex items-center justify-between p-2 rounded border bg-background">
+                    <span className="text-sm">{entry.employeeName}</span>
+                    <span className="text-sm font-medium">${Number(entry.netPay).toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
             <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-200">
               <AlertCircle className="h-4 w-4 flex-shrink-0" />
               <span className="text-sm">Funds will be deducted from your main wallet.</span>
@@ -322,9 +580,106 @@ export default function PayrollPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsRunPayrollOpen(false)}>Cancel</Button>
             <Button onClick={() => processPayrollMutation.mutate()} disabled={processPayrollMutation.isPending || pendingPayroll === 0} data-testid="button-confirm-payroll">
-              {processPayrollMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Processing...</> : <><Send className="mr-2 h-4 w-4" />Process Payroll</>}
+              {processPayrollMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Processing...</> : <><Send className="mr-2 h-4 w-4" />Process ${pendingPayroll.toLocaleString()}</>}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isPayIndividualOpen} onOpenChange={setIsPayIndividualOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Pay Individual Employee</DialogTitle>
+            <DialogDescription>Process payment for {selectedEntry?.employeeName}</DialogDescription>
+          </DialogHeader>
+          {selectedEntry && (
+            <div className="py-4 space-y-4">
+              <div className="flex items-center gap-4">
+                <Avatar className="h-12 w-12">
+                  <AvatarFallback className="bg-indigo-100 text-indigo-600">{selectedEntry.employeeName.split(" ").map(n => n[0]).join("")}</AvatarFallback>
+                </Avatar>
+                <div>
+                  <p className="font-medium">{selectedEntry.employeeName}</p>
+                  <p className="text-sm text-muted-foreground">{selectedEntry.department}</p>
+                </div>
+              </div>
+              <div className="p-4 rounded-lg bg-muted space-y-2">
+                <div className="flex justify-between"><span className="text-muted-foreground">Salary</span><span>${Number(selectedEntry.salary).toLocaleString()}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Bonus</span><span className="text-emerald-600">+${Number(selectedEntry.bonus).toLocaleString()}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Deductions</span><span className="text-rose-600">-${Number(selectedEntry.deductions).toLocaleString()}</span></div>
+                <div className="flex justify-between border-t pt-2 font-bold"><span>Net Pay</span><span>${Number(selectedEntry.netPay).toLocaleString()}</span></div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsPayIndividualOpen(false)} data-testid="button-cancel-pay">Cancel</Button>
+            <Button onClick={() => selectedEntry && payIndividualMutation.mutate(selectedEntry.id)} disabled={payIndividualMutation.isPending} data-testid="button-confirm-pay-individual">
+              {payIndividualMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Processing...</> : <><DollarSign className="mr-2 h-4 w-4" />Pay ${selectedEntry ? Number(selectedEntry.netPay).toLocaleString() : 0}</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isViewPayslipOpen} onOpenChange={setIsViewPayslipOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Payslip
+            </DialogTitle>
+          </DialogHeader>
+          {selectedEntry && (
+            <div className="space-y-6">
+              <div className="text-center border-b pb-4">
+                <h2 className="text-xl font-bold text-indigo-600">SPENDLY</h2>
+                <p className="text-sm text-muted-foreground">Payslip for {new Date(selectedEntry.payDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
+              </div>
+              
+              <div className="space-y-1">
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-10 w-10">
+                    <AvatarFallback className="bg-indigo-100 text-indigo-600">{selectedEntry.employeeName.split(" ").map(n => n[0]).join("")}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="font-semibold">{selectedEntry.employeeName}</p>
+                    <p className="text-sm text-muted-foreground">{selectedEntry.department}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground mt-2">
+                  <CalendarDays className="h-4 w-4" />
+                  <span>Pay Date: {new Date(selectedEntry.payDate).toLocaleDateString()}</span>
+                </div>
+              </div>
+
+              <div className="rounded-lg border overflow-hidden">
+                <div className="flex justify-between p-3 border-b">
+                  <span className="text-muted-foreground">Basic Salary</span>
+                  <span className="font-medium">${Number(selectedEntry.salary).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between p-3 border-b">
+                  <span className="text-muted-foreground">Bonus</span>
+                  <span className="font-medium text-emerald-600">+${Number(selectedEntry.bonus).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between p-3 border-b">
+                  <span className="text-muted-foreground">Deductions</span>
+                  <span className="font-medium text-rose-600">-${Number(selectedEntry.deductions).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between p-3 bg-muted font-bold">
+                  <span>Net Pay</span>
+                  <span>${Number(selectedEntry.netPay).toLocaleString()}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                {getStatusBadge(selectedEntry.status)}
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={handlePrintPayslip} data-testid="button-print-payslip">
+                    <Printer className="mr-2 h-4 w-4" />Print
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -336,7 +691,7 @@ export default function PayrollPage() {
           </DialogHeader>
           <div className="py-4 space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="employeeName">Employee Name</Label>
+              <Label htmlFor="employeeName">Employee Name *</Label>
               <Input id="employeeName" value={formData.employeeName} onChange={(e) => setFormData({ ...formData, employeeName: e.target.value })} placeholder="John Doe" data-testid="input-employee-name" />
             </div>
             <div className="space-y-2">
@@ -350,12 +705,16 @@ export default function PayrollPage() {
                   <SelectItem value="Finance">Finance</SelectItem>
                   <SelectItem value="Operations">Operations</SelectItem>
                   <SelectItem value="HR">HR</SelectItem>
+                  <SelectItem value="Legal">Legal</SelectItem>
+                  <SelectItem value="Product">Product</SelectItem>
+                  <SelectItem value="Design">Design</SelectItem>
+                  <SelectItem value="Support">Support</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="salary">Salary ($)</Label>
+                <Label htmlFor="salary">Salary ($) *</Label>
                 <Input id="salary" type="number" value={formData.salary} onChange={(e) => setFormData({ ...formData, salary: e.target.value })} placeholder="0" data-testid="input-salary" />
               </div>
               <div className="space-y-2">
@@ -387,6 +746,24 @@ export default function PayrollPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Payroll Entry</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the payroll entry for {selectedEntry?.employeeName}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => selectedEntry && deleteMutation.mutate(selectedEntry.id)} className="bg-red-600 hover:bg-red-700">
+              {deleteMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

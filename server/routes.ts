@@ -1227,6 +1227,39 @@ export async function registerRoutes(
     }
   });
 
+  // Pay individual employee
+  app.post("/api/payroll/:id/pay", async (req, res) => {
+    try {
+      const entry = await storage.getPayrollEntry(req.params.id);
+      if (!entry) {
+        return res.status(404).json({ error: "Payroll entry not found" });
+      }
+      
+      if (entry.status !== "pending") {
+        return res.status(400).json({ error: "Payroll entry is not pending" });
+      }
+
+      const updated = await storage.updatePayrollEntry(req.params.id, { status: "paid" });
+      
+      await storage.createTransaction({
+        type: "Payout",
+        amount: Number(entry.netPay),
+        fee: 0,
+        status: 'Completed',
+        date: new Date().toISOString().split('T')[0],
+        description: `Salary payment - ${entry.employeeName}`,
+        currency: 'USD',
+      });
+
+      res.json({ 
+        message: "Payment processed successfully",
+        entry: updated,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to process payment" });
+    }
+  });
+
   // ==================== INVOICES ====================
   app.get("/api/invoices", async (req, res) => {
     try {
