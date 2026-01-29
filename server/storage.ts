@@ -9,6 +9,30 @@ export interface Report {
   status: "completed" | "processing" | "scheduled";
   fileSize: string;
 }
+
+export interface CardTransaction {
+  id: string;
+  cardId: string;
+  amount: number;
+  merchant: string;
+  category: string;
+  description: string;
+  status: "pending" | "completed" | "declined";
+  date: string;
+}
+
+export interface VirtualAccount {
+  id: string;
+  name: string;
+  accountNumber: string;
+  bankName: string;
+  bankCode: string;
+  currency: string;
+  balance: number;
+  type: "collection" | "disbursement";
+  status: "active" | "inactive";
+  createdAt: string;
+}
 import { randomUUID } from "crypto";
 
 export interface IStorage {
@@ -50,6 +74,16 @@ export interface IStorage {
   createCard(card: Omit<VirtualCard, 'id'>): Promise<VirtualCard>;
   updateCard(id: string, card: Partial<Omit<VirtualCard, 'id'>>): Promise<VirtualCard | undefined>;
   deleteCard(id: string): Promise<boolean>;
+  
+  // Card Transactions
+  getCardTransactions(cardId: string): Promise<CardTransaction[]>;
+  createCardTransaction(tx: Omit<CardTransaction, 'id'>): Promise<CardTransaction>;
+  
+  // Virtual Accounts
+  getVirtualAccounts(): Promise<VirtualAccount[]>;
+  getVirtualAccount(id: string): Promise<VirtualAccount | undefined>;
+  createVirtualAccount(account: VirtualAccount): Promise<VirtualAccount>;
+  updateVirtualAccount(id: string, data: Partial<VirtualAccount>): Promise<VirtualAccount | undefined>;
   
   // Team
   getTeam(): Promise<TeamMember[]>;
@@ -104,6 +138,8 @@ export class MemStorage implements IStorage {
   private bills: Map<string, Bill>;
   private budgets: Map<string, Budget>;
   private cards: Map<string, VirtualCard>;
+  private cardTransactions: Map<string, CardTransaction>;
+  private virtualAccounts: Map<string, VirtualAccount>;
   private teamMembers: Map<string, TeamMember>;
   private payrollEntries: Map<string, PayrollEntry>;
   private invoices: Map<string, Invoice>;
@@ -119,20 +155,22 @@ export class MemStorage implements IStorage {
     this.bills = new Map();
     this.budgets = new Map();
     this.cards = new Map();
+    this.cardTransactions = new Map();
+    this.virtualAccounts = new Map();
     this.teamMembers = new Map();
     this.payrollEntries = new Map();
     this.invoices = new Map();
     this.vendors = new Map();
     this.reports = new Map();
     this.balances = {
-      local: 45850,
-      usd: 78500,
-      escrow: 12400,
+      local: 0,
+      usd: 0,
+      escrow: 0,
       localCurrency: 'USD',
     };
     this.settings = {
-      companyName: 'Acme Corporation',
-      companyEmail: 'finance@acme.com',
+      companyName: 'Spendly',
+      companyEmail: 'finance@spendly.com',
       companyPhone: '+1 (555) 123-4567',
       companyAddress: '123 Business Ave, San Francisco, CA 94105',
       currency: 'USD',
@@ -148,143 +186,9 @@ export class MemStorage implements IStorage {
       countryCode: 'US',
       region: 'North America',
       paymentProvider: 'stripe',
-      paystackEnabled: false,
+      paystackEnabled: true,
       stripeEnabled: true,
     };
-    
-    this.initializeDemoData();
-  }
-
-  private initializeDemoData() {
-    // Demo expenses
-    const demoExpenses: Omit<Expense, 'id'>[] = [
-      { merchant: 'AWS', amount: 2499, currency: 'USD', date: '2026-01-28', category: 'Software', status: 'PAID', user: 'John Doe', userId: '1', department: 'Engineering', note: 'Cloud hosting' },
-      { merchant: 'Figma', amount: 45, currency: 'USD', date: '2026-01-27', category: 'Software', status: 'PAID', user: 'Sarah Chen', userId: '2', department: 'Marketing' },
-      { merchant: 'Delta Airlines', amount: 890, currency: 'USD', date: '2026-01-26', category: 'Travel', status: 'PENDING', user: 'Mike Johnson', userId: '3', department: 'Sales' },
-      { merchant: 'WeWork', amount: 1200, currency: 'USD', date: '2026-01-25', category: 'Office', status: 'APPROVED', user: 'John Doe', userId: '1', department: 'General' },
-      { merchant: 'Google Ads', amount: 5000, currency: 'USD', date: '2026-01-24', category: 'Marketing', status: 'PAID', user: 'Sarah Chen', userId: '2', department: 'Marketing' },
-      { merchant: 'Uber', amount: 156, currency: 'USD', date: '2026-01-23', category: 'Travel', status: 'PAID', user: 'Mike Johnson', userId: '3', department: 'Sales' },
-      { merchant: 'Slack', amount: 12.50, currency: 'USD', date: '2026-01-22', category: 'Software', status: 'PAID', user: 'John Doe', userId: '1', department: 'Engineering' },
-      { merchant: 'Office Depot', amount: 345, currency: 'USD', date: '2026-01-21', category: 'Office', status: 'REJECTED', user: 'Emily Brown', userId: '4', department: 'HR' },
-    ];
-    
-    demoExpenses.forEach((exp) => {
-      const id = randomUUID();
-      this.expenses.set(id, { ...exp, id });
-    });
-
-    // Demo transactions
-    const demoTransactions: Omit<Transaction, 'id'>[] = [
-      { type: 'Deposit', amount: 50000, fee: 0, status: 'Completed', date: '2026-01-28', description: 'Wire transfer from Client A', currency: 'USD' },
-      { type: 'Payout', amount: 2499, fee: 2.50, status: 'Completed', date: '2026-01-28', description: 'AWS Payment', currency: 'USD' },
-      { type: 'Payout', amount: 5000, fee: 5, status: 'Processing', date: '2026-01-27', description: 'Google Ads Campaign', currency: 'USD' },
-      { type: 'Funding', amount: 25000, fee: 0, status: 'Completed', date: '2026-01-26', description: 'Capital injection', currency: 'USD' },
-      { type: 'Bill', amount: 1200, fee: 0, status: 'Completed', date: '2026-01-25', description: 'WeWork Monthly', currency: 'USD' },
-      { type: 'Refund', amount: 345, fee: 0, status: 'Completed', date: '2026-01-24', description: 'Office Depot refund', currency: 'USD' },
-      { type: 'Payout', amount: 890, fee: 1.50, status: 'Pending', date: '2026-01-23', description: 'Delta Airlines booking', currency: 'USD' },
-    ];
-    
-    demoTransactions.forEach((tx) => {
-      const id = randomUUID();
-      this.transactions.set(id, { ...tx, id });
-    });
-
-    // Demo bills
-    const demoBills: Omit<Bill, 'id'>[] = [
-      { name: 'AWS Hosting', provider: 'Amazon Web Services', amount: 2499, dueDate: '2026-02-01', category: 'Software', status: 'Unpaid', currency: 'USD' },
-      { name: 'Office Rent', provider: 'WeWork', amount: 3500, dueDate: '2026-02-01', category: 'Office', status: 'Unpaid', currency: 'USD' },
-      { name: 'Internet', provider: 'Comcast Business', amount: 299, dueDate: '2026-01-15', category: 'Utilities', status: 'Paid', currency: 'USD' },
-      { name: 'Insurance', provider: 'State Farm', amount: 1200, dueDate: '2026-01-10', category: 'Legal', status: 'Paid', currency: 'USD' },
-      { name: 'Google Workspace', provider: 'Google', amount: 144, dueDate: '2026-01-05', category: 'Software', status: 'Overdue', currency: 'USD' },
-    ];
-    
-    demoBills.forEach((bill) => {
-      const id = randomUUID();
-      this.bills.set(id, { ...bill, id });
-    });
-
-    // Demo budgets
-    const demoBudgets: Omit<Budget, 'id'>[] = [
-      { name: 'Software & Tools', category: 'Software', limit: 10000, spent: 7540, currency: 'USD', period: 'monthly' },
-      { name: 'Marketing Spend', category: 'Marketing', limit: 15000, spent: 12500, currency: 'USD', period: 'monthly' },
-      { name: 'Travel Expenses', category: 'Travel', limit: 5000, spent: 2890, currency: 'USD', period: 'monthly' },
-      { name: 'Office Operations', category: 'Office', limit: 8000, spent: 4200, currency: 'USD', period: 'monthly' },
-      { name: 'Employee Benefits', category: 'Other', limit: 20000, spent: 22500, currency: 'USD', period: 'monthly' },
-    ];
-    
-    demoBudgets.forEach((budget) => {
-      const id = randomUUID();
-      this.budgets.set(id, { ...budget, id });
-    });
-
-    // Demo cards
-    const demoCards: Omit<VirtualCard, 'id'>[] = [
-      { name: 'Marketing Team', last4: '4532', balance: 8500, limit: 15000, type: 'Visa', color: 'indigo', currency: 'USD', status: 'Active' },
-      { name: 'Engineering', last4: '7891', balance: 12340, limit: 25000, type: 'Mastercard', color: 'emerald', currency: 'USD', status: 'Active' },
-      { name: 'Travel Card', last4: '2345', balance: 3200, limit: 10000, type: 'Visa', color: 'rose', currency: 'USD', status: 'Active' },
-      { name: 'Office Supplies', last4: '6789', balance: 1500, limit: 5000, type: 'Visa', color: 'amber', currency: 'USD', status: 'Frozen' },
-    ];
-    
-    demoCards.forEach((card) => {
-      const id = randomUUID();
-      this.cards.set(id, { ...card, id });
-    });
-
-    // Demo team members
-    const demoTeam: Omit<TeamMember, 'id'>[] = [
-      { name: 'John Doe', email: 'john@acme.com', role: 'OWNER', department: 'General', status: 'Active', joinedAt: '2024-01-15', permissions: ['VIEW_TREASURY', 'MANAGE_TREASURY', 'CREATE_EXPENSE', 'APPROVE_EXPENSE', 'MANAGE_TEAM', 'VIEW_REPORTS', 'MANAGE_SETTINGS'] },
-      { name: 'Sarah Chen', email: 'sarah@acme.com', role: 'ADMIN', department: 'Marketing', status: 'Active', joinedAt: '2024-03-01', permissions: ['VIEW_TREASURY', 'CREATE_EXPENSE', 'APPROVE_EXPENSE', 'VIEW_REPORTS'] },
-      { name: 'Mike Johnson', email: 'mike@acme.com', role: 'MANAGER', department: 'Sales', status: 'Active', joinedAt: '2024-06-15', permissions: ['CREATE_EXPENSE', 'VIEW_REPORTS'] },
-      { name: 'Emily Brown', email: 'emily@acme.com', role: 'EMPLOYEE', department: 'HR', status: 'Active', joinedAt: '2024-09-01', permissions: ['CREATE_EXPENSE'] },
-      { name: 'Alex Rivera', email: 'alex@acme.com', role: 'EMPLOYEE', department: 'Engineering', status: 'Active', joinedAt: '2025-01-10', permissions: ['CREATE_EXPENSE'] },
-      { name: 'Lisa Park', email: 'lisa@acme.com', role: 'VIEWER', department: 'Finance', status: 'Inactive', joinedAt: '2025-06-01', permissions: ['VIEW_REPORTS'] },
-    ];
-    
-    demoTeam.forEach((member) => {
-      const id = randomUUID();
-      this.teamMembers.set(id, { ...member, id });
-    });
-
-    // Demo payroll
-    const demoPayroll: Omit<PayrollEntry, 'id'>[] = [
-      { employeeId: '1', employeeName: 'John Doe', department: 'Engineering', salary: 8500, bonus: 1000, deductions: 1200, netPay: 8300, status: 'paid', payDate: '2026-01-25' },
-      { employeeId: '2', employeeName: 'Sarah Chen', department: 'Marketing', salary: 7200, bonus: 500, deductions: 950, netPay: 6750, status: 'paid', payDate: '2026-01-25' },
-      { employeeId: '3', employeeName: 'Mike Johnson', department: 'Sales', salary: 6500, bonus: 2200, deductions: 1100, netPay: 7600, status: 'pending', payDate: '2026-02-01' },
-      { employeeId: '4', employeeName: 'Emily Brown', department: 'HR', salary: 5800, bonus: 0, deductions: 780, netPay: 5020, status: 'pending', payDate: '2026-02-01' },
-      { employeeId: '5', employeeName: 'Alex Rivera', department: 'Engineering', salary: 7800, bonus: 800, deductions: 1050, netPay: 7550, status: 'processing', payDate: '2026-01-28' },
-    ];
-    
-    demoPayroll.forEach((entry) => {
-      const id = randomUUID();
-      this.payrollEntries.set(id, { ...entry, id });
-    });
-
-    // Demo invoices
-    const demoInvoices: Omit<Invoice, 'id'>[] = [
-      { invoiceNumber: 'INV-2026-001', client: 'TechCorp Inc.', clientEmail: 'billing@techcorp.com', amount: 15000, dueDate: '2026-02-15', issuedDate: '2026-01-15', status: 'pending', items: [{ description: 'Consulting Services', quantity: 40, rate: 375 }] },
-      { invoiceNumber: 'INV-2026-002', client: 'GlobalScale Ltd.', clientEmail: 'accounts@globalscale.com', amount: 8500, dueDate: '2026-01-20', issuedDate: '2026-01-05', status: 'paid', items: [{ description: 'Software Development', quantity: 1, rate: 8500 }] },
-      { invoiceNumber: 'INV-2026-003', client: 'StartupHub', clientEmail: 'finance@startuphub.io', amount: 3200, dueDate: '2026-01-10', issuedDate: '2025-12-15', status: 'overdue', items: [{ description: 'Design Services', quantity: 16, rate: 200 }] },
-      { invoiceNumber: 'INV-2026-004', client: 'Acme Corp', clientEmail: 'billing@acme.com', amount: 22000, dueDate: '2026-03-01', issuedDate: '2026-01-28', status: 'draft', items: [{ description: 'Annual Maintenance', quantity: 1, rate: 22000 }] },
-    ];
-    
-    demoInvoices.forEach((invoice) => {
-      const id = randomUUID();
-      this.invoices.set(id, { ...invoice, id });
-    });
-
-    // Demo vendors
-    const demoVendors: Omit<Vendor, 'id'>[] = [
-      { name: 'Amazon Web Services', email: 'billing@aws.amazon.com', phone: '+1 (888) 123-4567', address: 'Seattle, WA, USA', category: 'Cloud Services', status: 'active', totalPaid: 28500, pendingPayments: 2499, lastPayment: '2026-01-28' },
-      { name: 'Google Cloud', email: 'billing@google.com', phone: '+1 (800) 555-0123', address: 'Mountain View, CA, USA', category: 'Cloud Services', status: 'active', totalPaid: 12000, pendingPayments: 0, lastPayment: '2026-01-15' },
-      { name: 'Figma Inc.', email: 'enterprise@figma.com', phone: '+1 (415) 555-7890', address: 'San Francisco, CA, USA', category: 'Design Tools', status: 'active', totalPaid: 540, pendingPayments: 45, lastPayment: '2026-01-27' },
-      { name: 'WeWork', email: 'invoices@wework.com', phone: '+1 (212) 555-4567', address: 'New York, NY, USA', category: 'Office Space', status: 'active', totalPaid: 14400, pendingPayments: 1200, lastPayment: '2026-01-25' },
-      { name: 'Comcast Business', email: 'business@comcast.com', phone: '+1 (800) 555-9876', address: 'Philadelphia, PA, USA', category: 'Utilities', status: 'active', totalPaid: 3588, pendingPayments: 0, lastPayment: '2026-01-15' },
-    ];
-    
-    demoVendors.forEach((vendor) => {
-      const id = randomUUID();
-      this.vendors.set(id, { ...vendor, id });
-    });
   }
 
   async getUser(id: string): Promise<User | undefined> {
@@ -455,6 +359,42 @@ export class MemStorage implements IStorage {
 
   async deleteCard(id: string): Promise<boolean> {
     return this.cards.delete(id);
+  }
+
+  // ==================== CARD TRANSACTIONS ====================
+  async getCardTransactions(cardId: string): Promise<CardTransaction[]> {
+    return Array.from(this.cardTransactions.values())
+      .filter(tx => tx.cardId === cardId)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }
+
+  async createCardTransaction(tx: Omit<CardTransaction, 'id'>): Promise<CardTransaction> {
+    const id = randomUUID();
+    const newTx: CardTransaction = { ...tx, id };
+    this.cardTransactions.set(id, newTx);
+    return newTx;
+  }
+
+  // ==================== VIRTUAL ACCOUNTS ====================
+  async getVirtualAccounts(): Promise<VirtualAccount[]> {
+    return Array.from(this.virtualAccounts.values());
+  }
+
+  async getVirtualAccount(id: string): Promise<VirtualAccount | undefined> {
+    return this.virtualAccounts.get(id);
+  }
+
+  async createVirtualAccount(account: VirtualAccount): Promise<VirtualAccount> {
+    this.virtualAccounts.set(account.id, account);
+    return account;
+  }
+
+  async updateVirtualAccount(id: string, data: Partial<VirtualAccount>): Promise<VirtualAccount | undefined> {
+    const existing = this.virtualAccounts.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...data };
+    this.virtualAccounts.set(id, updated);
+    return updated;
   }
 
   // ==================== TEAM ====================

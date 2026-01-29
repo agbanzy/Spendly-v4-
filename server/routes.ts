@@ -652,6 +652,258 @@ export async function registerRoutes(
     }
   });
 
+  // Fund a virtual card
+  app.post("/api/cards/:id/fund", async (req, res) => {
+    try {
+      const { amount, paymentMethod } = req.body;
+      if (!amount || amount <= 0) {
+        return res.status(400).json({ error: "Valid amount is required" });
+      }
+      
+      const card = await storage.getCard(req.params.id);
+      if (!card) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+      
+      // Update card balance
+      const newBalance = card.balance + amount;
+      const updated = await storage.updateCard(req.params.id, { balance: newBalance });
+      
+      // Create funding transaction
+      await storage.createTransaction({
+        description: `Card funding - ${card.name}`,
+        amount,
+        type: 'Funding',
+        status: 'Completed',
+        date: new Date().toISOString().split('T')[0],
+        account: `Virtual Card ****${card.last4}`,
+        category: 'Card Funding',
+        reference: `FUND-${Date.now()}`,
+      });
+      
+      res.json({ 
+        success: true, 
+        card: updated,
+        message: `$${amount.toLocaleString()} funded to card`
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fund card" });
+    }
+  });
+
+  // Make a payment with virtual card
+  app.post("/api/cards/:id/pay", async (req, res) => {
+    try {
+      const { amount, merchant, category, description } = req.body;
+      if (!amount || amount <= 0) {
+        return res.status(400).json({ error: "Valid amount is required" });
+      }
+      if (!merchant) {
+        return res.status(400).json({ error: "Merchant is required" });
+      }
+      
+      const card = await storage.getCard(req.params.id);
+      if (!card) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+      
+      if (card.status !== 'active') {
+        return res.status(400).json({ error: "Card is not active" });
+      }
+      
+      if (card.balance < amount) {
+        return res.status(400).json({ error: "Insufficient card balance" });
+      }
+      
+      // Deduct from card balance
+      const newBalance = card.balance - amount;
+      await storage.updateCard(req.params.id, { balance: newBalance });
+      
+      // Create card transaction record
+      const cardTx = await storage.createCardTransaction({
+        cardId: req.params.id,
+        amount,
+        merchant,
+        category: category || 'General',
+        description: description || '',
+        status: 'completed',
+        date: new Date().toISOString(),
+      });
+      
+      // Create expense record
+      await storage.createExpense({
+        merchant,
+        amount,
+        currency: card.currency || 'USD',
+        date: new Date().toISOString().split('T')[0],
+        category: category || 'General',
+        status: 'PAID',
+        user: 'Card Payment',
+        userId: '1',
+        department: 'General',
+        note: `Paid with virtual card ****${card.last4}`,
+      });
+      
+      res.json({ 
+        success: true, 
+        transaction: cardTx,
+        remainingBalance: newBalance,
+        message: `$${amount.toLocaleString()} paid to ${merchant}`
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to process payment" });
+    }
+  });
+
+  // Get card transactions
+  app.get("/api/cards/:id/transactions", async (req, res) => {
+    try {
+      const card = await storage.getCard(req.params.id);
+      if (!card) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+      
+      const transactions = await storage.getCardTransactions(req.params.id);
+      res.json(transactions);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch card transactions" });
+    }
+  });
+
+  // ==================== VIRTUAL ACCOUNTS ====================
+  app.get("/api/virtual-accounts", async (req, res) => {
+    try {
+      const accounts = await storage.getVirtualAccounts();
+      res.json(accounts);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch virtual accounts" });
+    }
+  });
+
+  app.post("/api/virtual-accounts", async (req, res) => {
+    try {
+      const { name, currency, type } = req.body;
+      if (!name) {
+        return res.status(400).json({ error: "Account name is required" });
+      }
+      
+      // Generate account number
+      const accountNumber = `VA${Date.now()}${Math.floor(Math.random() * 1000)}`;
+      const bankCode = currency === 'NGN' ? 'PAYSTACK' : 'STRIPE';
+      
+      const account = await storage.createVirtualAccount({
+        id: `VA-${Date.now()}`,
+        name,
+        accountNumber,
+        bankName: bankCode === 'PAYSTACK' ? 'Wema Bank' : 'Stripe Treasury',
+        bankCode,
+        currency: currency || 'USD',
+        balance: 0,
+        type: type || 'collection',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+      });
+      
+      res.status(201).json(account);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create virtual account" });
+    }
+  });
+
+  app.get("/api/virtual-accounts/:id", async (req, res) => {
+    try {
+      const account = await storage.getVirtualAccount(req.params.id);
+      if (!account) {
+        return res.status(404).json({ error: "Virtual account not found" });
+      }
+      res.json(account);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch virtual account" });
+    }
+  });
+
+  // Transfer to virtual account
+  app.post("/api/virtual-accounts/:id/deposit", async (req, res) => {
+    try {
+      const { amount, reference, source } = req.body;
+      if (!amount || amount <= 0) {
+        return res.status(400).json({ error: "Valid amount is required" });
+      }
+      
+      const account = await storage.getVirtualAccount(req.params.id);
+      if (!account) {
+        return res.status(404).json({ error: "Virtual account not found" });
+      }
+      
+      // Update balance
+      const newBalance = account.balance + amount;
+      await storage.updateVirtualAccount(req.params.id, { balance: newBalance });
+      
+      // Create transaction record
+      await storage.createTransaction({
+        description: `Deposit to ${account.name}`,
+        amount,
+        type: 'Deposit',
+        status: 'Completed',
+        date: new Date().toISOString().split('T')[0],
+        account: account.accountNumber,
+        category: 'Virtual Account',
+        reference: reference || `DEP-${Date.now()}`,
+      });
+      
+      res.json({ 
+        success: true, 
+        newBalance,
+        message: `$${amount.toLocaleString()} deposited`
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to deposit" });
+    }
+  });
+
+  // Withdraw from virtual account
+  app.post("/api/virtual-accounts/:id/withdraw", async (req, res) => {
+    try {
+      const { amount, destination, reference } = req.body;
+      if (!amount || amount <= 0) {
+        return res.status(400).json({ error: "Valid amount is required" });
+      }
+      
+      const account = await storage.getVirtualAccount(req.params.id);
+      if (!account) {
+        return res.status(404).json({ error: "Virtual account not found" });
+      }
+      
+      if (account.balance < amount) {
+        return res.status(400).json({ error: "Insufficient balance" });
+      }
+      
+      // Update balance
+      const newBalance = account.balance - amount;
+      await storage.updateVirtualAccount(req.params.id, { balance: newBalance });
+      
+      // Create transaction record
+      await storage.createTransaction({
+        description: `Withdrawal from ${account.name}`,
+        amount,
+        type: 'Payout',
+        status: 'Completed',
+        date: new Date().toISOString().split('T')[0],
+        account: account.accountNumber,
+        category: 'Virtual Account',
+        reference: reference || `WTH-${Date.now()}`,
+      });
+      
+      res.json({ 
+        success: true, 
+        newBalance,
+        message: `$${amount.toLocaleString()} withdrawn`
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to withdraw" });
+    }
+  });
+
   // ==================== TEAM ====================
   app.get("/api/team", async (req, res) => {
     try {
