@@ -32,6 +32,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { isPaystackRegion } from "@/lib/constants";
 
 interface CompanySettings {
   companyName: string;
@@ -77,8 +78,6 @@ const COUNTRY_OPTIONS = [
   { code: 'RW', name: 'Rwanda', region: 'Africa' },
   { code: 'CI', name: "Côte d'Ivoire", region: 'Africa' },
 ];
-
-const AFRICAN_COUNTRIES = ['NG', 'GH', 'KE', 'ZA', 'EG', 'RW', 'CI'];
 
 export default function Settings() {
   const { toast } = useToast();
@@ -138,7 +137,7 @@ export default function Settings() {
   };
 
   const handleCountryChange = (countryCode: string) => {
-    const isAfrican = AFRICAN_COUNTRIES.includes(countryCode);
+    const isAfrican = isPaystackRegion(countryCode);
     const country = COUNTRY_OPTIONS.find(c => c.code === countryCode);
     const regionConfig = regions?.find(r => r.countries.includes(countryCode));
     
@@ -178,7 +177,7 @@ export default function Settings() {
     );
   }
 
-  const isPaystackRegion = AFRICAN_COUNTRIES.includes(formData.countryCode || 'US');
+  const isPaystack = isPaystackRegion(formData.countryCode || 'US');
 
   return (
     <div className="p-6 md:p-8 max-w-4xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
@@ -326,23 +325,23 @@ export default function Settings() {
           <div className="p-4 rounded-lg bg-muted/50 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isPaystackRegion ? 'bg-teal-100 dark:bg-teal-900/30' : 'bg-indigo-100 dark:bg-indigo-900/30'}`}>
-                  <Landmark className={`h-6 w-6 ${isPaystackRegion ? 'text-teal-600' : 'text-indigo-600'}`} />
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isPaystack ? 'bg-teal-100 dark:bg-teal-900/30' : 'bg-indigo-100 dark:bg-indigo-900/30'}`}>
+                  <Landmark className={`h-6 w-6 ${isPaystack ? 'text-teal-600' : 'text-indigo-600'}`} />
                 </div>
                 <div>
                   <p className="font-semibold">
-                    Payment Provider: {isPaystackRegion ? 'Paystack' : 'Stripe'}
+                    Payment Provider: {isPaystack ? 'Paystack' : 'Stripe'}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    {isPaystackRegion 
+                    {isPaystack 
                       ? 'Optimized for African payments with local bank support'
                       : 'Global payment processing with card and bank support'
                     }
                   </p>
                 </div>
               </div>
-              <Badge className={isPaystackRegion ? 'bg-teal-600' : 'bg-indigo-600'}>
-                {isPaystackRegion ? 'Paystack' : 'Stripe'}
+              <Badge className={isPaystack ? 'bg-teal-600' : 'bg-indigo-600'}>
+                {isPaystack ? 'Paystack' : 'Stripe'}
               </Badge>
             </div>
 
@@ -437,19 +436,19 @@ export default function Settings() {
               <div>
                 <p className="font-medium">Virtual Account</p>
                 <p className="text-sm text-muted-foreground">
-                  {isPaystackRegion 
+                  {isPaystack 
                     ? 'Create a dedicated bank account number for your company'
                     : 'Connect your bank for direct deposits via Stripe Treasury'
                   }
                 </p>
               </div>
               <Button variant="outline" data-testid="button-create-virtual-account">
-                {isPaystackRegion ? 'Create Account' : 'Connect Bank'}
+                {isPaystack ? 'Create Account' : 'Connect Bank'}
               </Button>
             </div>
           </div>
           
-          {isPaystackRegion && (
+          {isPaystack && (
             <div className="text-sm text-muted-foreground">
               <p>Supported banks: Wema Bank, Access Bank, Providus Bank</p>
               <p>Receive instant notifications for deposits</p>

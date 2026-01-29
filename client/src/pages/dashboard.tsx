@@ -48,7 +48,8 @@ import {
   BadgeCheck,
 } from "lucide-react";
 import { Link } from "wouter";
-import type { Expense, Transaction, CompanyBalances, AIInsight } from "@shared/schema";
+import type { Expense, Transaction, CompanyBalances, AIInsight, CompanySettings } from "@shared/schema";
+import { isPaystackRegion } from "@/lib/constants";
 
 interface Bank {
   code: string;
@@ -80,12 +81,20 @@ export default function Dashboard() {
     queryKey: ["/api/insights"],
   });
 
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ["/api/settings"],
+  });
+
+  const countryCode = settings?.countryCode || "US";
+  const isPaystack = isPaystackRegion(countryCode);
+
   const { data: banks } = useQuery<Bank[]>({
-    queryKey: ["/api/payment/banks", "NG"],
+    queryKey: ["/api/payment/banks", countryCode],
     queryFn: async () => {
-      const res = await fetch("/api/payment/banks/NG");
+      const res = await fetch(`/api/payment/banks/${countryCode}`);
       return res.json();
     },
+    enabled: isPaystack,
   });
 
   const fundWalletMutation = useMutation({
@@ -148,7 +157,7 @@ export default function Dashboard() {
       const res = await apiRequest("POST", "/api/payment/validate-account", {
         accountNumber: sendMoneyData.recipient,
         bankCode: sendMoneyData.bankCode,
-        countryCode: "NG",
+        countryCode,
       });
       const data = await res.json();
       if (data.success) {
