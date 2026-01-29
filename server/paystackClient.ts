@@ -111,4 +111,84 @@ export const paystackClient = {
   async resolveAccount(accountNumber: string, bankCode: string) {
     return paystackRequest(`/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`);
   },
+
+  async createSubscriptionPlan(name: string, amount: number, interval: 'hourly' | 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'biannually' | 'annually', description?: string) {
+    const amountInKobo = Math.round(amount * 100);
+    return paystackRequest('/plan', 'POST', {
+      name,
+      amount: amountInKobo,
+      interval,
+      description,
+      currency: 'NGN',
+    });
+  },
+
+  async listPlans() {
+    return paystackRequest('/plan');
+  },
+
+  async getPlan(planId: string) {
+    return paystackRequest(`/plan/${planId}`);
+  },
+
+  async createSubscription(customerEmail: string, planCode: string, authorizationCode?: string) {
+    const payload: any = {
+      customer: customerEmail,
+      plan: planCode,
+    };
+    if (authorizationCode) {
+      payload.authorization = authorizationCode;
+    }
+    return paystackRequest('/subscription', 'POST', payload);
+  },
+
+  async enableSubscription(subscriptionCode: string, emailToken: string) {
+    return paystackRequest('/subscription/enable', 'POST', {
+      code: subscriptionCode,
+      token: emailToken,
+    });
+  },
+
+  async disableSubscription(subscriptionCode: string, emailToken: string) {
+    return paystackRequest('/subscription/disable', 'POST', {
+      code: subscriptionCode,
+      token: emailToken,
+    });
+  },
+
+  async listSubscriptions(perPage: number = 50, page: number = 1) {
+    return paystackRequest(`/subscription?perPage=${perPage}&page=${page}`);
+  },
+
+  async chargeAuthorization(email: string, amount: number, authorizationCode: string, reference?: string, metadata?: any) {
+    const amountInKobo = Math.round(amount * 100);
+    const payload: any = {
+      email,
+      amount: amountInKobo,
+      authorization_code: authorizationCode,
+      currency: 'NGN',
+      metadata,
+    };
+    if (reference) {
+      payload.reference = reference;
+    }
+    return paystackRequest('/transaction/charge_authorization', 'POST', payload);
+  },
+
+  async listAuthorizations(email: string) {
+    return paystackRequest(`/customer/${email}`);
+  },
+
+  async deactivateAuthorization(authorizationCode: string) {
+    return paystackRequest('/customer/deactivate_authorization', 'POST', {
+      authorization_code: authorizationCode,
+    });
+  },
+
+  async requestReauthorization(email: string, authorizationCode: string) {
+    return paystackRequest('/transaction/request_reauthorization', 'POST', {
+      email,
+      authorization_code: authorizationCode,
+    });
+  },
 };

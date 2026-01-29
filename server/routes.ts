@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { z } from "zod";
 import { paymentService, REGION_CONFIGS, getRegionConfig, getCurrencyForCountry } from "./paymentService";
 import { getStripePublishableKey } from "./stripeClient";
-import { getPaystackPublicKey } from "./paystackClient";
+import { getPaystackPublicKey, paystackClient } from "./paystackClient";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -1640,6 +1640,174 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error('Paystack callback error:', error);
       res.redirect('/dashboard?payment=failed');
+    }
+  });
+
+  // ==================== PAYSTACK AUTO-DEBIT & SUBSCRIPTIONS ====================
+  app.post("/api/paystack/plans", async (req, res) => {
+    try {
+      const { name, amount, interval, description } = req.body;
+      if (!name || !amount || !interval) {
+        return res.status(400).json({ error: "Name, amount, and interval are required" });
+      }
+      const result = await paystackClient.createSubscriptionPlan(name, amount, interval, description);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to create plan" });
+    }
+  });
+
+  app.get("/api/paystack/plans", async (req, res) => {
+    try {
+      const result = await paystackClient.listPlans();
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to list plans" });
+    }
+  });
+
+  app.post("/api/paystack/subscriptions", async (req, res) => {
+    try {
+      const { customerEmail, planCode, authorizationCode } = req.body;
+      if (!customerEmail || !planCode) {
+        return res.status(400).json({ error: "Customer email and plan code are required" });
+      }
+      const result = await paystackClient.createSubscription(customerEmail, planCode, authorizationCode);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to create subscription" });
+    }
+  });
+
+  app.get("/api/paystack/subscriptions", async (req, res) => {
+    try {
+      const result = await paystackClient.listSubscriptions();
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to list subscriptions" });
+    }
+  });
+
+  app.post("/api/paystack/subscriptions/enable", async (req, res) => {
+    try {
+      const { subscriptionCode, emailToken } = req.body;
+      if (!subscriptionCode || !emailToken) {
+        return res.status(400).json({ error: "Subscription code and email token are required" });
+      }
+      const result = await paystackClient.enableSubscription(subscriptionCode, emailToken);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to enable subscription" });
+    }
+  });
+
+  app.post("/api/paystack/subscriptions/disable", async (req, res) => {
+    try {
+      const { subscriptionCode, emailToken } = req.body;
+      if (!subscriptionCode || !emailToken) {
+        return res.status(400).json({ error: "Subscription code and email token are required" });
+      }
+      const result = await paystackClient.disableSubscription(subscriptionCode, emailToken);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to disable subscription" });
+    }
+  });
+
+  app.post("/api/paystack/charge-authorization", async (req, res) => {
+    try {
+      const { email, amount, authorizationCode, reference, metadata } = req.body;
+      if (!email || !amount || !authorizationCode) {
+        return res.status(400).json({ error: "Email, amount, and authorization code are required" });
+      }
+      const result = await paystackClient.chargeAuthorization(email, amount, authorizationCode, reference, metadata);
+      
+      if (result.status && result.data?.status === 'success') {
+        const amountInNaira = result.data.amount / 100;
+        await storage.createTransaction({
+          type: 'Payout',
+          amount: amountInNaira,
+          fee: 0,
+          status: 'Completed',
+          description: metadata?.description || 'Auto-debit charge',
+          currency: 'NGN',
+          date: new Date().toISOString().split('T')[0],
+        });
+      }
+      
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to charge authorization" });
+    }
+  });
+
+  app.get("/api/paystack/authorizations/:email", async (req, res) => {
+    try {
+      const result = await paystackClient.listAuthorizations(req.params.email);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to list authorizations" });
+    }
+  });
+
+  app.post("/api/paystack/deactivate-authorization", async (req, res) => {
+    try {
+      const { authorizationCode } = req.body;
+      if (!authorizationCode) {
+        return res.status(400).json({ error: "Authorization code is required" });
+      }
+      const result = await paystackClient.deactivateAuthorization(authorizationCode);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to deactivate authorization" });
+    }
+  });
+
+  // ==================== ANALYTICS API ====================
+  app.get("/api/analytics/summary", async (req, res) => {
+    try {
+      const expenses = await storage.getExpenses();
+      const transactions = await storage.getTransactions();
+      const budgets = await storage.getBudgets();
+      
+      const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+      const totalIncome = transactions
+        .filter(t => t.type === 'Deposit' || t.type === 'Funding' || t.type === 'Refund')
+        .reduce((sum, t) => sum + t.amount, 0);
+      const totalOutflow = transactions
+        .filter(t => t.type === 'Payout' || t.type === 'Bill')
+        .reduce((sum, t) => sum + t.amount, 0);
+      
+      const categoryBreakdown: Record<string, number> = {};
+      expenses.forEach(e => {
+        categoryBreakdown[e.category] = (categoryBreakdown[e.category] || 0) + e.amount;
+      });
+      
+      const departmentBreakdown: Record<string, number> = {};
+      expenses.forEach(e => {
+        departmentBreakdown[e.department || 'Other'] = (departmentBreakdown[e.department || 'Other'] || 0) + e.amount;
+      });
+      
+      const budgetUtilization = budgets.map(b => ({
+        name: b.name,
+        budget: b.limit,
+        spent: b.spent,
+        percentage: Math.round((b.spent / b.limit) * 100),
+      }));
+      
+      res.json({
+        totalExpenses,
+        totalIncome,
+        totalOutflow,
+        netCashFlow: totalIncome - totalOutflow,
+        pendingExpenses: expenses.filter(e => e.status === 'PENDING').length,
+        approvedExpenses: expenses.filter(e => e.status === 'APPROVED' || e.status === 'PAID').length,
+        categoryBreakdown,
+        departmentBreakdown,
+        budgetUtilization,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch analytics" });
     }
   });
 
