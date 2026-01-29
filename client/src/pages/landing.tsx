@@ -397,27 +397,27 @@ export default function LandingPage() {
             <div>
               <div className="font-semibold mb-4">Product</div>
               <ul className="space-y-2 text-sm text-muted-foreground">
-                <li><a href="#" className="hover:text-foreground transition-colors">Virtual Cards</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Expense Management</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Global Payments</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Analytics</a></li>
+                <li><a href="#features" className="hover:text-foreground transition-colors">Virtual Cards</a></li>
+                <li><a href="#features" className="hover:text-foreground transition-colors">Expense Management</a></li>
+                <li><a href="#features" className="hover:text-foreground transition-colors">Global Payments</a></li>
+                <li><a href="#features" className="hover:text-foreground transition-colors">Analytics</a></li>
               </ul>
             </div>
             <div>
               <div className="font-semibold mb-4">Company</div>
               <ul className="space-y-2 text-sm text-muted-foreground">
-                <li><a href="#" className="hover:text-foreground transition-colors">About</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Blog</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Careers</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Contact</a></li>
+                <li><a href="#testimonials" className="hover:text-foreground transition-colors">About</a></li>
+                <li><a href="#testimonials" className="hover:text-foreground transition-colors">Blog</a></li>
+                <li><a href="#pricing" className="hover:text-foreground transition-colors">Pricing</a></li>
+                <li><Link href="/signup"><span className="hover:text-foreground transition-colors cursor-pointer">Get Started</span></Link></li>
               </ul>
             </div>
             <div>
               <div className="font-semibold mb-4">Legal</div>
               <ul className="space-y-2 text-sm text-muted-foreground">
-                <li><a href="#" className="hover:text-foreground transition-colors">Privacy Policy</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Terms of Service</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Cookie Policy</a></li>
+                <li><Link href="/privacy"><span className="hover:text-foreground transition-colors cursor-pointer">Privacy Policy</span></Link></li>
+                <li><Link href="/terms"><span className="hover:text-foreground transition-colors cursor-pointer">Terms of Service</span></Link></li>
+                <li><Link href="/privacy"><span className="hover:text-foreground transition-colors cursor-pointer">Cookie Policy</span></Link></li>
               </ul>
             </div>
           </div>

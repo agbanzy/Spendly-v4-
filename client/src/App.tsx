@@ -27,6 +27,9 @@ import Reports from "@/pages/reports";
 import Payroll from "@/pages/payroll";
 import Invoices from "@/pages/invoices";
 import Vendors from "@/pages/vendors";
+import ForgotPassword from "@/pages/forgot-password";
+import Terms from "@/pages/terms";
+import Privacy from "@/pages/privacy";
 
 function AuthLoading() {
   return (
@@ -123,7 +126,7 @@ function AppContent() {
   const [location] = useLocation();
   const { isAuthenticated, isLoading } = useAuth();
   
-  const publicRoutes = ["/", "/login", "/signup"];
+  const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/terms", "/privacy"];
   const isPublicRoute = publicRoutes.includes(location);
 
   if (isLoading) {
@@ -136,6 +139,9 @@ function AppContent() {
         <Route path="/">{() => isAuthenticated ? <Redirect to="/dashboard" /> : <LandingPage />}</Route>
         <Route path="/login">{() => <PublicRoute component={LoginPage} />}</Route>
         <Route path="/signup">{() => <PublicRoute component={SignupPage} />}</Route>
+        <Route path="/forgot-password">{() => <PublicRoute component={ForgotPassword} />}</Route>
+        <Route path="/terms" component={Terms} />
+        <Route path="/privacy" component={Privacy} />
       </Switch>
     );
   }
