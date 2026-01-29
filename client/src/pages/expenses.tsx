@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Dialog,
   DialogContent,
@@ -44,11 +46,18 @@ import {
   Upload,
   Eye,
   DollarSign,
+  Paperclip,
+  Users,
+  Image,
+  FileText,
+  X,
+  CreditCard,
+  FileQuestion,
 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Expense } from "@shared/schema";
+import type { Expense, TeamMember } from "@shared/schema";
 
 const categories = [
   "Software",
@@ -71,12 +80,19 @@ export default function Expenses() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
+  const [selectedReviewers, setSelectedReviewers] = useState<string[]>([]);
+  const [expenseType, setExpenseType] = useState<'spent' | 'request'>('request');
   const [isUploading, setIsUploading] = useState(false);
   const { toast } = useToast();
 
   const { data: expenses, isLoading } = useQuery<Expense[]>({
     queryKey: ["/api/expenses"],
+  });
+
+  const { data: teamMembers } = useQuery<TeamMember[]>({
+    queryKey: ["/api/team"],
   });
 
   const filteredExpenses = useMemo(() => {
@@ -87,9 +103,10 @@ export default function Expenses() {
         expense.note?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === "all" || expense.status === statusFilter;
       const matchesCategory = categoryFilter === "all" || expense.category === categoryFilter;
-      return matchesSearch && matchesStatus && matchesCategory;
+      const matchesType = typeFilter === "all" || expense.expenseType === typeFilter;
+      return matchesSearch && matchesStatus && matchesCategory && matchesType;
     });
-  }, [expenses, searchQuery, statusFilter, categoryFilter]);
+  }, [expenses, searchQuery, statusFilter, categoryFilter, typeFilter]);
 
   const { register, handleSubmit, reset, setValue, watch } = useForm({
     defaultValues: {
@@ -118,6 +135,9 @@ export default function Expenses() {
       toast({ title: "Expense created successfully" });
       setOpen(false);
       reset();
+      setExpenseType('request');
+      setSelectedReviewers([]);
+      setAttachmentFiles([]);
     },
     onError: () => {
       toast({ title: "Failed to create expense", variant: "destructive" });
@@ -193,7 +213,7 @@ export default function Expenses() {
     },
   });
 
-  const uploadReceipt = async (file: File): Promise<string | null> => {
+  const uploadFile = async (file: File): Promise<string | null> => {
     const formData = new FormData();
     formData.append('receipt', file);
     
@@ -213,25 +233,49 @@ export default function Expenses() {
     }
   };
 
+  const handleAttachmentAdd = (e: { target: HTMLInputElement }) => {
+    const files = e.target.files;
+    if (files) {
+      const newFiles = Array.from(files);
+      setAttachmentFiles(prev => [...prev, ...newFiles]);
+    }
+    e.target.value = '';
+  };
+
+  const handleAttachmentRemove = (index: number) => {
+    setAttachmentFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const toggleReviewer = (memberId: string) => {
+    setSelectedReviewers(prev => 
+      prev.includes(memberId) 
+        ? prev.filter(id => id !== memberId)
+        : [...prev, memberId]
+    );
+  };
+
   const onSubmit = async (data: any) => {
     setIsUploading(true);
     try {
-      let receiptUrl = undefined;
-      if (receiptFile) {
-        receiptUrl = await uploadReceipt(receiptFile);
-        if (!receiptUrl) {
-          toast({ title: "Failed to upload receipt", variant: "destructive" });
-          setIsUploading(false);
-          return;
+      const attachmentUrls: string[] = [];
+      for (const file of attachmentFiles) {
+        const url = await uploadFile(file);
+        if (url) {
+          attachmentUrls.push(url);
         }
       }
+      
+      const receiptUrl = attachmentUrls.length > 0 ? attachmentUrls[0] : undefined;
       
       createExpense.mutate({
         ...data,
         amount: parseFloat(data.amount),
         receiptUrl,
+        expenseType,
+        attachments: attachmentUrls,
+        taggedReviewers: selectedReviewers,
       });
-      setReceiptFile(null);
+      setAttachmentFiles([]);
     } finally {
       setIsUploading(false);
     }
@@ -280,11 +324,11 @@ export default function Expenses() {
 
   const exportToCSV = () => {
     if (!filteredExpenses.length) return;
-    const headers = ["Merchant", "Amount", "Currency", "Category", "Date", "Status", "User", "Note"];
+    const headers = ["Merchant", "Amount", "Currency", "Category", "Date", "Status", "Type", "User", "Note"];
     const csvContent = [
       headers.join(","),
       ...filteredExpenses.map(e => 
-        [e.merchant, e.amount, e.currency, e.category, e.date, e.status, e.user, e.note || ""].map(escapeCSVField).join(",")
+        [e.merchant, e.amount, e.currency, e.category, e.date, e.status, e.expenseType || 'request', e.user, e.note || ""].map(escapeCSVField).join(",")
       )
     ].join("\n");
     
@@ -328,6 +372,24 @@ export default function Expenses() {
     }
   };
 
+  const getTypeIcon = (type: string | undefined) => {
+    if (type === 'spent') {
+      return <CreditCard className="h-3 w-3" />;
+    }
+    return <FileQuestion className="h-3 w-3" />;
+  };
+
+  const getTypeColor = (type: string | undefined) => {
+    if (type === 'spent') {
+      return "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400";
+    }
+    return "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400";
+  };
+
+  const getMemberById = (id: string) => {
+    return teamMembers?.find(m => m.id === id);
+  };
+
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
       {/* Header */}
@@ -347,11 +409,54 @@ export default function Expenses() {
               Add Expense
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Add New Expense</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+              {/* Expense Type Selection */}
+              <div className="space-y-2">
+                <Label>Expense Type</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExpenseType('spent')}
+                    className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                      expenseType === 'spent' 
+                        ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' 
+                        : 'border-border hover:border-muted-foreground'
+                    }`}
+                    data-testid="button-type-spent"
+                  >
+                    <CreditCard className={`h-5 w-5 ${expenseType === 'spent' ? 'text-indigo-600' : 'text-muted-foreground'}`} />
+                    <span className={`text-sm font-medium ${expenseType === 'spent' ? 'text-indigo-700 dark:text-indigo-400' : ''}`}>
+                      Already Spent
+                    </span>
+                    <span className="text-xs text-muted-foreground text-center">
+                      Reimbursement request
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExpenseType('request')}
+                    className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                      expenseType === 'request' 
+                        ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20' 
+                        : 'border-border hover:border-muted-foreground'
+                    }`}
+                    data-testid="button-type-request"
+                  >
+                    <FileQuestion className={`h-5 w-5 ${expenseType === 'request' ? 'text-purple-600' : 'text-muted-foreground'}`} />
+                    <span className={`text-sm font-medium ${expenseType === 'request' ? 'text-purple-700 dark:text-purple-400' : ''}`}>
+                      Fresh Request
+                    </span>
+                    <span className="text-xs text-muted-foreground text-center">
+                      Needs approval first
+                    </span>
+                  </button>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="merchant">Merchant</Label>
                 <Input
@@ -399,28 +504,96 @@ export default function Expenses() {
                   data-testid="input-note"
                 />
               </div>
+
+              {/* Attachments Section */}
               <div className="space-y-2">
-                <Label htmlFor="receipt">Receipt (Optional)</Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="receipt"
-                    type="file"
-                    accept="image/*,application/pdf"
-                    onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
-                    className="flex-1"
-                    data-testid="input-receipt"
-                  />
-                  {receiptFile && (
-                    <Badge variant="secondary" className="text-xs">
-                      <Upload className="h-3 w-3 mr-1" />
-                      {receiptFile.name.substring(0, 15)}...
-                    </Badge>
+                <Label className="flex items-center gap-2">
+                  <Paperclip className="h-4 w-4" />
+                  Attachments
+                </Label>
+                <div className="border rounded-lg p-3 space-y-3">
+                  {attachmentFiles.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {attachmentFiles.map((file, index) => (
+                        <div key={index} className="flex items-center gap-2 bg-muted rounded-md px-2 py-1">
+                          {file.type.startsWith('image/') ? (
+                            <Image className="h-3 w-3 text-blue-500" />
+                          ) : (
+                            <FileText className="h-3 w-3 text-amber-500" />
+                          )}
+                          <span className="text-xs truncate max-w-[120px]">{file.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleAttachmentRemove(index)}
+                            className="text-muted-foreground hover:text-destructive"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      multiple
+                      onChange={handleAttachmentAdd}
+                      className="flex-1"
+                      data-testid="input-attachments"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Upload receipts, invoices, or supporting documents (JPEG, PNG, PDF)
+                  </p>
+                </div>
+              </div>
+
+              {/* Tag Reviewers Section */}
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Tag Reviewers for Re-evaluation
+                </Label>
+                <div className="border rounded-lg p-3 max-h-40 overflow-y-auto">
+                  {teamMembers && teamMembers.length > 0 ? (
+                    <div className="space-y-2">
+                      {teamMembers.filter(m => m.status === 'Active').map((member) => (
+                        <div
+                          key={member.id}
+                          className="flex items-center gap-3 p-2 rounded-md hover:bg-muted cursor-pointer"
+                          onClick={() => toggleReviewer(member.id)}
+                          data-testid={`reviewer-${member.id}`}
+                        >
+                          <Checkbox
+                            checked={selectedReviewers.includes(member.id)}
+                            onCheckedChange={() => toggleReviewer(member.id)}
+                          />
+                          <Avatar className="h-7 w-7">
+                            <AvatarFallback className="text-xs bg-primary/10">
+                              {member.name.split(' ').map(n => n[0]).join('').toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{member.name}</p>
+                            <p className="text-xs text-muted-foreground">{member.role}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-2">
+                      No team members available
+                    </p>
                   )}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Accepted formats: JPEG, PNG, GIF, PDF (max 5MB)
-                </p>
+                {selectedReviewers.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {selectedReviewers.length} reviewer(s) selected
+                  </p>
+                )}
               </div>
+
               <Button
                 type="submit"
                 className="w-full"
@@ -435,7 +608,7 @@ export default function Expenses() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card className="glass card-hover">
           <CardContent className="p-4">
             <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-1">
@@ -466,11 +639,21 @@ export default function Expenses() {
         </Card>
         <Card className="glass card-hover">
           <CardContent className="p-4">
-            <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-1">
-              This Month
+            <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest mb-1">
+              Reimbursements
             </p>
-            <p className="text-2xl font-black">
-              ${expenses?.reduce((sum, e) => sum + e.amount, 0).toLocaleString() || 0}
+            <p className="text-2xl font-black text-indigo-600">
+              {expenses?.filter((e) => e.expenseType === "spent").length || 0}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="glass card-hover">
+          <CardContent className="p-4">
+            <p className="text-xs font-bold text-purple-600 dark:text-purple-400 uppercase tracking-widest mb-1">
+              Requests
+            </p>
+            <p className="text-2xl font-black text-purple-600">
+              {expenses?.filter((e) => e.expenseType === "request" || !e.expenseType).length || 0}
             </p>
           </CardContent>
         </Card>
@@ -479,8 +662,8 @@ export default function Expenses() {
       {/* Search and Filters */}
       <Card>
         <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="relative flex-1">
+          <div className="flex flex-col md:flex-row gap-4 flex-wrap">
+            <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search expenses..."
@@ -490,6 +673,16 @@ export default function Expenses() {
                 data-testid="input-search-expenses"
               />
             </div>
+            <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <SelectTrigger className="w-full md:w-40" data-testid="select-type-filter">
+                <SelectValue placeholder="Type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Types</SelectItem>
+                <SelectItem value="spent">Reimbursement</SelectItem>
+                <SelectItem value="request">Request</SelectItem>
+              </SelectContent>
+            </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-full md:w-40" data-testid="select-status-filter">
                 <Filter className="h-4 w-4 mr-2" />
@@ -553,23 +746,39 @@ export default function Expenses() {
                   className="flex items-center justify-between p-4 hover:bg-muted/50 transition-colors"
                   data-testid={`expense-row-${expense.id}`}
                 >
-                  <div className="flex items-center gap-4 cursor-pointer" onClick={() => handleViewDetail(expense)}>
-                    <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-primary">
+                  <div className="flex items-center gap-4 cursor-pointer flex-1 min-w-0" onClick={() => handleViewDetail(expense)}>
+                    <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-primary shrink-0">
                       {expense.merchant[0]?.toUpperCase()}
                     </div>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="text-sm font-bold truncate">{expense.merchant}</p>
-                      <div className="flex items-center gap-2 mt-1">
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <Badge variant="secondary" className={`text-xs ${getTypeColor(expense.expenseType)}`}>
+                          {getTypeIcon(expense.expenseType)}
+                          <span className="ml-1">{expense.expenseType === 'spent' ? 'Reimbursement' : 'Request'}</span>
+                        </Badge>
                         <Badge variant="outline" className="text-xs">
                           {expense.category}
                         </Badge>
                         <span className="text-xs text-muted-foreground">
                           {new Date(expense.date).toLocaleDateString()}
                         </span>
+                        {expense.attachments && expense.attachments.length > 0 && (
+                          <Badge variant="outline" className="text-xs">
+                            <Paperclip className="h-3 w-3 mr-1" />
+                            {expense.attachments.length}
+                          </Badge>
+                        )}
+                        {expense.taggedReviewers && expense.taggedReviewers.length > 0 && (
+                          <Badge variant="outline" className="text-xs">
+                            <Users className="h-3 w-3 mr-1" />
+                            {expense.taggedReviewers.length}
+                          </Badge>
+                        )}
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 shrink-0">
                     <div className="text-right">
                       <p className="text-base font-bold">
                         ${expense.amount.toLocaleString()}
@@ -612,7 +821,7 @@ export default function Expenses() {
                           <Edit className="h-4 w-4 mr-2" />
                           Edit
                         </DropdownMenuItem>
-                        <DropdownMenuItem className="text-red-600" onClick={() => handleDelete(expense)}>
+                        <DropdownMenuItem onClick={() => handleDelete(expense)} className="text-red-600">
                           <Trash2 className="h-4 w-4 mr-2" />
                           Delete
                         </DropdownMenuItem>
@@ -642,7 +851,7 @@ export default function Expenses() {
 
       {/* Expense Detail Dialog */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Expense Details</DialogTitle>
           </DialogHeader>
@@ -652,12 +861,18 @@ export default function Expenses() {
                 <div className="w-16 h-16 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-primary text-2xl">
                   {selectedExpense.merchant[0]?.toUpperCase()}
                 </div>
-                <div>
+                <div className="space-y-1">
                   <h3 className="font-bold text-lg">{selectedExpense.merchant}</h3>
-                  <Badge className={getStatusColor(selectedExpense.status)}>
-                    {getStatusIcon(selectedExpense.status)}
-                    <span className="ml-1">{selectedExpense.status}</span>
-                  </Badge>
+                  <div className="flex gap-2">
+                    <Badge className={getStatusColor(selectedExpense.status)}>
+                      {getStatusIcon(selectedExpense.status)}
+                      <span className="ml-1">{selectedExpense.status}</span>
+                    </Badge>
+                    <Badge className={getTypeColor(selectedExpense.expenseType)}>
+                      {getTypeIcon(selectedExpense.expenseType)}
+                      <span className="ml-1">{selectedExpense.expenseType === 'spent' ? 'Reimbursement' : 'Request'}</span>
+                    </Badge>
+                  </div>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -692,6 +907,58 @@ export default function Expenses() {
                   <p className="text-sm mt-1">{selectedExpense.note}</p>
                 </div>
               )}
+
+              {/* Attachments Display */}
+              {selectedExpense.attachments && selectedExpense.attachments.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase font-bold mb-2">
+                    Attachments ({selectedExpense.attachments.length})
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {selectedExpense.attachments.map((url, index) => (
+                      <a
+                        key={index}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="border rounded-lg p-2 flex items-center gap-2 hover:bg-muted transition-colors"
+                      >
+                        {url.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+                          <Image className="h-4 w-4 text-blue-500" />
+                        ) : (
+                          <FileText className="h-4 w-4 text-amber-500" />
+                        )}
+                        <span className="text-xs truncate">Attachment {index + 1}</span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Tagged Reviewers Display */}
+              {selectedExpense.taggedReviewers && selectedExpense.taggedReviewers.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase font-bold mb-2">
+                    Tagged Reviewers ({selectedExpense.taggedReviewers.length})
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedExpense.taggedReviewers.map((reviewerId) => {
+                      const member = getMemberById(reviewerId);
+                      return (
+                        <div key={reviewerId} className="flex items-center gap-2 bg-muted rounded-full px-3 py-1">
+                          <Avatar className="h-5 w-5">
+                            <AvatarFallback className="text-xs">
+                              {member?.name.split(' ').map(n => n[0]).join('').toUpperCase() || '?'}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="text-xs font-medium">{member?.name || 'Unknown'}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {selectedExpense.receiptUrl && (
                 <div>
                   <p className="text-xs text-muted-foreground uppercase font-bold mb-2">Receipt</p>
