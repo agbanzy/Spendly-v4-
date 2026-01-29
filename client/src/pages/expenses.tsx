@@ -117,7 +117,7 @@ export default function Expenses() {
   };
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500">
+    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -202,7 +202,7 @@ export default function Expenses() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card>
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-1">
               Total
@@ -210,7 +210,7 @@ export default function Expenses() {
             <p className="text-2xl font-black">{expenses?.length || 0}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-1">
               Pending
@@ -220,7 +220,7 @@ export default function Expenses() {
             </p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-1">
               Approved
@@ -230,7 +230,7 @@ export default function Expenses() {
             </p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-1">
               This Month

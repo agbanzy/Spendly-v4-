@@ -129,7 +129,7 @@ export default function BudgetPage() {
   const overBudget = budgets?.filter((b) => b.spent > b.limit).length || 0;
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500">
+    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black tracking-tight" data-testid="text-budget-title">Budget</h1>
@@ -141,7 +141,7 @@ export default function BudgetPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20">
+        <Card className="glass card-hover bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Total Budget</p>

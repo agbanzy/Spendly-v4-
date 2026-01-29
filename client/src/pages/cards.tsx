@@ -157,7 +157,7 @@ export default function Cards() {
   const activeCards = cards?.filter((c) => c.status === "Active").length || 0;
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500">
+    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black tracking-tight" data-testid="text-cards-title">Virtual Cards</h1>
@@ -169,33 +169,42 @@ export default function Cards() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
+        <Card className="glass card-hover">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Total Balance</p>
-              <CreditCard className="h-4 w-4 text-primary" />
+              <div className="p-2 bg-gradient-to-br from-primary/20 to-primary/5 rounded-xl">
+                <CreditCard className="h-4 w-4 text-primary" />
+              </div>
             </div>
             {isLoading ? <Skeleton className="h-8 w-32" /> : <p className="text-2xl font-black" data-testid="text-total-card-balance">${totalBalance.toLocaleString()}</p>}
+            <p className="text-xs text-muted-foreground mt-1">Across all cards</p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="glass card-hover">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Active Cards</p>
-              <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+              <div className="p-2 bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 rounded-xl">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+              </div>
             </div>
-            {isLoading ? <Skeleton className="h-8 w-16" /> : <p className="text-2xl font-black">{activeCards}</p>}
+            {isLoading ? <Skeleton className="h-8 w-16" /> : <p className="text-2xl font-black text-emerald-600">{activeCards}</p>}
+            <p className="text-xs text-muted-foreground mt-1">Ready to use</p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="glass card-hover">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Total Cards</p>
-              <CreditCard className="h-4 w-4 text-muted-foreground" />
+              <div className="p-2 bg-gradient-to-br from-slate-500/20 to-slate-500/5 rounded-xl">
+                <CreditCard className="h-4 w-4 text-muted-foreground" />
+              </div>
             </div>
             {isLoading ? <Skeleton className="h-8 w-16" /> : <p className="text-2xl font-black">{cards?.length || 0}</p>}
+            <p className="text-xs text-muted-foreground mt-1">Virtual cards issued</p>
           </CardContent>
         </Card>
       </div>

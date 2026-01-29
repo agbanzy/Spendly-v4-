@@ -181,7 +181,7 @@ export default function Settings() {
   const isPaystackRegion = AFRICAN_COUNTRIES.includes(formData.countryCode || 'US');
 
   return (
-    <div className="p-6 md:p-8 max-w-4xl mx-auto space-y-6 animate-in fade-in duration-500">
+    <div className="p-6 md:p-8 max-w-4xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
       <div>
         <h1 className="text-3xl font-black tracking-tight" data-testid="text-settings-title">
           Settings

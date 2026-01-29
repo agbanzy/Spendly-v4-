@@ -182,10 +182,10 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold" data-testid="text-reports-title">Reports</h1>
+          <h1 className="text-3xl font-black tracking-tight" data-testid="text-reports-title">Reports</h1>
           <p className="text-muted-foreground">Generate and download financial reports</p>
         </div>
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
@@ -276,7 +276,7 @@ export default function ReportsPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
-        <Card className="hover-elevate">
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900 text-indigo-600">
@@ -289,7 +289,7 @@ export default function ReportsPage() {
             </div>
           </CardContent>
         </Card>
-        <Card className="hover-elevate">
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900 text-emerald-600">
@@ -302,7 +302,7 @@ export default function ReportsPage() {
             </div>
           </CardContent>
         </Card>
-        <Card className="hover-elevate">
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900 text-amber-600">
@@ -315,7 +315,7 @@ export default function ReportsPage() {
             </div>
           </CardContent>
         </Card>
-        <Card className="hover-elevate">
+        <Card className="glass card-hover">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-cyan-100 dark:bg-cyan-900 text-cyan-600">

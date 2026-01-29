@@ -86,7 +86,7 @@ export default function Transactions() {
   const totalOutflow = transactions?.filter(tx => tx.type !== "Deposit" && tx.type !== "Funding").reduce((sum, tx) => sum + tx.amount, 0) || 0;
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500">
+    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black tracking-tight" data-testid="text-transactions-title">Transactions</h1>
@@ -103,30 +103,40 @@ export default function Transactions() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
+        <Card className="glass card-hover">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Total Transactions</p>
+              <div className="p-2 bg-gradient-to-br from-primary/20 to-primary/5 rounded-xl">
+                <Wallet className="h-4 w-4 text-primary" />
+              </div>
             </div>
             {isLoading ? <Skeleton className="h-8 w-24" /> : <p className="text-2xl font-black">{transactions?.length || 0}</p>}
+            <p className="text-xs text-muted-foreground mt-1">All time</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="glass card-hover">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Total Inflow</p>
-              <ArrowDownRight className="h-4 w-4 text-emerald-600" />
+              <div className="p-2 bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 rounded-xl">
+                <ArrowDownRight className="h-4 w-4 text-emerald-600" />
+              </div>
             </div>
             {isLoading ? <Skeleton className="h-8 w-24" /> : <p className="text-2xl font-black text-emerald-600">+${totalInflow.toLocaleString()}</p>}
+            <p className="text-xs text-muted-foreground mt-1">Money received</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="glass card-hover">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Total Outflow</p>
-              <ArrowUpRight className="h-4 w-4 text-red-600" />
+              <div className="p-2 bg-gradient-to-br from-red-500/20 to-red-500/5 rounded-xl">
+                <ArrowUpRight className="h-4 w-4 text-red-600" />
+              </div>
             </div>
             {isLoading ? <Skeleton className="h-8 w-24" /> : <p className="text-2xl font-black text-red-600">-${totalOutflow.toLocaleString()}</p>}
+            <p className="text-xs text-muted-foreground mt-1">Money spent</p>
           </CardContent>
         </Card>
       </div>

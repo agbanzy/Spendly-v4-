@@ -112,10 +112,10 @@ export default function AnalyticsPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold" data-testid="text-analytics-title">Analytics</h1>
+          <h1 className="text-3xl font-black tracking-tight" data-testid="text-analytics-title">Analytics</h1>
           <p className="text-muted-foreground">Track spending patterns and financial insights</p>
         </div>
         <div className="flex items-center gap-2">
@@ -140,7 +140,7 @@ export default function AnalyticsPage() {
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {statsCards.map((stat, index) => (
-          <Card key={index} className="hover-elevate" data-testid={`card-stat-${index}`}>
+          <Card key={index} className="glass card-hover" data-testid={`card-stat-${index}`}>
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div className={`p-2 rounded-lg bg-muted ${stat.color}`}>
