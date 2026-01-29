@@ -5,12 +5,44 @@ import { z } from "zod";
 import { paymentService, REGION_CONFIGS, getRegionConfig, getCurrencyForCountry } from "./paymentService";
 import { getStripePublishableKey } from "./stripeClient";
 import { getPaystackPublicKey } from "./paystackClient";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+
+const uploadDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const receiptStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'receipt-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage: receiptStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only JPEG, PNG, GIF, and PDF are allowed.'));
+    }
+  }
+});
 
 const expenseSchema = z.object({
   merchant: z.string().min(1),
   amount: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseFloat(val) : val),
   category: z.string().min(1),
   note: z.string().optional(),
+  receiptUrl: z.string().optional(),
 });
 
 const transactionSchema = z.object({
@@ -252,13 +284,27 @@ export async function registerRoutes(
     }
   });
 
+  app.use('/uploads', (await import('express')).default.static(uploadDir));
+
+  app.post("/api/upload/receipt", upload.single('receipt'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+      const fileUrl = `/uploads/${req.file.filename}`;
+      res.json({ success: true, url: fileUrl });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to upload file" });
+    }
+  });
+
   app.post("/api/expenses", async (req, res) => {
     try {
       const result = expenseSchema.safeParse(req.body);
       if (!result.success) {
         return res.status(400).json({ error: "Invalid expense data", details: result.error.issues });
       }
-      const { merchant, amount, category, note } = result.data;
+      const { merchant, amount, category, note, receiptUrl } = result.data;
 
       const expense = await storage.createExpense({
         merchant,
@@ -271,6 +317,7 @@ export async function registerRoutes(
         userId: '1',
         department: 'General',
         note,
+        receiptUrl,
       });
       
       res.status(201).json(expense);
