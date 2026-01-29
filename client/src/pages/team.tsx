@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -17,6 +19,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -44,8 +56,12 @@ import {
   Loader2,
   UserX,
   UserCheck,
+  Building2,
+  Palette,
+  DollarSign,
+  FolderPlus,
 } from "lucide-react";
-import type { TeamMember } from "@shared/schema";
+import type { TeamMember, Department } from "@shared/schema";
 
 const roleColors: Record<string, string> = {
   OWNER: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
@@ -56,60 +72,95 @@ const roleColors: Record<string, string> = {
   VIEWER: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
 };
 
+const departmentColors = [
+  { name: "Indigo", value: "#6366f1" },
+  { name: "Blue", value: "#3b82f6" },
+  { name: "Emerald", value: "#10b981" },
+  { name: "Amber", value: "#f59e0b" },
+  { name: "Rose", value: "#f43f5e" },
+  { name: "Purple", value: "#a855f7" },
+  { name: "Cyan", value: "#06b6d4" },
+  { name: "Orange", value: "#f97316" },
+];
+
 export default function Team() {
   const { toast } = useToast();
-  const [isOpen, setIsOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("members");
+  const [isMemberOpen, setIsMemberOpen] = useState(false);
+  const [isDeptOpen, setIsDeptOpen] = useState(false);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: "member" | "department"; id: string; name: string } | null>(null);
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
+  const [editingDept, setEditingDept] = useState<Department | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [formData, setFormData] = useState({
+  const [departmentFilter, setDepartmentFilter] = useState("all");
+
+  const [memberForm, setMemberForm] = useState({
     name: "",
     email: "",
     role: "EMPLOYEE",
-    department: "Engineering",
+    department: "",
   });
 
-  const { data: team, isLoading } = useQuery<TeamMember[]>({
+  const [deptForm, setDeptForm] = useState({
+    name: "",
+    description: "",
+    budget: "",
+    color: "#6366f1",
+    headId: "",
+  });
+
+  const { data: team, isLoading: teamLoading } = useQuery<TeamMember[]>({
     queryKey: ["/api/team"],
   });
 
-  const createMutation = useMutation({
-    mutationFn: async (data: typeof formData) => {
+  const { data: departments, isLoading: deptsLoading } = useQuery<Department[]>({
+    queryKey: ["/api/departments"],
+  });
+
+  const createMemberMutation = useMutation({
+    mutationFn: async (data: typeof memberForm) => {
       return apiRequest("POST", "/api/team", data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/team"] });
-      toast({ title: "Team member invited successfully" });
-      setIsOpen(false);
-      resetForm();
+      queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
+      toast({ title: "Team member added successfully" });
+      setIsMemberOpen(false);
+      resetMemberForm();
     },
     onError: () => {
-      toast({ title: "Failed to invite team member", variant: "destructive" });
+      toast({ title: "Failed to add team member", variant: "destructive" });
     },
   });
 
-  const updateMutation = useMutation({
+  const updateMemberMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
       return apiRequest("PATCH", `/api/team/${id}`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/team"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
       toast({ title: "Team member updated successfully" });
-      setIsOpen(false);
+      setIsMemberOpen(false);
       setEditingMember(null);
-      resetForm();
+      resetMemberForm();
     },
     onError: () => {
       toast({ title: "Failed to update team member", variant: "destructive" });
     },
   });
 
-  const deleteMutation = useMutation({
+  const deleteMemberMutation = useMutation({
     mutationFn: async (id: string) => {
       return apiRequest("DELETE", `/api/team/${id}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/team"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
       toast({ title: "Team member removed successfully" });
+      setIsDeleteOpen(false);
+      setDeleteTarget(null);
     },
     onError: () => {
       toast({ title: "Failed to remove team member", variant: "destructive" });
@@ -129,48 +180,152 @@ export default function Team() {
     },
   });
 
-  const resetForm = () => {
-    setFormData({ name: "", email: "", role: "EMPLOYEE", department: "Engineering" });
+  const createDeptMutation = useMutation({
+    mutationFn: async (data: typeof deptForm) => {
+      return apiRequest("POST", "/api/departments", {
+        ...data,
+        budget: data.budget ? parseFloat(data.budget) : null,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
+      toast({ title: "Department created successfully" });
+      setIsDeptOpen(false);
+      resetDeptForm();
+    },
+    onError: () => {
+      toast({ title: "Failed to create department", variant: "destructive" });
+    },
+  });
+
+  const updateDeptMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
+      return apiRequest("PATCH", `/api/departments/${id}`, {
+        ...data,
+        budget: data.budget ? parseFloat(data.budget as string) : null,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
+      toast({ title: "Department updated successfully" });
+      setIsDeptOpen(false);
+      setEditingDept(null);
+      resetDeptForm();
+    },
+    onError: () => {
+      toast({ title: "Failed to update department", variant: "destructive" });
+    },
+  });
+
+  const deleteDeptMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("DELETE", `/api/departments/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/team"] });
+      toast({ title: "Department deleted successfully" });
+      setIsDeleteOpen(false);
+      setDeleteTarget(null);
+    },
+    onError: () => {
+      toast({ title: "Failed to delete department", variant: "destructive" });
+    },
+  });
+
+  const resetMemberForm = () => {
+    setMemberForm({ name: "", email: "", role: "EMPLOYEE", department: "" });
   };
 
-  const openEditDialog = (member: TeamMember) => {
+  const resetDeptForm = () => {
+    setDeptForm({ name: "", description: "", budget: "", color: "#6366f1", headId: "" });
+  };
+
+  const openEditMember = (member: TeamMember) => {
     setEditingMember(member);
-    setFormData({
+    setMemberForm({
       name: member.name,
       email: member.email,
       role: member.role,
       department: member.department,
     });
-    setIsOpen(true);
+    setIsMemberOpen(true);
   };
 
-  const handleSubmit = () => {
+  const openEditDept = (dept: Department) => {
+    setEditingDept(dept);
+    setDeptForm({
+      name: dept.name,
+      description: dept.description || "",
+      budget: dept.budget ? String(dept.budget) : "",
+      color: dept.color,
+      headId: dept.headId || "",
+    });
+    setIsDeptOpen(true);
+  };
+
+  const handleMemberSubmit = () => {
+    if (!memberForm.name || !memberForm.email) {
+      toast({ title: "Please fill in all required fields", variant: "destructive" });
+      return;
+    }
     if (editingMember) {
-      updateMutation.mutate({ id: editingMember.id, data: formData });
+      updateMemberMutation.mutate({ id: editingMember.id, data: memberForm });
     } else {
-      createMutation.mutate(formData);
+      createMemberMutation.mutate(memberForm);
+    }
+  };
+
+  const handleDeptSubmit = () => {
+    if (!deptForm.name) {
+      toast({ title: "Department name is required", variant: "destructive" });
+      return;
+    }
+    if (editingDept) {
+      updateDeptMutation.mutate({ id: editingDept.id, data: deptForm });
+    } else {
+      createDeptMutation.mutate(deptForm);
+    }
+  };
+
+  const handleDelete = () => {
+    if (!deleteTarget) return;
+    if (deleteTarget.type === "member") {
+      deleteMemberMutation.mutate(deleteTarget.id);
+    } else {
+      deleteDeptMutation.mutate(deleteTarget.id);
     }
   };
 
   const filteredTeam = team?.filter(
     (member) =>
-      member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.department.toLowerCase().includes(searchQuery.toLowerCase())
+      (departmentFilter === "all" || member.department === departmentFilter) &&
+      (member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+       member.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+       member.department.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   const activeMembers = team?.filter((m) => m.status === "Active").length || 0;
+  const departmentList = departments || [];
+  const allDepartments = Array.from(new Set([...(team?.map(m => m.department) || []), ...departmentList.map(d => d.name)]));
+
+  const getMemberCountForDept = (deptName: string) => team?.filter(m => m.department === deptName).length || 0;
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black tracking-tight" data-testid="text-team-title">Team</h1>
-          <p className="text-muted-foreground mt-1">Manage team members and their permissions.</p>
+          <h1 className="text-3xl font-black tracking-tight" data-testid="text-team-title">Team Management</h1>
+          <p className="text-muted-foreground mt-1">Manage team members and departments</p>
         </div>
-        <Button onClick={() => { resetForm(); setEditingMember(null); setIsOpen(true); }} data-testid="button-invite-member">
-          <UserPlus className="h-4 w-4 mr-2" />Invite Member
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => { resetDeptForm(); setEditingDept(null); setIsDeptOpen(true); }} data-testid="button-add-department">
+            <FolderPlus className="h-4 w-4 mr-2" />Add Department
+          </Button>
+          <Button onClick={() => { resetMemberForm(); setEditingMember(null); setIsMemberOpen(true); }} data-testid="button-add-member">
+            <UserPlus className="h-4 w-4 mr-2" />Add Member
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -182,7 +337,7 @@ export default function Team() {
                 <Users className="h-4 w-4 text-primary" />
               </div>
             </div>
-            {isLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black">{team?.length || 0}</p>}
+            {teamLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black" data-testid="text-total-members">{team?.length || 0}</p>}
           </CardContent>
         </Card>
         <Card className="glass card-hover">
@@ -193,7 +348,7 @@ export default function Team() {
                 <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
               </div>
             </div>
-            {isLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black text-emerald-600">{activeMembers}</p>}
+            {teamLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black text-emerald-600" data-testid="text-active-members">{activeMembers}</p>}
           </CardContent>
         </Card>
         <Card className="glass card-hover">
@@ -204,7 +359,7 @@ export default function Team() {
                 <Shield className="h-4 w-4 text-amber-600" />
               </div>
             </div>
-            {isLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black">{team?.filter((m) => m.role === "ADMIN" || m.role === "OWNER").length || 0}</p>}
+            {teamLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black" data-testid="text-admin-count">{team?.filter((m) => m.role === "ADMIN" || m.role === "OWNER").length || 0}</p>}
           </CardContent>
         </Card>
         <Card className="glass card-hover">
@@ -212,113 +367,211 @@ export default function Team() {
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Departments</p>
               <div className="p-2 bg-gradient-to-br from-cyan-500/20 to-cyan-500/5 rounded-xl">
-                <Users className="h-4 w-4 text-cyan-600" />
+                <Building2 className="h-4 w-4 text-cyan-600" />
               </div>
             </div>
-            {isLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black">{new Set(team?.map((m) => m.department)).size || 0}</p>}
+            {deptsLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black" data-testid="text-dept-count">{departmentList.length || allDepartments.length}</p>}
           </CardContent>
         </Card>
       </div>
 
-      <Card>
-        <CardContent className="p-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search team members..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} data-testid="input-search-team" />
-          </div>
-        </CardContent>
-      </Card>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <TabsList>
+            <TabsTrigger value="members" data-testid="tab-members">
+              <Users className="h-4 w-4 mr-2" />Members
+            </TabsTrigger>
+            <TabsTrigger value="departments" data-testid="tab-departments">
+              <Building2 className="h-4 w-4 mr-2" />Departments
+            </TabsTrigger>
+          </TabsList>
 
-      <Card>
-        <CardHeader className="border-b"><CardTitle className="text-sm font-bold uppercase tracking-widest">All Members</CardTitle></CardHeader>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-6 space-y-4">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="flex items-center justify-between py-2">
-                  <div className="flex items-center gap-4">
-                    <Skeleton className="h-12 w-12 rounded-full" />
-                    <div><Skeleton className="h-4 w-32 mb-2" /><Skeleton className="h-3 w-48" /></div>
-                  </div>
-                  <Skeleton className="h-6 w-20" />
-                </div>
-              ))}
-            </div>
-          ) : filteredTeam && filteredTeam.length > 0 ? (
-            <div className="divide-y divide-border">
-              {filteredTeam.map((member) => (
-                <div key={member.id} className="flex items-center justify-between p-4 hover:bg-muted/50 transition-colors" data-testid={`team-member-${member.id}`}>
-                  <div className="flex items-center gap-4">
-                    <Avatar className="h-12 w-12">
-                      {member.avatar && <AvatarImage src={member.avatar} />}
-                      <AvatarFallback className="bg-primary/10 text-primary font-bold">{member.name.split(' ').map(n => n[0]).join('').toUpperCase()}</AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-bold truncate">{member.name}</p>
-                        {member.status === "Active" && <span className="w-2 h-2 bg-emerald-500 rounded-full" />}
-                      </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <Mail className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground truncate">{member.email}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-right">
-                      <Badge variant="outline" className="text-xs mb-1">{member.department}</Badge>
-                      <br />
-                      <Badge variant="secondary" className={`text-xs ${roleColors[member.role] || ""}`}>{member.role}</Badge>
-                    </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8"><MoreVertical className="h-4 w-4" /></Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => openEditDialog(member)}><Pencil className="h-4 w-4 mr-2" />Edit</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => toggleStatusMutation.mutate({ id: member.id, status: member.status === "Active" ? "Inactive" : "Active" })}>
-                          {member.status === "Active" ? <><UserX className="h-4 w-4 mr-2" />Deactivate</> : <><UserCheck className="h-4 w-4 mr-2" />Activate</>}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-red-600" onClick={() => deleteMutation.mutate(member.id)}><Trash2 className="h-4 w-4 mr-2" />Remove</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="p-12 text-center">
-              <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
-                <Users className="h-8 w-8 text-muted-foreground" />
+          {activeTab === "members" && (
+            <div className="flex items-center gap-2">
+              <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                <SelectTrigger className="w-40" data-testid="select-department-filter">
+                  <SelectValue placeholder="Department" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Departments</SelectItem>
+                  {allDepartments.map((dept) => (
+                    <SelectItem key={dept} value={dept}>{dept}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="relative w-full sm:w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input placeholder="Search members..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} data-testid="input-search-team" />
               </div>
-              <h3 className="text-lg font-bold mb-1">No team members yet</h3>
-              <p className="text-sm text-muted-foreground mb-4">Invite your first team member to get started.</p>
-              <Button onClick={() => setIsOpen(true)}><UserPlus className="h-4 w-4 mr-2" />Invite Member</Button>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
 
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
+        <TabsContent value="members">
+          <Card>
+            <CardHeader className="border-b flex flex-row items-center justify-between gap-4">
+              <CardTitle className="text-sm font-bold uppercase tracking-widest">All Members</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {teamLoading ? (
+                <div className="p-6 space-y-4">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="flex items-center justify-between py-2">
+                      <div className="flex items-center gap-4">
+                        <Skeleton className="h-12 w-12 rounded-full" />
+                        <div><Skeleton className="h-4 w-32 mb-2" /><Skeleton className="h-3 w-48" /></div>
+                      </div>
+                      <Skeleton className="h-6 w-20" />
+                    </div>
+                  ))}
+                </div>
+              ) : filteredTeam && filteredTeam.length > 0 ? (
+                <div className="divide-y divide-border">
+                  {filteredTeam.map((member) => (
+                    <div key={member.id} className="flex items-center justify-between p-4 hover:bg-muted/50 transition-colors" data-testid={`team-member-${member.id}`}>
+                      <div className="flex items-center gap-4">
+                        <Avatar className="h-12 w-12">
+                          {member.avatar && <AvatarImage src={member.avatar} />}
+                          <AvatarFallback className="bg-primary/10 text-primary font-bold">{member.name.split(' ').map(n => n[0]).join('').toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-bold truncate" data-testid={`text-member-name-${member.id}`}>{member.name}</p>
+                            {member.status === "Active" && <span className="w-2 h-2 bg-emerald-500 rounded-full" />}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Mail className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-xs text-muted-foreground truncate">{member.email}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <Badge variant="outline" className="text-xs mb-1">{member.department}</Badge>
+                          <br />
+                          <Badge variant="secondary" className={`text-xs ${roleColors[member.role] || ""}`}>{member.role}</Badge>
+                        </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" data-testid={`button-member-menu-${member.id}`}><MoreVertical className="h-4 w-4" /></Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => openEditMember(member)} data-testid={`button-edit-member-${member.id}`}><Pencil className="h-4 w-4 mr-2" />Edit</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => toggleStatusMutation.mutate({ id: member.id, status: member.status === "Active" ? "Inactive" : "Active" })} data-testid={`button-toggle-status-${member.id}`}>
+                              {member.status === "Active" ? <><UserX className="h-4 w-4 mr-2" />Deactivate</> : <><UserCheck className="h-4 w-4 mr-2" />Activate</>}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="text-red-600" onClick={() => { setDeleteTarget({ type: "member", id: member.id, name: member.name }); setIsDeleteOpen(true); }} data-testid={`button-delete-member-${member.id}`}><Trash2 className="h-4 w-4 mr-2" />Remove</DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-12 text-center">
+                  <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
+                    <Users className="h-8 w-8 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-lg font-bold mb-1">No team members yet</h3>
+                  <p className="text-sm text-muted-foreground mb-4">Add your first team member to get started.</p>
+                  <Button onClick={() => { resetMemberForm(); setEditingMember(null); setIsMemberOpen(true); }}><UserPlus className="h-4 w-4 mr-2" />Add Member</Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="departments">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {deptsLoading ? (
+              [1, 2, 3].map((i) => (
+                <Card key={i}>
+                  <CardContent className="p-6">
+                    <Skeleton className="h-6 w-32 mb-2" />
+                    <Skeleton className="h-4 w-full mb-4" />
+                    <Skeleton className="h-8 w-20" />
+                  </CardContent>
+                </Card>
+              ))
+            ) : departmentList.length > 0 ? (
+              departmentList.map((dept) => (
+                <Card key={dept.id} className="group hover:shadow-lg transition-shadow" data-testid={`department-card-${dept.id}`}>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${dept.color}20` }}>
+                          <Building2 className="h-5 w-5" style={{ color: dept.color }} />
+                        </div>
+                        <div>
+                          <CardTitle className="text-lg" data-testid={`text-dept-name-${dept.id}`}>{dept.name}</CardTitle>
+                          <p className="text-sm text-muted-foreground">{getMemberCountForDept(dept.name)} members</p>
+                        </div>
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity" data-testid={`button-dept-menu-${dept.id}`}><MoreVertical className="h-4 w-4" /></Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => openEditDept(dept)} data-testid={`button-edit-dept-${dept.id}`}><Pencil className="h-4 w-4 mr-2" />Edit</DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem className="text-red-600" onClick={() => { setDeleteTarget({ type: "department", id: dept.id, name: dept.name }); setIsDeleteOpen(true); }} data-testid={`button-delete-dept-${dept.id}`}><Trash2 className="h-4 w-4 mr-2" />Delete</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {dept.description && (
+                      <p className="text-sm text-muted-foreground line-clamp-2">{dept.description}</p>
+                    )}
+                    <div className="flex items-center justify-between">
+                      {dept.budget && (
+                        <div className="flex items-center gap-1 text-sm">
+                          <DollarSign className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-medium">${Number(dept.budget).toLocaleString()}</span>
+                          <span className="text-muted-foreground">budget</span>
+                        </div>
+                      )}
+                      <Badge variant={dept.status === "Active" ? "default" : "secondary"} className={dept.status === "Active" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : ""}>{dept.status}</Badge>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            ) : (
+              <Card className="col-span-full">
+                <CardContent className="p-12 text-center">
+                  <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
+                    <Building2 className="h-8 w-8 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-lg font-bold mb-1">No departments yet</h3>
+                  <p className="text-sm text-muted-foreground mb-4">Create your first department to organize your team.</p>
+                  <Button onClick={() => { resetDeptForm(); setEditingDept(null); setIsDeptOpen(true); }}><FolderPlus className="h-4 w-4 mr-2" />Create Department</Button>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      <Dialog open={isMemberOpen} onOpenChange={setIsMemberOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editingMember ? "Edit Team Member" : "Invite Team Member"}</DialogTitle>
-            <DialogDescription>{editingMember ? "Update the team member's details." : "Send an invitation to join your team."}</DialogDescription>
+            <DialogTitle>{editingMember ? "Edit Team Member" : "Add Team Member"}</DialogTitle>
+            <DialogDescription>{editingMember ? "Update the team member's details." : "Add a new member to your team."}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="name">Full Name</Label>
-              <Input id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="John Doe" data-testid="input-member-name" />
+              <Label htmlFor="name">Full Name *</Label>
+              <Input id="name" value={memberForm.name} onChange={(e) => setMemberForm({ ...memberForm, name: e.target.value })} placeholder="John Doe" data-testid="input-member-name" />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="email">Email Address</Label>
-              <Input id="email" type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="john@company.com" data-testid="input-member-email" />
+              <Label htmlFor="email">Email Address *</Label>
+              <Input id="email" type="email" value={memberForm.email} onChange={(e) => setMemberForm({ ...memberForm, email: e.target.value })} placeholder="john@company.com" data-testid="input-member-email" />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="role">Role</Label>
-                <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
+                <Select value={memberForm.role} onValueChange={(value) => setMemberForm({ ...memberForm, role: value })}>
                   <SelectTrigger data-testid="select-member-role"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="OWNER">Owner</SelectItem>
@@ -332,30 +585,121 @@ export default function Team() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="department">Department</Label>
-                <Select value={formData.department} onValueChange={(value) => setFormData({ ...formData, department: value })}>
-                  <SelectTrigger data-testid="select-member-department"><SelectValue /></SelectTrigger>
+                <Select value={memberForm.department} onValueChange={(value) => setMemberForm({ ...memberForm, department: value })}>
+                  <SelectTrigger data-testid="select-member-department"><SelectValue placeholder="Select department" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Engineering">Engineering</SelectItem>
-                    <SelectItem value="Marketing">Marketing</SelectItem>
-                    <SelectItem value="Sales">Sales</SelectItem>
-                    <SelectItem value="Finance">Finance</SelectItem>
-                    <SelectItem value="Operations">Operations</SelectItem>
-                    <SelectItem value="HR">HR</SelectItem>
-                    <SelectItem value="Product">Product</SelectItem>
+                    {departmentList.length > 0 ? (
+                      departmentList.map((dept) => (
+                        <SelectItem key={dept.id} value={dept.name}>{dept.name}</SelectItem>
+                      ))
+                    ) : (
+                      <>
+                        <SelectItem value="Engineering">Engineering</SelectItem>
+                        <SelectItem value="Marketing">Marketing</SelectItem>
+                        <SelectItem value="Sales">Sales</SelectItem>
+                        <SelectItem value="Finance">Finance</SelectItem>
+                        <SelectItem value="Operations">Operations</SelectItem>
+                        <SelectItem value="HR">HR</SelectItem>
+                        <SelectItem value="Product">Product</SelectItem>
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsOpen(false)}>Cancel</Button>
-            <Button onClick={handleSubmit} disabled={createMutation.isPending || updateMutation.isPending} data-testid="button-submit-member">
-              {(createMutation.isPending || updateMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              {editingMember ? "Update Member" : "Send Invite"}
+            <Button variant="outline" onClick={() => setIsMemberOpen(false)}>Cancel</Button>
+            <Button onClick={handleMemberSubmit} disabled={createMemberMutation.isPending || updateMemberMutation.isPending} data-testid="button-submit-member">
+              {(createMemberMutation.isPending || updateMemberMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {editingMember ? "Update Member" : "Add Member"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={isDeptOpen} onOpenChange={setIsDeptOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingDept ? "Edit Department" : "Create Department"}</DialogTitle>
+            <DialogDescription>{editingDept ? "Update department details." : "Create a new department to organize your team."}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="deptName">Department Name *</Label>
+              <Input id="deptName" value={deptForm.name} onChange={(e) => setDeptForm({ ...deptForm, name: e.target.value })} placeholder="e.g. Engineering" data-testid="input-dept-name" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="deptDesc">Description</Label>
+              <Textarea id="deptDesc" value={deptForm.description} onChange={(e) => setDeptForm({ ...deptForm, description: e.target.value })} placeholder="Describe the department's responsibilities..." className="resize-none" data-testid="input-dept-description" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="deptBudget">Monthly Budget</Label>
+                <div className="relative">
+                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input id="deptBudget" type="number" className="pl-10" value={deptForm.budget} onChange={(e) => setDeptForm({ ...deptForm, budget: e.target.value })} placeholder="50000" data-testid="input-dept-budget" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Color</Label>
+                <div className="flex gap-2 flex-wrap">
+                  {departmentColors.map((color) => (
+                    <button
+                      key={color.value}
+                      type="button"
+                      className={`w-8 h-8 rounded-lg transition-transform hover:scale-110 ${deptForm.color === color.value ? "ring-2 ring-offset-2 ring-primary" : ""}`}
+                      style={{ backgroundColor: color.value }}
+                      onClick={() => setDeptForm({ ...deptForm, color: color.value })}
+                      title={color.name}
+                      data-testid={`button-color-${color.name.toLowerCase()}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="deptHead">Department Head</Label>
+              <Select value={deptForm.headId} onValueChange={(value) => setDeptForm({ ...deptForm, headId: value })}>
+                <SelectTrigger data-testid="select-dept-head"><SelectValue placeholder="Select a department head" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">No head assigned</SelectItem>
+                  {team?.filter(m => m.role === "MANAGER" || m.role === "ADMIN" || m.role === "OWNER").map((member) => (
+                    <SelectItem key={member.id} value={member.id}>{member.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDeptOpen(false)}>Cancel</Button>
+            <Button onClick={handleDeptSubmit} disabled={createDeptMutation.isPending || updateDeptMutation.isPending} data-testid="button-submit-dept">
+              {(createDeptMutation.isPending || updateDeptMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {editingDept ? "Update Department" : "Create Department"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.type === "member"
+                ? `This will permanently remove ${deleteTarget.name} from your team. This action cannot be undone.`
+                : `This will permanently delete the ${deleteTarget?.name} department. Members in this department will need to be reassigned.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700" data-testid="button-confirm-delete">
+              {(deleteMemberMutation.isPending || deleteDeptMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -5,13 +5,14 @@ import {
   teamMembers, payrollEntries, invoices, vendors, reports,
   cardTransactions, virtualAccounts, companyBalances, companySettings,
   userProfiles, kycSubmissions, notifications, notificationSettings, pushTokens,
+  departments,
   type User, type InsertUser, type Expense, type Transaction, type Bill, 
   type Budget, type VirtualCard, type TeamMember, type PayrollEntry, 
   type Invoice, type Vendor, type Report, type CardTransaction, 
   type VirtualAccount, type CompanyBalances, type CompanySettings, type AIInsight,
   type UserProfile, type InsertUserProfile, type KycSubmission, type InsertKycSubmission,
   type Notification, type InsertNotification, type NotificationSettings, type InsertNotificationSettings,
-  type PushToken, type InsertPushToken
+  type PushToken, type InsertPushToken, type Department
 } from "@shared/schema";
 
 export interface IStorage {
@@ -57,6 +58,12 @@ export interface IStorage {
   createVirtualAccount(account: Omit<VirtualAccount, 'id'>): Promise<VirtualAccount>;
   updateVirtualAccount(id: string, data: Partial<VirtualAccount>): Promise<VirtualAccount | undefined>;
   
+  getDepartments(): Promise<Department[]>;
+  getDepartment(id: string): Promise<Department | undefined>;
+  createDepartment(dept: Omit<Department, 'id'>): Promise<Department>;
+  updateDepartment(id: string, dept: Partial<Omit<Department, 'id'>>): Promise<Department | undefined>;
+  deleteDepartment(id: string): Promise<boolean>;
+
   getTeam(): Promise<TeamMember[]>;
   getTeamMember(id: string): Promise<TeamMember | undefined>;
   createTeamMember(member: Omit<TeamMember, 'id'>): Promise<TeamMember>;
@@ -310,6 +317,32 @@ export class DatabaseStorage implements IStorage {
   async updateVirtualAccount(id: string, data: Partial<VirtualAccount>): Promise<VirtualAccount | undefined> {
     const result = await db.update(virtualAccounts).set(data as any).where(eq(virtualAccounts.id, id)).returning();
     return result[0];
+  }
+
+  // ==================== DEPARTMENTS ====================
+  async getDepartments(): Promise<Department[]> {
+    const result = await db.select().from(departments);
+    return result;
+  }
+
+  async getDepartment(id: string): Promise<Department | undefined> {
+    const result = await db.select().from(departments).where(eq(departments.id, id)).limit(1);
+    return result[0];
+  }
+
+  async createDepartment(dept: Omit<Department, 'id'>): Promise<Department> {
+    const result = await db.insert(departments).values(dept as any).returning();
+    return result[0];
+  }
+
+  async updateDepartment(id: string, dept: Partial<Omit<Department, 'id'>>): Promise<Department | undefined> {
+    const result = await db.update(departments).set(dept as any).where(eq(departments.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteDepartment(id: string): Promise<boolean> {
+    const result = await db.delete(departments).where(eq(departments.id, id)).returning();
+    return result.length > 0;
   }
 
   // ==================== TEAM ====================

@@ -157,6 +157,19 @@ export const virtualCards = pgTable("virtual_cards", {
   status: text("status").notNull().default('Active'),
 });
 
+// Departments table
+export const departments = pgTable("departments", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  headId: text("head_id"),
+  budget: decimal("budget", { precision: 12, scale: 2 }),
+  color: text("color").notNull().default('#6366f1'),
+  memberCount: integer("member_count").notNull().default(0),
+  status: text("status").notNull().default('Active'),
+  createdAt: text("created_at").notNull(),
+});
+
 // Team Members table
 export const teamMembers = pgTable("team_members", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
@@ -164,6 +177,7 @@ export const teamMembers = pgTable("team_members", {
   email: text("email").notNull(),
   role: text("role").notNull().default('EMPLOYEE'),
   department: text("department").notNull().default('General'),
+  departmentId: text("department_id"),
   avatar: text("avatar"),
   status: text("status").notNull().default('Active'),
   joinedAt: text("joined_at").notNull(),
@@ -383,6 +397,7 @@ export const insertTransactionSchema = createInsertSchema(transactions).omit({ i
 export const insertBillSchema = createInsertSchema(bills).omit({ id: true });
 export const insertBudgetSchema = createInsertSchema(budgets).omit({ id: true });
 export const insertVirtualCardSchema = createInsertSchema(virtualCards).omit({ id: true });
+export const insertDepartmentSchema = createInsertSchema(departments).omit({ id: true });
 export const insertTeamMemberSchema = createInsertSchema(teamMembers).omit({ id: true });
 export const insertPayrollSchema = createInsertSchema(payrollEntries).omit({ id: true });
 export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true });
@@ -412,6 +427,9 @@ export type Budget = typeof budgets.$inferSelect;
 
 export type InsertVirtualCard = z.infer<typeof insertVirtualCardSchema>;
 export type VirtualCard = typeof virtualCards.$inferSelect;
+
+export type InsertDepartment = z.infer<typeof insertDepartmentSchema>;
+export type Department = typeof departments.$inferSelect;
 
 export type InsertTeamMember = z.infer<typeof insertTeamMemberSchema>;
 export type TeamMember = typeof teamMembers.$inferSelect;

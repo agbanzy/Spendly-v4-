@@ -928,6 +928,85 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== DEPARTMENTS ====================
+  app.get("/api/departments", async (req, res) => {
+    try {
+      const depts = await storage.getDepartments();
+      res.json(depts);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch departments" });
+    }
+  });
+
+  app.get("/api/departments/:id", async (req, res) => {
+    try {
+      const dept = await storage.getDepartment(req.params.id);
+      if (!dept) {
+        return res.status(404).json({ error: "Department not found" });
+      }
+      res.json(dept);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch department" });
+    }
+  });
+
+  app.post("/api/departments", async (req, res) => {
+    try {
+      const { name, description, headId, budget, color } = req.body;
+      if (!name) {
+        return res.status(400).json({ error: "Department name is required" });
+      }
+      const dept = await storage.createDepartment({
+        name,
+        description: description || null,
+        headId: headId || null,
+        budget: budget ? String(budget) : null,
+        color: color || '#6366f1',
+        memberCount: 0,
+        status: 'Active',
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(dept);
+    } catch (error) {
+      console.error("Create department error:", error);
+      res.status(500).json({ error: "Failed to create department" });
+    }
+  });
+
+  app.patch("/api/departments/:id", async (req, res) => {
+    try {
+      const { name, description, headId, budget, color, status, memberCount } = req.body;
+      const updateData: Record<string, any> = {};
+      if (name !== undefined) updateData.name = name;
+      if (description !== undefined) updateData.description = description;
+      if (headId !== undefined) updateData.headId = headId;
+      if (budget !== undefined) updateData.budget = budget ? String(budget) : null;
+      if (color !== undefined) updateData.color = color;
+      if (status !== undefined) updateData.status = status;
+      if (memberCount !== undefined) updateData.memberCount = memberCount;
+
+      const dept = await storage.updateDepartment(req.params.id, updateData);
+      if (!dept) {
+        return res.status(404).json({ error: "Department not found" });
+      }
+      res.json(dept);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update department" });
+    }
+  });
+
+  app.delete("/api/departments/:id", async (req, res) => {
+    try {
+      const success = await storage.deleteDepartment(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: "Department not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete department" });
+    }
+  });
+
   // ==================== TEAM ====================
   app.get("/api/team", async (req, res) => {
     try {
