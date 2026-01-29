@@ -4,12 +4,14 @@ import {
   users, expenses, transactions, bills, budgets, virtualCards, 
   teamMembers, payrollEntries, invoices, vendors, reports,
   cardTransactions, virtualAccounts, companyBalances, companySettings,
-  userProfiles, kycSubmissions,
+  userProfiles, kycSubmissions, notifications, notificationSettings, pushTokens,
   type User, type InsertUser, type Expense, type Transaction, type Bill, 
   type Budget, type VirtualCard, type TeamMember, type PayrollEntry, 
   type Invoice, type Vendor, type Report, type CardTransaction, 
   type VirtualAccount, type CompanyBalances, type CompanySettings, type AIInsight,
-  type UserProfile, type InsertUserProfile, type KycSubmission, type InsertKycSubmission
+  type UserProfile, type InsertUserProfile, type KycSubmission, type InsertKycSubmission,
+  type Notification, type InsertNotification, type NotificationSettings, type InsertNotificationSettings,
+  type PushToken, type InsertPushToken
 } from "@shared/schema";
 
 export interface IStorage {
@@ -100,6 +102,26 @@ export interface IStorage {
   getKycSubmission(userProfileId: string): Promise<KycSubmission | undefined>;
   createKycSubmission(submission: InsertKycSubmission): Promise<KycSubmission>;
   updateKycSubmission(id: string, submission: Partial<KycSubmission>): Promise<KycSubmission | undefined>;
+  
+  // Notifications
+  getNotifications(userId: string): Promise<Notification[]>;
+  getNotification(id: number): Promise<Notification | undefined>;
+  createNotification(notification: InsertNotification): Promise<Notification>;
+  updateNotification(id: number, notification: Partial<Notification>): Promise<Notification | undefined>;
+  markNotificationRead(id: number): Promise<Notification | undefined>;
+  markAllNotificationsRead(userId: string): Promise<void>;
+  deleteNotification(id: number): Promise<boolean>;
+  
+  // Notification Settings
+  getNotificationSettings(userId: string): Promise<NotificationSettings | null>;
+  createNotificationSettings(settings: InsertNotificationSettings): Promise<NotificationSettings>;
+  updateNotificationSettings(userId: string, settings: Partial<NotificationSettings>): Promise<NotificationSettings | undefined>;
+  
+  // Push Tokens
+  getPushTokens(userId: string): Promise<PushToken[]>;
+  createPushToken(token: InsertPushToken): Promise<PushToken>;
+  deletePushToken(token: string): Promise<boolean>;
+  deactivatePushToken(token: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -559,6 +581,87 @@ export class DatabaseStorage implements IStorage {
       updatedAt: now,
     } as any).where(eq(kycSubmissions.id, id)).returning();
     return result[0];
+  }
+
+  // ==================== NOTIFICATIONS ====================
+  async getNotifications(userId: string): Promise<Notification[]> {
+    return db.select().from(notifications).where(eq(notifications.userId, userId)).orderBy(desc(notifications.createdAt));
+  }
+
+  async getNotification(id: number): Promise<Notification | undefined> {
+    const result = await db.select().from(notifications).where(eq(notifications.id, id)).limit(1);
+    return result[0];
+  }
+
+  async createNotification(notification: InsertNotification): Promise<Notification> {
+    const result = await db.insert(notifications).values(notification as any).returning();
+    return result[0];
+  }
+
+  async updateNotification(id: number, notificationData: Partial<Notification>): Promise<Notification | undefined> {
+    const result = await db.update(notifications).set(notificationData as any).where(eq(notifications.id, id)).returning();
+    return result[0];
+  }
+
+  async markNotificationRead(id: number): Promise<Notification | undefined> {
+    const now = new Date().toISOString();
+    const result = await db.update(notifications).set({
+      read: true,
+      readAt: now,
+    } as any).where(eq(notifications.id, id)).returning();
+    return result[0];
+  }
+
+  async markAllNotificationsRead(userId: string): Promise<void> {
+    const now = new Date().toISOString();
+    await db.update(notifications).set({
+      read: true,
+      readAt: now,
+    } as any).where(eq(notifications.userId, userId));
+  }
+
+  async deleteNotification(id: number): Promise<boolean> {
+    const result = await db.delete(notifications).where(eq(notifications.id, id)).returning();
+    return result.length > 0;
+  }
+
+  // ==================== NOTIFICATION SETTINGS ====================
+  async getNotificationSettings(userId: string): Promise<NotificationSettings | null> {
+    const result = await db.select().from(notificationSettings).where(eq(notificationSettings.userId, userId)).limit(1);
+    return result[0] || null;
+  }
+
+  async createNotificationSettings(settings: InsertNotificationSettings): Promise<NotificationSettings> {
+    const result = await db.insert(notificationSettings).values(settings as any).returning();
+    return result[0];
+  }
+
+  async updateNotificationSettings(userId: string, settingsData: Partial<NotificationSettings>): Promise<NotificationSettings | undefined> {
+    const now = new Date().toISOString();
+    const result = await db.update(notificationSettings).set({
+      ...settingsData,
+      updatedAt: now,
+    } as any).where(eq(notificationSettings.userId, userId)).returning();
+    return result[0];
+  }
+
+  // ==================== PUSH TOKENS ====================
+  async getPushTokens(userId: string): Promise<PushToken[]> {
+    return db.select().from(pushTokens).where(eq(pushTokens.userId, userId));
+  }
+
+  async createPushToken(token: InsertPushToken): Promise<PushToken> {
+    const result = await db.insert(pushTokens).values(token as any).returning();
+    return result[0];
+  }
+
+  async deletePushToken(token: string): Promise<boolean> {
+    const result = await db.delete(pushTokens).where(eq(pushTokens.token, token)).returning();
+    return result.length > 0;
+  }
+
+  async deactivatePushToken(token: string): Promise<void> {
+    await db.update(pushTokens).set({ active: false } as any).where(eq(pushTokens.token, token));
   }
 }
 

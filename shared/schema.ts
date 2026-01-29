@@ -450,6 +450,100 @@ export interface AIInsight {
   type: 'saving' | 'warning' | 'info';
 }
 
+// ==================== NOTIFICATIONS TABLES ====================
+
+// Notification types enum
+export const NotificationType = {
+  EXPENSE_SUBMITTED: 'expense_submitted',
+  EXPENSE_APPROVED: 'expense_approved',
+  EXPENSE_REJECTED: 'expense_rejected',
+  PAYMENT_RECEIVED: 'payment_received',
+  PAYMENT_SENT: 'payment_sent',
+  BILL_DUE: 'bill_due',
+  BILL_OVERDUE: 'bill_overdue',
+  BUDGET_WARNING: 'budget_warning',
+  BUDGET_EXCEEDED: 'budget_exceeded',
+  KYC_APPROVED: 'kyc_approved',
+  KYC_REJECTED: 'kyc_rejected',
+  CARD_TRANSACTION: 'card_transaction',
+  TEAM_INVITE: 'team_invite',
+  SYSTEM_ALERT: 'system_alert',
+} as const;
+export type NotificationType = typeof NotificationType[keyof typeof NotificationType];
+
+export const NotificationChannel = {
+  IN_APP: 'in_app',
+  EMAIL: 'email',
+  SMS: 'sms',
+  PUSH: 'push',
+} as const;
+export type NotificationChannel = typeof NotificationChannel[keyof typeof NotificationChannel];
+
+// Notifications table
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  type: text("type").notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  data: jsonb("data").$type<Record<string, unknown>>(),
+  channels: jsonb("channels").$type<string[]>().default(['in_app']),
+  read: boolean("read").notNull().default(false),
+  readAt: text("read_at"),
+  emailSent: boolean("email_sent").default(false),
+  smsSent: boolean("sms_sent").default(false),
+  pushSent: boolean("push_sent").default(false),
+  createdAt: text("created_at").notNull(),
+});
+
+// Notification settings per user
+export const notificationSettings = pgTable("notification_settings", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().unique(),
+  emailEnabled: boolean("email_enabled").notNull().default(true),
+  smsEnabled: boolean("sms_enabled").notNull().default(false),
+  pushEnabled: boolean("push_enabled").notNull().default(true),
+  inAppEnabled: boolean("in_app_enabled").notNull().default(true),
+  email: text("email"),
+  phone: text("phone"),
+  pushToken: text("push_token"),
+  expenseNotifications: boolean("expense_notifications").notNull().default(true),
+  paymentNotifications: boolean("payment_notifications").notNull().default(true),
+  billNotifications: boolean("bill_notifications").notNull().default(true),
+  budgetNotifications: boolean("budget_notifications").notNull().default(true),
+  securityNotifications: boolean("security_notifications").notNull().default(true),
+  marketingNotifications: boolean("marketing_notifications").notNull().default(false),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+// Push notification tokens
+export const pushTokens = pgTable("push_tokens", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  token: text("token").notNull(),
+  platform: text("platform").notNull(), // 'ios', 'android', 'web'
+  deviceId: text("device_id"),
+  active: boolean("active").notNull().default(true),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+// Insert schemas for notifications
+export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true });
+export const insertNotificationSettingsSchema = createInsertSchema(notificationSettings).omit({ id: true });
+export const insertPushTokenSchema = createInsertSchema(pushTokens).omit({ id: true });
+
+// Types for notifications
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;
+
+export type InsertNotificationSettings = z.infer<typeof insertNotificationSettingsSchema>;
+export type NotificationSettings = typeof notificationSettings.$inferSelect;
+
+export type InsertPushToken = z.infer<typeof insertPushTokenSchema>;
+export type PushToken = typeof pushTokens.$inferSelect;
+
 // Category icons mapping
 export const categoryIcons: Record<string, string> = {
   'Software': 'code',

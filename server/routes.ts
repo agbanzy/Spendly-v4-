@@ -5,6 +5,7 @@ import { z } from "zod";
 import { paymentService, REGION_CONFIGS, getRegionConfig, getCurrencyForCountry } from "./paymentService";
 import { getStripePublishableKey } from "./stripeClient";
 import { getPaystackPublicKey, paystackClient } from "./paystackClient";
+import { notificationService } from "./services/notification-service";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -332,10 +333,33 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid expense data", details: result.error.issues });
       }
+      
+      const originalExpense = await storage.getExpense(req.params.id);
       const expense = await storage.updateExpense(req.params.id, result.data);
       if (!expense) {
         return res.status(404).json({ error: "Expense not found" });
       }
+      
+      // Send notification if status changed
+      if (originalExpense && expense.status !== originalExpense.status) {
+        const userId = expense.submittedBy || expense.userId || 'system';
+        
+        if (expense.status === 'APPROVED') {
+          notificationService.notifyExpenseApproved(userId, {
+            id: expense.id,
+            merchant: expense.merchant,
+            amount: parseFloat(expense.amount),
+          }).catch(console.error);
+        } else if (expense.status === 'REJECTED') {
+          notificationService.notifyExpenseRejected(userId, {
+            id: expense.id,
+            merchant: expense.merchant,
+            amount: parseFloat(expense.amount),
+            reason: result.data.rejectionReason,
+          }).catch(console.error);
+        }
+      }
+      
       res.json(expense);
     } catch (error) {
       res.status(500).json({ error: "Failed to update expense" });
@@ -2366,6 +2390,228 @@ export async function registerRoutes(
       res.json({ url: fileUrl, filename: req.file.filename });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to upload document" });
+    }
+  });
+
+  // ==================== NOTIFICATIONS API ====================
+
+  // Get all notifications for a user
+  app.get("/api/notifications", async (req, res) => {
+    try {
+      const userId = req.query.userId as string;
+      if (!userId) {
+        return res.status(400).json({ error: "User ID is required" });
+      }
+      const notifications = await storage.getNotifications(userId);
+      res.json(notifications);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch notifications" });
+    }
+  });
+
+  // Get unread notification count
+  app.get("/api/notifications/unread-count", async (req, res) => {
+    try {
+      const userId = req.query.userId as string;
+      if (!userId) {
+        return res.status(400).json({ error: "User ID is required" });
+      }
+      const notifications = await storage.getNotifications(userId);
+      const unreadCount = notifications.filter(n => !n.read).length;
+      res.json({ count: unreadCount });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch unread count" });
+    }
+  });
+
+  // Mark notification as read
+  app.patch("/api/notifications/:id/read", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const notification = await storage.markNotificationRead(id);
+      if (!notification) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
+      res.json(notification);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to mark notification as read" });
+    }
+  });
+
+  // Mark all notifications as read
+  app.post("/api/notifications/mark-all-read", async (req, res) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: "User ID is required" });
+      }
+      await storage.markAllNotificationsRead(userId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to mark all notifications as read" });
+    }
+  });
+
+  // Delete notification
+  app.delete("/api/notifications/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const deleted = await storage.deleteNotification(id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to delete notification" });
+    }
+  });
+
+  // Send test notification
+  app.post("/api/notifications/send", async (req, res) => {
+    try {
+      const { userId, type, title, message, data, channels } = req.body;
+      if (!userId || !title || !message) {
+        return res.status(400).json({ error: "userId, title, and message are required" });
+      }
+      await notificationService.send({
+        userId,
+        type: type || 'system_alert',
+        title,
+        message,
+        data,
+        channels: channels || ['in_app', 'push'],
+      });
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to send notification" });
+    }
+  });
+
+  // ==================== NOTIFICATION SETTINGS API ====================
+
+  // Get notification settings
+  app.get("/api/notification-settings", async (req, res) => {
+    try {
+      const userId = req.query.userId as string;
+      if (!userId) {
+        return res.status(400).json({ error: "User ID is required" });
+      }
+      const settings = await storage.getNotificationSettings(userId);
+      if (!settings) {
+        // Create default settings
+        const now = new Date().toISOString();
+        const newSettings = await storage.createNotificationSettings({
+          userId,
+          emailEnabled: true,
+          smsEnabled: false,
+          pushEnabled: true,
+          inAppEnabled: true,
+          email: null,
+          phone: null,
+          pushToken: null,
+          expenseNotifications: true,
+          paymentNotifications: true,
+          billNotifications: true,
+          budgetNotifications: true,
+          securityNotifications: true,
+          marketingNotifications: false,
+          createdAt: now,
+          updatedAt: now,
+        });
+        return res.json(newSettings);
+      }
+      res.json(settings);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch notification settings" });
+    }
+  });
+
+  // Update notification settings
+  app.patch("/api/notification-settings", async (req, res) => {
+    try {
+      const { userId, ...settingsData } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: "User ID is required" });
+      }
+      
+      let settings = await storage.getNotificationSettings(userId);
+      if (!settings) {
+        const now = new Date().toISOString();
+        settings = await storage.createNotificationSettings({
+          userId,
+          emailEnabled: settingsData.emailEnabled ?? true,
+          smsEnabled: settingsData.smsEnabled ?? false,
+          pushEnabled: settingsData.pushEnabled ?? true,
+          inAppEnabled: settingsData.inAppEnabled ?? true,
+          email: settingsData.email || null,
+          phone: settingsData.phone || null,
+          pushToken: settingsData.pushToken || null,
+          expenseNotifications: settingsData.expenseNotifications ?? true,
+          paymentNotifications: settingsData.paymentNotifications ?? true,
+          billNotifications: settingsData.billNotifications ?? true,
+          budgetNotifications: settingsData.budgetNotifications ?? true,
+          securityNotifications: settingsData.securityNotifications ?? true,
+          marketingNotifications: settingsData.marketingNotifications ?? false,
+          createdAt: now,
+          updatedAt: now,
+        });
+      } else {
+        settings = await storage.updateNotificationSettings(userId, settingsData);
+      }
+      
+      res.json(settings);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to update notification settings" });
+    }
+  });
+
+  // ==================== PUSH TOKENS API ====================
+
+  // Register push token
+  app.post("/api/push-tokens", async (req, res) => {
+    try {
+      const { userId, token, platform, deviceId } = req.body;
+      if (!userId || !token || !platform) {
+        return res.status(400).json({ error: "userId, token, and platform are required" });
+      }
+
+      // Deactivate existing tokens for this device
+      if (deviceId) {
+        const existingTokens = await storage.getPushTokens(userId);
+        for (const t of existingTokens) {
+          if (t.deviceId === deviceId && t.token !== token) {
+            await storage.deactivatePushToken(t.token);
+          }
+        }
+      }
+
+      const now = new Date().toISOString();
+      const pushToken = await storage.createPushToken({
+        userId,
+        token,
+        platform,
+        deviceId: deviceId || null,
+        active: true,
+        createdAt: now,
+        updatedAt: now,
+      });
+      res.json(pushToken);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to register push token" });
+    }
+  });
+
+  // Delete push token
+  app.delete("/api/push-tokens/:token", async (req, res) => {
+    try {
+      const { token } = req.params;
+      const deleted = await storage.deletePushToken(token);
+      if (!deleted) {
+        return res.status(404).json({ error: "Push token not found" });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to delete push token" });
     }
   });
 
