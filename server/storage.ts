@@ -127,6 +127,11 @@ export class MemStorage implements IStorage {
       autoApproveBelow: 100,
       requireReceipts: true,
       expenseCategories: ['Software', 'Travel', 'Office', 'Marketing', 'Food', 'Equipment', 'Utilities', 'Legal', 'Other'],
+      countryCode: 'US',
+      region: 'North America',
+      paymentProvider: 'stripe',
+      paystackEnabled: false,
+      stripeEnabled: true,
     };
     
     this.initializeDemoData();

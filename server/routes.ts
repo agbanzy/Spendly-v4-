@@ -2,6 +2,9 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { z } from "zod";
+import { paymentService, REGION_CONFIGS, getRegionConfig, getCurrencyForCountry } from "./paymentService";
+import { getStripePublishableKey } from "./stripeClient";
+import { getPaystackPublicKey } from "./paystackClient";
 
 const expenseSchema = z.object({
   merchant: z.string().min(1),
@@ -172,7 +175,7 @@ export async function registerRoutes(
       const newLocal = currentLocal - parsedAmount;
       
       await storage.createTransaction({
-        type: "Withdrawal",
+        type: "Payout" as any,
         amount: parsedAmount,
         fee: 0,
         status: 'Completed',
@@ -335,7 +338,7 @@ export async function registerRoutes(
       const { type, amount, description, fee } = result.data;
 
       const transaction = await storage.createTransaction({
-        type,
+        type: type as any,
         amount,
         fee: fee || 0,
         status: 'Completed',
@@ -356,7 +359,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid transaction data", details: result.error.issues });
       }
-      const transaction = await storage.updateTransaction(req.params.id, result.data);
+      const transaction = await storage.updateTransaction(req.params.id, result.data as any);
       if (!transaction) {
         return res.status(404).json({ error: "Transaction not found" });
       }
@@ -430,7 +433,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid bill data", details: result.error.issues });
       }
-      const bill = await storage.updateBill(req.params.id, result.data);
+      const bill = await storage.updateBill(req.params.id, result.data as any);
       if (!bill) {
         return res.status(404).json({ error: "Bill not found" });
       }
@@ -488,7 +491,7 @@ export async function registerRoutes(
         limit,
         spent: 0,
         currency: 'USD',
-        period: period || 'monthly',
+        period: (period || 'monthly') as any,
       });
       
       res.status(201).json(budget);
@@ -503,7 +506,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid budget data", details: result.error.issues });
       }
-      const budget = await storage.updateBudget(req.params.id, result.data);
+      const budget = await storage.updateBudget(req.params.id, result.data as any);
       if (!budget) {
         return res.status(404).json({ error: "Budget not found" });
       }
@@ -562,7 +565,7 @@ export async function registerRoutes(
         last4,
         balance: limit,
         limit,
-        type: type || 'Visa',
+        type: (type || 'Visa') as any,
         color: color || 'indigo',
         currency: 'USD',
         status: 'Active',
@@ -580,7 +583,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid card data", details: result.error.issues });
       }
-      const card = await storage.updateCard(req.params.id, result.data);
+      const card = await storage.updateCard(req.params.id, result.data as any);
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -635,8 +638,8 @@ export async function registerRoutes(
       const member = await storage.createTeamMember({
         name,
         email,
-        role: role || 'EMPLOYEE',
-        department: department || 'General',
+        role: (role || 'EMPLOYEE') as any,
+        department: (department || 'General') as any,
         status: 'Active',
         joinedAt: new Date().toISOString().split('T')[0],
         permissions: ['CREATE_EXPENSE'],
@@ -654,7 +657,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid team member data", details: result.error.issues });
       }
-      const member = await storage.updateTeamMember(req.params.id, result.data);
+      const member = await storage.updateTeamMember(req.params.id, result.data as any);
       if (!member) {
         return res.status(404).json({ error: "Team member not found" });
       }
@@ -768,8 +771,8 @@ export async function registerRoutes(
 
   app.post("/api/payroll/process", async (req, res) => {
     try {
-      const entries = await storage.getPayrollEntries();
-      const pendingEntries = entries.filter(e => e.status === "pending");
+      const entries = await storage.getPayroll();
+      const pendingEntries = entries.filter((e: any) => e.status === "pending");
       
       if (pendingEntries.length === 0) {
         return res.status(400).json({ error: "No pending payroll entries to process" });
@@ -860,7 +863,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid invoice data", details: result.error.issues });
       }
-      const invoice = await storage.updateInvoice(req.params.id, result.data);
+      const invoice = await storage.updateInvoice(req.params.id, result.data as any);
       if (!invoice) {
         return res.status(404).json({ error: "Invoice not found" });
       }
@@ -936,7 +939,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid vendor data", details: result.error.issues });
       }
-      const vendor = await storage.updateVendor(req.params.id, result.data);
+      const vendor = await storage.updateVendor(req.params.id, result.data as any);
       if (!vendor) {
         return res.status(404).json({ error: "Vendor not found" });
       }
@@ -974,6 +977,339 @@ export async function registerRoutes(
       res.json(settings);
     } catch (error) {
       res.status(500).json({ error: "Failed to update settings" });
+    }
+  });
+
+  // ==================== PAYMENT ROUTES ====================
+  app.get("/api/regions", async (req, res) => {
+    try {
+      res.json(REGION_CONFIGS);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch regions" });
+    }
+  });
+
+  app.get("/api/region/:countryCode", async (req, res) => {
+    try {
+      const config = getRegionConfig(req.params.countryCode);
+      if (!config) {
+        return res.status(404).json({ error: "Region not found for country" });
+      }
+      res.json(config);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch region config" });
+    }
+  });
+
+  app.get("/api/currency/:countryCode", async (req, res) => {
+    try {
+      const currency = getCurrencyForCountry(req.params.countryCode);
+      res.json(currency);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch currency" });
+    }
+  });
+
+  app.get("/api/payment/keys", async (req, res) => {
+    try {
+      let stripeKey = null;
+      let paystackKey = null;
+      
+      try {
+        stripeKey = await getStripePublishableKey();
+      } catch (e) {
+        console.log("Stripe not configured");
+      }
+      
+      try {
+        paystackKey = getPaystackPublicKey();
+      } catch (e) {
+        console.log("Paystack not configured");
+      }
+      
+      res.json({
+        stripe: stripeKey,
+        paystack: paystackKey,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch payment keys" });
+    }
+  });
+
+  const paymentIntentSchema = z.object({
+    amount: z.number().positive(),
+    currency: z.string().min(1),
+    countryCode: z.string().min(2).max(2),
+    email: z.string().email().optional(),
+    metadata: z.record(z.any()).optional(),
+  });
+
+  app.post("/api/payment/create-intent", async (req, res) => {
+    try {
+      const result = paymentIntentSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid payment data", details: result.error.issues });
+      }
+
+      const { amount, currency, countryCode, email, metadata } = result.data;
+      const paymentResult = await paymentService.createPaymentIntent(
+        amount,
+        currency,
+        countryCode,
+        { email, ...metadata }
+      );
+      
+      res.json(paymentResult);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to create payment intent" });
+    }
+  });
+
+  const transferSchema = z.object({
+    amount: z.number().positive(),
+    countryCode: z.string().min(2).max(2),
+    reason: z.string().min(1),
+    recipientDetails: z.object({
+      accountNumber: z.string().optional(),
+      bankCode: z.string().optional(),
+      accountName: z.string().optional(),
+      stripeAccountId: z.string().optional(),
+      currency: z.string().optional(),
+    }),
+  });
+
+  app.post("/api/payment/transfer", async (req, res) => {
+    try {
+      const result = transferSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid transfer data", details: result.error.issues });
+      }
+
+      const { amount, countryCode, reason, recipientDetails } = result.data;
+      const transferResult = await paymentService.initiateTransfer(
+        amount,
+        recipientDetails,
+        countryCode,
+        reason
+      );
+      
+      res.json(transferResult);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to initiate transfer" });
+    }
+  });
+
+  const virtualAccountSchema = z.object({
+    email: z.string().email(),
+    firstName: z.string().min(1),
+    lastName: z.string().min(1),
+    countryCode: z.string().min(2).max(2),
+  });
+
+  app.post("/api/payment/virtual-account", async (req, res) => {
+    try {
+      const result = virtualAccountSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid account data", details: result.error.issues });
+      }
+
+      const { email, firstName, lastName, countryCode } = result.data;
+      const accountResult = await paymentService.createVirtualAccount(
+        email,
+        firstName,
+        lastName,
+        countryCode
+      );
+      
+      res.json(accountResult);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to create virtual account" });
+    }
+  });
+
+  app.post("/api/payment/verify", async (req, res) => {
+    try {
+      const { reference, provider } = req.body;
+      if (!reference || !provider) {
+        return res.status(400).json({ error: "Reference and provider required" });
+      }
+
+      const verifyResult = await paymentService.verifyPayment(reference, provider);
+      res.json(verifyResult);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to verify payment" });
+    }
+  });
+
+  app.get("/api/payment/banks/:countryCode", async (req, res) => {
+    try {
+      const banks = await paymentService.getBanks(req.params.countryCode);
+      res.json(banks);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch banks" });
+    }
+  });
+
+  app.get("/api/payment/provider-balance/:countryCode", async (req, res) => {
+    try {
+      const balances = await paymentService.getBalance(req.params.countryCode);
+      res.json(balances);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch balance" });
+    }
+  });
+
+  // ==================== BILL PAYMENT ====================
+  const billPaymentSchema = z.object({
+    billId: z.string().min(1),
+    paymentMethod: z.enum(['wallet', 'card', 'bank']),
+    countryCode: z.string().min(2).max(2).default('US'),
+  });
+
+  app.post("/api/bills/pay", async (req, res) => {
+    try {
+      const result = billPaymentSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid payment data", details: result.error.issues });
+      }
+
+      const { billId, paymentMethod, countryCode } = result.data;
+      const bill = await storage.getBill(billId);
+      
+      if (!bill) {
+        return res.status(404).json({ error: "Bill not found" });
+      }
+
+      if (bill.status === 'Paid') {
+        return res.status(400).json({ error: "Bill already paid" });
+      }
+
+      if (paymentMethod === 'wallet') {
+        const balances = await storage.getBalances();
+        if (balances.usd < bill.amount) {
+          return res.status(400).json({ error: "Insufficient wallet balance" });
+        }
+        
+        await storage.updateBalances({ usd: balances.usd - bill.amount });
+        await storage.updateBill(billId, { status: 'Paid' });
+        
+        await storage.createTransaction({
+          type: 'Bill',
+          amount: bill.amount,
+          fee: 0,
+          status: 'Completed',
+          date: new Date().toISOString().split('T')[0],
+          description: `Bill payment - ${bill.name}`,
+          currency: bill.currency || 'USD',
+        });
+        
+        res.json({ success: true, message: "Bill paid successfully from wallet" });
+      } else {
+        const paymentResult = await paymentService.createPaymentIntent(
+          bill.amount,
+          bill.currency || 'USD',
+          countryCode,
+          { billId, type: 'bill_payment' }
+        );
+        
+        res.json({
+          success: true,
+          requiresPayment: true,
+          paymentDetails: paymentResult,
+        });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to pay bill" });
+    }
+  });
+
+  // ==================== DEPOSIT/FUND WALLET ====================
+  const depositSchema = z.object({
+    amount: z.number().positive(),
+    source: z.enum(['bank', 'card', 'crypto']),
+    countryCode: z.string().min(2).max(2).default('US'),
+    email: z.string().email().optional(),
+  });
+
+  app.post("/api/wallet/deposit", async (req, res) => {
+    try {
+      const result = depositSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid deposit data", details: result.error.issues });
+      }
+
+      const { amount, source, countryCode, email } = result.data;
+      const currencyInfo = getCurrencyForCountry(countryCode);
+      
+      const paymentResult = await paymentService.createPaymentIntent(
+        amount,
+        currencyInfo.currency,
+        countryCode,
+        { email, type: 'wallet_deposit', source }
+      );
+      
+      res.json({
+        success: true,
+        paymentDetails: paymentResult,
+        currency: currencyInfo,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to initiate deposit" });
+    }
+  });
+
+  // ==================== PAYOUT/WITHDRAW ====================
+  const payoutSchema = z.object({
+    amount: z.number().positive(),
+    countryCode: z.string().min(2).max(2).default('US'),
+    recipientDetails: z.object({
+      accountNumber: z.string().optional(),
+      bankCode: z.string().optional(),
+      accountName: z.string().optional(),
+      stripeAccountId: z.string().optional(),
+    }),
+    reason: z.string().default('Payout'),
+  });
+
+  app.post("/api/wallet/payout", async (req, res) => {
+    try {
+      const result = payoutSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid payout data", details: result.error.issues });
+      }
+
+      const { amount, countryCode, recipientDetails, reason } = result.data;
+      
+      const balances = await storage.getBalances();
+      if (balances.usd < amount) {
+        return res.status(400).json({ error: "Insufficient wallet balance" });
+      }
+      
+      const transferResult = await paymentService.initiateTransfer(
+        amount,
+        recipientDetails,
+        countryCode,
+        reason
+      );
+      
+      await storage.updateBalances({ usd: balances.usd - amount });
+      
+      await storage.createTransaction({
+        type: 'Payout',
+        amount,
+        fee: 0,
+        status: 'Processing',
+        date: new Date().toISOString().split('T')[0],
+        description: reason,
+        currency: getCurrencyForCountry(countryCode).currency,
+      });
+      
+      res.json({
+        success: true,
+        transferDetails: transferResult,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to process payout" });
     }
   });
 

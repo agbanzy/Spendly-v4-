@@ -26,6 +26,10 @@ import {
   HelpCircle,
   Save,
   Loader2,
+  Landmark,
+  Wallet,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -44,13 +48,51 @@ interface CompanySettings {
   autoApproveBelow: number;
   requireReceipts: boolean;
   expenseCategories: string[];
+  countryCode: string;
+  region: string;
+  paymentProvider: 'stripe' | 'paystack';
+  paystackEnabled: boolean;
+  stripeEnabled: boolean;
 }
+
+interface RegionConfig {
+  region: string;
+  countries: string[];
+  currency: string;
+  paymentProvider: 'stripe' | 'paystack';
+  currencySymbol: string;
+}
+
+const COUNTRY_OPTIONS = [
+  { code: 'US', name: 'United States', region: 'North America' },
+  { code: 'CA', name: 'Canada', region: 'North America' },
+  { code: 'GB', name: 'United Kingdom', region: 'Europe' },
+  { code: 'DE', name: 'Germany', region: 'Europe' },
+  { code: 'FR', name: 'France', region: 'Europe' },
+  { code: 'NG', name: 'Nigeria', region: 'Africa' },
+  { code: 'GH', name: 'Ghana', region: 'Africa' },
+  { code: 'KE', name: 'Kenya', region: 'Africa' },
+  { code: 'ZA', name: 'South Africa', region: 'Africa' },
+  { code: 'EG', name: 'Egypt', region: 'Africa' },
+  { code: 'RW', name: 'Rwanda', region: 'Africa' },
+  { code: 'CI', name: "Côte d'Ivoire", region: 'Africa' },
+];
+
+const AFRICAN_COUNTRIES = ['NG', 'GH', 'KE', 'ZA', 'EG', 'RW', 'CI'];
 
 export default function Settings() {
   const { toast } = useToast();
   
   const { data: settings, isLoading } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
+  });
+
+  const { data: regions } = useQuery<RegionConfig[]>({
+    queryKey: ["/api/regions"],
+  });
+
+  const { data: paymentKeys } = useQuery<{ stripe: string | null; paystack: string | null }>({
+    queryKey: ["/api/payment/keys"],
   });
 
   const [formData, setFormData] = useState<Partial<CompanySettings>>({});
@@ -95,8 +137,27 @@ export default function Settings() {
     });
   };
 
-  const handleSaveCurrency = () => {
+  const handleCountryChange = (countryCode: string) => {
+    const isAfrican = AFRICAN_COUNTRIES.includes(countryCode);
+    const country = COUNTRY_OPTIONS.find(c => c.code === countryCode);
+    const regionConfig = regions?.find(r => r.countries.includes(countryCode));
+    
+    const updates: Partial<CompanySettings> = {
+      countryCode,
+      region: country?.region || 'North America',
+      paymentProvider: isAfrican ? 'paystack' : 'stripe',
+      currency: regionConfig?.currency || 'USD',
+    };
+    
+    setFormData({ ...formData, ...updates });
+    updateSettingsMutation.mutate(updates);
+  };
+
+  const handleSaveRegion = () => {
     updateSettingsMutation.mutate({
+      countryCode: formData.countryCode,
+      region: formData.region,
+      paymentProvider: formData.paymentProvider,
       currency: formData.currency,
       timezone: formData.timezone,
     });
@@ -117,6 +178,8 @@ export default function Settings() {
     );
   }
 
+  const isPaystackRegion = AFRICAN_COUNTRIES.includes(formData.countryCode || 'US');
+
   return (
     <div className="p-6 md:p-8 max-w-4xl mx-auto space-y-6 animate-in fade-in duration-500">
       <div>
@@ -124,7 +187,7 @@ export default function Settings() {
           Settings
         </h1>
         <p className="text-muted-foreground mt-1">
-          Manage your account and company preferences.
+          Manage your account, company preferences, and payment settings.
         </p>
       </div>
 
@@ -197,18 +260,44 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="border-2 border-primary/20">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Globe className="h-5 w-5 text-primary" />
-            <CardTitle>Currency & Region</CardTitle>
+            <CardTitle>Region & Payment Settings</CardTitle>
+            <Badge variant="outline" className="ml-auto">Important</Badge>
           </div>
           <CardDescription>
-            Set your default currency and regional preferences.
+            Your country determines your payment provider. African countries use Paystack, others use Stripe.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="country">Country / Region</Label>
+              <Select 
+                value={formData.countryCode || "US"} 
+                onValueChange={handleCountryChange}
+              >
+                <SelectTrigger data-testid="select-country">
+                  <SelectValue placeholder="Select country" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="US">🇺🇸 United States</SelectItem>
+                  <SelectItem value="CA">🇨🇦 Canada</SelectItem>
+                  <SelectItem value="GB">🇬🇧 United Kingdom</SelectItem>
+                  <SelectItem value="DE">🇩🇪 Germany</SelectItem>
+                  <SelectItem value="FR">🇫🇷 France</SelectItem>
+                  <SelectItem value="NG">🇳🇬 Nigeria</SelectItem>
+                  <SelectItem value="GH">🇬🇭 Ghana</SelectItem>
+                  <SelectItem value="KE">🇰🇪 Kenya</SelectItem>
+                  <SelectItem value="ZA">🇿🇦 South Africa</SelectItem>
+                  <SelectItem value="EG">🇪🇬 Egypt</SelectItem>
+                  <SelectItem value="RW">🇷🇼 Rwanda</SelectItem>
+                  <SelectItem value="CI">🇨🇮 Côte d'Ivoire</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="currency">Default Currency</Label>
               <Select 
@@ -219,16 +308,67 @@ export default function Settings() {
                   <SelectValue placeholder="Select currency" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="USD">USD - US Dollar</SelectItem>
-                  <SelectItem value="EUR">EUR - Euro</SelectItem>
-                  <SelectItem value="GBP">GBP - British Pound</SelectItem>
-                  <SelectItem value="NGN">NGN - Nigerian Naira</SelectItem>
-                  <SelectItem value="KES">KES - Kenyan Shilling</SelectItem>
-                  <SelectItem value="GHS">GHS - Ghanaian Cedi</SelectItem>
-                  <SelectItem value="ZAR">ZAR - South African Rand</SelectItem>
+                  <SelectItem value="USD">$ USD - US Dollar</SelectItem>
+                  <SelectItem value="EUR">€ EUR - Euro</SelectItem>
+                  <SelectItem value="GBP">£ GBP - British Pound</SelectItem>
+                  <SelectItem value="NGN">₦ NGN - Nigerian Naira</SelectItem>
+                  <SelectItem value="KES">KSh KES - Kenyan Shilling</SelectItem>
+                  <SelectItem value="GHS">GH₵ GHS - Ghanaian Cedi</SelectItem>
+                  <SelectItem value="ZAR">R ZAR - South African Rand</SelectItem>
+                  <SelectItem value="EGP">E£ EGP - Egyptian Pound</SelectItem>
+                  <SelectItem value="RWF">RF RWF - Rwandan Franc</SelectItem>
+                  <SelectItem value="XOF">CFA XOF - West African CFA</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="p-4 rounded-lg bg-muted/50 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isPaystackRegion ? 'bg-teal-100 dark:bg-teal-900/30' : 'bg-indigo-100 dark:bg-indigo-900/30'}`}>
+                  <Landmark className={`h-6 w-6 ${isPaystackRegion ? 'text-teal-600' : 'text-indigo-600'}`} />
+                </div>
+                <div>
+                  <p className="font-semibold">
+                    Payment Provider: {isPaystackRegion ? 'Paystack' : 'Stripe'}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {isPaystackRegion 
+                      ? 'Optimized for African payments with local bank support'
+                      : 'Global payment processing with card and bank support'
+                    }
+                  </p>
+                </div>
+              </div>
+              <Badge className={isPaystackRegion ? 'bg-teal-600' : 'bg-indigo-600'}>
+                {isPaystackRegion ? 'Paystack' : 'Stripe'}
+              </Badge>
+            </div>
+
+            <Separator />
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex items-center gap-2">
+                {paymentKeys?.stripe ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                ) : (
+                  <XCircle className="h-4 w-4 text-muted-foreground" />
+                )}
+                <span className="text-sm">Stripe {paymentKeys?.stripe ? 'Connected' : 'Not configured'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {paymentKeys?.paystack ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                ) : (
+                  <XCircle className="h-4 w-4 text-muted-foreground" />
+                )}
+                <span className="text-sm">Paystack {paymentKeys?.paystack ? 'Connected' : 'Not configured'}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="timezone">Timezone</Label>
               <Select 
@@ -245,11 +385,11 @@ export default function Settings() {
                   <SelectItem value="Europe/London">GMT (London)</SelectItem>
                   <SelectItem value="Africa/Lagos">West Africa Time</SelectItem>
                   <SelectItem value="Africa/Nairobi">East Africa Time</SelectItem>
+                  <SelectItem value="Africa/Cairo">Egypt Time</SelectItem>
+                  <SelectItem value="Africa/Johannesburg">South Africa Time</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="dateFormat">Date Format</Label>
               <Select 
@@ -266,34 +406,55 @@ export default function Settings() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="fiscalYearStart">Fiscal Year Start</Label>
-              <Select 
-                value={formData.fiscalYearStart || "January"}
-                onValueChange={(value) => setFormData({ ...formData, fiscalYearStart: value })}
-              >
-                <SelectTrigger data-testid="select-fiscal-year">
-                  <SelectValue placeholder="Select month" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="January">January</SelectItem>
-                  <SelectItem value="April">April</SelectItem>
-                  <SelectItem value="July">July</SelectItem>
-                  <SelectItem value="October">October</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
           </div>
+
           <div className="flex justify-end">
             <Button 
-              onClick={handleSaveCurrency}
+              onClick={handleSaveRegion}
               disabled={updateSettingsMutation.isPending}
-              data-testid="button-save-currency"
+              data-testid="button-save-region"
             >
               <Save className="h-4 w-4 mr-2" />
-              Save Changes
+              Save Region Settings
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Wallet className="h-5 w-5 text-primary" />
+            <CardTitle>Virtual Accounts</CardTitle>
+          </div>
+          <CardDescription>
+            Create virtual bank accounts for receiving payments.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="p-4 border rounded-lg bg-muted/30">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium">Virtual Account</p>
+                <p className="text-sm text-muted-foreground">
+                  {isPaystackRegion 
+                    ? 'Create a dedicated bank account number for your company'
+                    : 'Connect your bank for direct deposits via Stripe Treasury'
+                  }
+                </p>
+              </div>
+              <Button variant="outline" data-testid="button-create-virtual-account">
+                {isPaystackRegion ? 'Create Account' : 'Connect Bank'}
+              </Button>
+            </div>
+          </div>
+          
+          {isPaystackRegion && (
+            <div className="text-sm text-muted-foreground">
+              <p>Supported banks: Wema Bank, Access Bank, Providus Bank</p>
+              <p>Receive instant notifications for deposits</p>
+            </div>
+          )}
         </CardContent>
       </Card>
 

@@ -242,6 +242,11 @@ export interface CompanySettings {
   autoApproveBelow: number;
   requireReceipts: boolean;
   expenseCategories: string[];
+  countryCode: string;
+  region: string;
+  paymentProvider: 'stripe' | 'paystack';
+  paystackEnabled: boolean;
+  stripeEnabled: boolean;
 }
 
 // Category icons mapping
