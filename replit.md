@@ -1,23 +1,26 @@
 # Spendly - Global Expense Management Platform
 
 ## Overview
-Spendly is a comprehensive financial operating system for high-growth teams. It provides expense tracking, budget management, virtual cards, team management, and transaction monitoring in a unified platform.
+Spendly is a comprehensive financial operating system for high-growth teams. It provides expense tracking, budget management, virtual cards, team management, payroll, invoicing, vendor management, and transaction monitoring in a unified platform.
 
 ## Recent Changes (January 29, 2026)
-- Initial build from GitHub repository merge
-- Implemented full React frontend with sidebar navigation
-- Created backend API with in-memory storage and demo data
-- Added 8 main pages: Dashboard, Transactions, Expenses, Bills, Budget, Cards, Team, Settings
-- Configured indigo/slate color theme with dark mode support
+- Full application build from GitHub repository (https://github.com/agbanzy/spendly-g)
+- Implemented complete React frontend with 15+ pages
+- Added landing page, login/signup authentication flows
+- Created comprehensive dashboard with balance cards and AI insights
+- Added Finance section: Analytics, Reports, Payroll, Invoices, Vendors
+- Implemented Quick Actions FAB for rapid actions
+- Backend API with in-memory storage and demo data
 
 ## Architecture
 
 ### Frontend (client/)
 - React with TypeScript
-- Wouter for routing
+- Wouter for routing (landing, auth, and app routes)
 - TanStack Query for data fetching
 - Shadcn/ui components with Tailwind CSS
-- Dark/light theme support
+- Dark/light theme support with ThemeProvider
+- Responsive sidebar navigation
 
 ### Backend (server/)
 - Express.js server
@@ -29,14 +32,30 @@ Spendly is a comprehensive financial operating system for high-growth teams. It 
 - Drizzle-zod integration for validation
 
 ## Key Features
-1. **Dashboard** - Financial overview with balance cards, AI insights, recent activity
-2. **Transactions** - Full transaction history with filters
-3. **Expenses** - Expense tracking and creation
-4. **Bills** - Recurring bill management
-5. **Budget** - Category-based budget tracking with progress
-6. **Cards** - Virtual card management
-7. **Team** - Team member management
-8. **Settings** - Company and user preferences
+
+### Public Pages
+1. **Landing Page** (`/`) - Marketing page with features, pricing, testimonials
+2. **Login** (`/login`) - Email/password and Google login
+3. **Signup** (`/signup`) - New user registration
+
+### App Pages (After Login)
+1. **Dashboard** (`/dashboard`) - Financial overview with balance cards, AI insights, recent activity
+2. **Transactions** (`/transactions`) - Full transaction history with filters
+3. **Expenses** (`/expenses`) - Expense tracking and creation with approval workflow
+4. **Bills** (`/bills`) - Recurring bill management
+5. **Budget** (`/budget`) - Category-based budget tracking with progress bars
+6. **Cards** (`/cards`) - Virtual card management with visual cards
+
+### Finance Section
+7. **Analytics** (`/analytics`) - Spending trends, charts, category breakdown
+8. **Reports** (`/reports`) - Generate and download financial reports
+9. **Payroll** (`/payroll`) - Employee salary management and payments
+10. **Invoices** (`/invoices`) - Create and manage client invoices
+11. **Vendors** (`/vendors`) - Vendor management and payments
+
+### Management Section
+12. **Team** (`/team`) - Team member management with roles
+13. **Settings** (`/settings`) - Company and user preferences
 
 ## API Endpoints
 - `GET /api/balances` - Company balances
@@ -49,6 +68,12 @@ Spendly is a comprehensive financial operating system for high-growth teams. It 
 - `GET /api/team` - List team members
 - `GET /api/insights` - AI-generated insights
 
+## Components
+- **AppSidebar** - Main navigation with sections (Main, Finance, Management)
+- **QuickActions** - Floating action button for rapid actions
+- **ThemeToggle** - Dark/light mode toggle
+- **Various page components** with data fetching and forms
+
 ## Running the Application
 The app runs on port 5000 with `npm run dev`.
 
@@ -56,3 +81,10 @@ The app runs on port 5000 with `npm run dev`.
 - Default theme: Light mode (toggle available in header)
 - Currency: USD
 - Clean, minimal interface with indigo accent color
+- Professional design with Shadcn components
+
+## Design Tokens
+- Primary: Indigo (hsl 238, 84%, 57%)
+- Background: Slate tones
+- Cards: White/dark backgrounds with subtle borders
+- Shadows: Minimal, for elevation only

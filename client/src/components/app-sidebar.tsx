@@ -1,4 +1,5 @@
 import { useLocation, Link } from "wouter";
+import { useAuth } from "@/lib/auth";
 import {
   LayoutDashboard,
   Receipt,
@@ -9,8 +10,11 @@ import {
   Settings,
   ArrowRightLeft,
   FileText,
-  HelpCircle,
   LogOut,
+  BarChart3,
+  FileSpreadsheet,
+  DollarSign,
+  Building2,
 } from "lucide-react";
 import {
   Sidebar,
@@ -27,12 +31,20 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 const mainMenuItems = [
-  { title: "Dashboard", url: "/", icon: LayoutDashboard },
+  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Transactions", url: "/transactions", icon: ArrowRightLeft },
   { title: "Expenses", url: "/expenses", icon: Receipt },
   { title: "Bills", url: "/bills", icon: FileText },
   { title: "Budget", url: "/budget", icon: PieChart },
   { title: "Cards", url: "/cards", icon: CreditCard },
+];
+
+const financeItems = [
+  { title: "Analytics", url: "/analytics", icon: BarChart3 },
+  { title: "Reports", url: "/reports", icon: FileSpreadsheet },
+  { title: "Payroll", url: "/payroll", icon: DollarSign },
+  { title: "Invoices", url: "/invoices", icon: FileText },
+  { title: "Vendors", url: "/vendors", icon: Building2 },
 ];
 
 const managementItems = [
@@ -41,20 +53,32 @@ const managementItems = [
 ];
 
 export function AppSidebar() {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
+  const { user, logout } = useAuth();
+
+  const handleLogout = () => {
+    logout();
+    setLocation("/");
+  };
+
+  const initials = user?.name
+    ? user.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)
+    : "JD";
 
   return (
     <Sidebar>
       <SidebarHeader className="border-b border-sidebar-border p-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center font-black text-xl text-primary-foreground shadow-lg">
-            S
+        <Link href="/dashboard">
+          <div className="flex items-center gap-3 cursor-pointer">
+            <div className="w-10 h-10 bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-xl flex items-center justify-center shadow-lg">
+              <Wallet className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <span className="text-xl font-black text-foreground">Spendly</span>
+              <p className="text-xs text-muted-foreground">Finance Dashboard</p>
+            </div>
           </div>
-          <div>
-            <span className="text-xl font-black text-foreground">Spendly</span>
-            <p className="text-xs text-muted-foreground">Finance Dashboard</p>
-          </div>
-        </div>
+        </Link>
       </SidebarHeader>
       
       <SidebarContent>
@@ -69,7 +93,31 @@ export function AppSidebar() {
                   <SidebarMenuButton
                     asChild
                     isActive={location === item.url}
-                    data-testid={`nav-${item.title.toLowerCase()}`}
+                    data-testid={`nav-${item.title.toLowerCase().replace(/\s/g, "-")}`}
+                  >
+                    <Link href={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel className="text-xs font-bold uppercase tracking-widest text-muted-foreground px-4">
+            Finance
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {financeItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={location === item.url}
+                    data-testid={`nav-${item.title.toLowerCase().replace(/\s/g, "-")}`}
                   >
                     <Link href={item.url}>
                       <item.icon className="h-4 w-4" />
@@ -93,7 +141,7 @@ export function AppSidebar() {
                   <SidebarMenuButton
                     asChild
                     isActive={location === item.url}
-                    data-testid={`nav-${item.title.toLowerCase()}`}
+                    data-testid={`nav-${item.title.toLowerCase().replace(/\s/g, "-")}`}
                   >
                     <Link href={item.url}>
                       <item.icon className="h-4 w-4" />
@@ -110,15 +158,16 @@ export function AppSidebar() {
       <SidebarFooter className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3">
           <Avatar className="h-9 w-9">
-            <AvatarFallback className="bg-primary/10 text-primary font-bold text-sm">
-              JD
+            <AvatarFallback className="bg-indigo-100 dark:bg-indigo-900 text-indigo-600 dark:text-indigo-400 font-bold text-sm">
+              {initials}
             </AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold truncate">John Doe</p>
-            <p className="text-xs text-muted-foreground truncate">Admin</p>
+            <p className="text-sm font-semibold truncate">{user?.name || "User"}</p>
+            <p className="text-xs text-muted-foreground truncate">{user?.role || "Member"}</p>
           </div>
           <button
+            onClick={handleLogout}
             className="p-2 rounded-md hover:bg-sidebar-accent transition-colors"
             data-testid="button-logout"
           >

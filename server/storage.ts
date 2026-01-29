@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Expense, type Transaction, type Bill, type Budget, type VirtualCard, type TeamMember, type CompanyBalances, type AIInsight } from "@shared/schema";
+import { type User, type InsertUser, type Expense, type Transaction, type Bill, type Budget, type VirtualCard, type TeamMember, type CompanyBalances, type AIInsight, type PayrollEntry, type Invoice, type Vendor } from "@shared/schema";
 import { randomUUID } from "crypto";
 
 export interface IStorage {
@@ -30,6 +30,17 @@ export interface IStorage {
   
   // AI Insights
   getInsights(): Promise<AIInsight[]>;
+  
+  // Payroll
+  getPayroll(): Promise<PayrollEntry[]>;
+  
+  // Invoices
+  getInvoices(): Promise<Invoice[]>;
+  createInvoice(invoice: Omit<Invoice, 'id'>): Promise<Invoice>;
+  
+  // Vendors
+  getVendors(): Promise<Vendor[]>;
+  createVendor(vendor: Omit<Vendor, 'id'>): Promise<Vendor>;
 }
 
 export class MemStorage implements IStorage {
@@ -40,6 +51,9 @@ export class MemStorage implements IStorage {
   private budgets: Map<string, Budget>;
   private cards: Map<string, VirtualCard>;
   private teamMembers: Map<string, TeamMember>;
+  private payrollEntries: Map<string, PayrollEntry>;
+  private invoices: Map<string, Invoice>;
+  private vendors: Map<string, Vendor>;
   private balances: CompanyBalances;
 
   constructor() {
@@ -50,6 +64,9 @@ export class MemStorage implements IStorage {
     this.budgets = new Map();
     this.cards = new Map();
     this.teamMembers = new Map();
+    this.payrollEntries = new Map();
+    this.invoices = new Map();
+    this.vendors = new Map();
     this.balances = {
       local: 45850,
       usd: 78500,
@@ -149,6 +166,47 @@ export class MemStorage implements IStorage {
       const id = randomUUID();
       this.teamMembers.set(id, { ...member, id });
     });
+
+    // Demo payroll
+    const demoPayroll: Omit<PayrollEntry, 'id'>[] = [
+      { employeeId: '1', employeeName: 'John Doe', department: 'Engineering', salary: 8500, bonus: 1000, deductions: 1200, netPay: 8300, status: 'paid', payDate: '2026-01-25' },
+      { employeeId: '2', employeeName: 'Sarah Chen', department: 'Marketing', salary: 7200, bonus: 500, deductions: 950, netPay: 6750, status: 'paid', payDate: '2026-01-25' },
+      { employeeId: '3', employeeName: 'Mike Johnson', department: 'Sales', salary: 6500, bonus: 2200, deductions: 1100, netPay: 7600, status: 'pending', payDate: '2026-02-01' },
+      { employeeId: '4', employeeName: 'Emily Brown', department: 'HR', salary: 5800, bonus: 0, deductions: 780, netPay: 5020, status: 'pending', payDate: '2026-02-01' },
+      { employeeId: '5', employeeName: 'Alex Rivera', department: 'Engineering', salary: 7800, bonus: 800, deductions: 1050, netPay: 7550, status: 'processing', payDate: '2026-01-28' },
+    ];
+    
+    demoPayroll.forEach((entry) => {
+      const id = randomUUID();
+      this.payrollEntries.set(id, { ...entry, id });
+    });
+
+    // Demo invoices
+    const demoInvoices: Omit<Invoice, 'id'>[] = [
+      { invoiceNumber: 'INV-2026-001', client: 'TechCorp Inc.', clientEmail: 'billing@techcorp.com', amount: 15000, dueDate: '2026-02-15', issuedDate: '2026-01-15', status: 'pending', items: [{ description: 'Consulting Services', quantity: 40, rate: 375 }] },
+      { invoiceNumber: 'INV-2026-002', client: 'GlobalScale Ltd.', clientEmail: 'accounts@globalscale.com', amount: 8500, dueDate: '2026-01-20', issuedDate: '2026-01-05', status: 'paid', items: [{ description: 'Software Development', quantity: 1, rate: 8500 }] },
+      { invoiceNumber: 'INV-2026-003', client: 'StartupHub', clientEmail: 'finance@startuphub.io', amount: 3200, dueDate: '2026-01-10', issuedDate: '2025-12-15', status: 'overdue', items: [{ description: 'Design Services', quantity: 16, rate: 200 }] },
+      { invoiceNumber: 'INV-2026-004', client: 'Acme Corp', clientEmail: 'billing@acme.com', amount: 22000, dueDate: '2026-03-01', issuedDate: '2026-01-28', status: 'draft', items: [{ description: 'Annual Maintenance', quantity: 1, rate: 22000 }] },
+    ];
+    
+    demoInvoices.forEach((invoice) => {
+      const id = randomUUID();
+      this.invoices.set(id, { ...invoice, id });
+    });
+
+    // Demo vendors
+    const demoVendors: Omit<Vendor, 'id'>[] = [
+      { name: 'Amazon Web Services', email: 'billing@aws.amazon.com', phone: '+1 (888) 123-4567', address: 'Seattle, WA, USA', category: 'Cloud Services', status: 'active', totalPaid: 28500, pendingPayments: 2499, lastPayment: '2026-01-28' },
+      { name: 'Google Cloud', email: 'billing@google.com', phone: '+1 (800) 555-0123', address: 'Mountain View, CA, USA', category: 'Cloud Services', status: 'active', totalPaid: 12000, pendingPayments: 0, lastPayment: '2026-01-15' },
+      { name: 'Figma Inc.', email: 'enterprise@figma.com', phone: '+1 (415) 555-7890', address: 'San Francisco, CA, USA', category: 'Design Tools', status: 'active', totalPaid: 540, pendingPayments: 45, lastPayment: '2026-01-27' },
+      { name: 'WeWork', email: 'invoices@wework.com', phone: '+1 (212) 555-4567', address: 'New York, NY, USA', category: 'Office Space', status: 'active', totalPaid: 14400, pendingPayments: 1200, lastPayment: '2026-01-25' },
+      { name: 'Comcast Business', email: 'business@comcast.com', phone: '+1 (800) 555-9876', address: 'Philadelphia, PA, USA', category: 'Utilities', status: 'active', totalPaid: 3588, pendingPayments: 0, lastPayment: '2026-01-15' },
+    ];
+    
+    demoVendors.forEach((vendor) => {
+      const id = randomUUID();
+      this.vendors.set(id, { ...vendor, id });
+    });
   }
 
   async getUser(id: string): Promise<User | undefined> {
@@ -227,6 +285,36 @@ export class MemStorage implements IStorage {
         type: 'info',
       },
     ];
+  }
+
+  async getPayroll(): Promise<PayrollEntry[]> {
+    return Array.from(this.payrollEntries.values()).sort((a, b) => 
+      new Date(b.payDate).getTime() - new Date(a.payDate).getTime()
+    );
+  }
+
+  async getInvoices(): Promise<Invoice[]> {
+    return Array.from(this.invoices.values()).sort((a, b) => 
+      new Date(b.issuedDate).getTime() - new Date(a.issuedDate).getTime()
+    );
+  }
+
+  async createInvoice(invoice: Omit<Invoice, 'id'>): Promise<Invoice> {
+    const id = randomUUID();
+    const newInvoice: Invoice = { ...invoice, id };
+    this.invoices.set(id, newInvoice);
+    return newInvoice;
+  }
+
+  async getVendors(): Promise<Vendor[]> {
+    return Array.from(this.vendors.values());
+  }
+
+  async createVendor(vendor: Omit<Vendor, 'id'>): Promise<Vendor> {
+    const id = randomUUID();
+    const newVendor: Vendor = { ...vendor, id };
+    this.vendors.set(id, newVendor);
+    return newVendor;
   }
 }
 

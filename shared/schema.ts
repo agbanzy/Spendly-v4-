@@ -189,6 +189,44 @@ export interface AIInsight {
   type: 'saving' | 'warning' | 'info';
 }
 
+export interface PayrollEntry {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  department: string;
+  salary: number;
+  bonus: number;
+  deductions: number;
+  netPay: number;
+  status: 'paid' | 'pending' | 'processing';
+  payDate: string;
+}
+
+export interface Invoice {
+  id: string;
+  invoiceNumber: string;
+  client: string;
+  clientEmail: string;
+  amount: number;
+  dueDate: string;
+  issuedDate: string;
+  status: 'paid' | 'pending' | 'overdue' | 'draft';
+  items: { description: string; quantity: number; rate: number }[];
+}
+
+export interface Vendor {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  address: string;
+  category: string;
+  status: 'active' | 'inactive' | 'pending';
+  totalPaid: number;
+  pendingPayments: number;
+  lastPayment: string;
+}
+
 // Category icons mapping
 export const categoryIcons: Record<string, string> = {
   'Software': 'code',
