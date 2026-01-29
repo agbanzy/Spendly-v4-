@@ -1,76 +1,88 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { 
+  auth, 
+  signInWithEmail, 
+  signUpWithEmail, 
+  signInWithGoogle, 
+  logOut, 
+  onAuthChange,
+  type User as FirebaseUser 
+} from "./firebase";
 
 interface User {
   id: string;
   name: string;
   email: string;
   role: string;
+  photoURL?: string;
 }
 
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
+  isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
   signup: (name: string, email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const STORAGE_KEY = "spendly_auth";
+function mapFirebaseUser(firebaseUser: FirebaseUser): User {
+  return {
+    id: firebaseUser.uid,
+    name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
+    email: firebaseUser.email || "",
+    role: "Admin",
+    photoURL: firebaseUser.photoURL || undefined
+  };
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      try {
-        setUser(JSON.parse(stored));
-      } catch {
-        localStorage.removeItem(STORAGE_KEY);
+    const unsubscribe = onAuthChange((firebaseUser) => {
+      if (firebaseUser) {
+        setUser(mapFirebaseUser(firebaseUser));
+      } else {
+        setUser(null);
       }
-    }
+      setIsLoading(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  const login = async (email: string, _password: string) => {
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    const newUser: User = {
-      id: "1",
-      name: email.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
-      email,
-      role: "Admin"
-    };
-    
-    setUser(newUser);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newUser));
+  const login = async (email: string, password: string) => {
+    const userCredential = await signInWithEmail(email, password);
+    setUser(mapFirebaseUser(userCredential.user));
   };
 
-  const signup = async (name: string, email: string, _password: string) => {
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    const newUser: User = {
-      id: "1",
-      name,
-      email,
-      role: "Admin"
-    };
-    
-    setUser(newUser);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newUser));
+  const loginWithGoogle = async () => {
+    const userCredential = await signInWithGoogle();
+    setUser(mapFirebaseUser(userCredential.user));
   };
 
-  const logout = () => {
+  const signup = async (name: string, email: string, password: string) => {
+    const userCredential = await signUpWithEmail(email, password, name);
+    setUser(mapFirebaseUser(userCredential.user));
+  };
+
+  const logout = async () => {
+    await logOut();
     setUser(null);
-    localStorage.removeItem(STORAGE_KEY);
   };
 
   return (
     <AuthContext.Provider value={{ 
       user, 
-      isAuthenticated: !!user, 
-      login, 
+      isAuthenticated: !!user,
+      isLoading,
+      login,
+      loginWithGoogle,
       signup, 
       logout 
     }}>

@@ -28,8 +28,27 @@ import Payroll from "@/pages/payroll";
 import Invoices from "@/pages/invoices";
 import Vendors from "@/pages/vendors";
 
+function AuthLoading() {
+  return (
+    <div className="h-screen w-full flex items-center justify-center bg-background">
+      <div className="flex flex-col items-center gap-4">
+        <div className="h-12 w-12 rounded-xl bg-indigo-600 flex items-center justify-center animate-pulse">
+          <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+          </svg>
+        </div>
+        <p className="text-muted-foreground">Loading...</p>
+      </div>
+    </div>
+  );
+}
+
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
+  
+  if (isLoading) {
+    return <AuthLoading />;
+  }
   
   if (!isAuthenticated) {
     return <Redirect to="/login" />;
@@ -87,7 +106,11 @@ function AppLayout() {
 }
 
 function PublicRoute({ component: Component }: { component: React.ComponentType }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
+  
+  if (isLoading) {
+    return <AuthLoading />;
+  }
   
   if (isAuthenticated) {
     return <Redirect to="/dashboard" />;
@@ -98,10 +121,14 @@ function PublicRoute({ component: Component }: { component: React.ComponentType 
 
 function AppContent() {
   const [location] = useLocation();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
   
   const publicRoutes = ["/", "/login", "/signup"];
   const isPublicRoute = publicRoutes.includes(location);
+
+  if (isLoading) {
+    return <AuthLoading />;
+  }
 
   if (isPublicRoute) {
     return (

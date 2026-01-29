@@ -28,7 +28,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 const mainMenuItems = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -56,8 +56,8 @@ export function AppSidebar() {
   const [location, setLocation] = useLocation();
   const { user, logout } = useAuth();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     setLocation("/");
   };
 
@@ -158,6 +158,7 @@ export function AppSidebar() {
       <SidebarFooter className="border-t border-sidebar-border p-4">
         <div className="flex items-center gap-3">
           <Avatar className="h-9 w-9">
+            {user?.photoURL && <AvatarImage src={user.photoURL} alt={user.name} />}
             <AvatarFallback className="bg-indigo-100 dark:bg-indigo-900 text-indigo-600 dark:text-indigo-400 font-bold text-sm">
               {initials}
             </AvatarFallback>

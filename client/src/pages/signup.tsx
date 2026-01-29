@@ -14,7 +14,7 @@ import { SiGoogle } from "react-icons/si";
 export default function SignupPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { signup, login } = useAuth();
+  const { signup, loginWithGoogle } = useAuth();
   const [formData, setFormData] = useState({
     fullName: "",
     email: "",
@@ -69,10 +69,18 @@ export default function SignupPage() {
         description: "Welcome to Spendly. Let's get you set up."
       });
       setLocation("/dashboard");
-    } catch (error) {
+    } catch (error: any) {
+      let errorMessage = "Signup failed. Please try again.";
+      if (error?.code === "auth/email-already-in-use") {
+        errorMessage = "An account with this email already exists.";
+      } else if (error?.code === "auth/weak-password") {
+        errorMessage = "Password is too weak. Use at least 6 characters.";
+      } else if (error?.code === "auth/invalid-email") {
+        errorMessage = "Please enter a valid email address.";
+      }
       toast({
         title: "Error",
-        description: "Signup failed. Please try again.",
+        description: errorMessage,
         variant: "destructive"
       });
     } finally {
@@ -83,16 +91,19 @@ export default function SignupPage() {
   const handleGoogleSignup = async () => {
     setIsLoading(true);
     try {
-      await login("user@company.com", "google");
+      await loginWithGoogle();
       toast({
         title: "Welcome!",
         description: "Signed up with Google successfully."
       });
       setLocation("/dashboard");
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = error?.code === "auth/popup-closed-by-user" 
+        ? "Sign-up cancelled." 
+        : "Google sign-up failed. Please try again.";
       toast({
         title: "Error",
-        description: "Google sign-up failed.",
+        description: errorMessage,
         variant: "destructive"
       });
     } finally {

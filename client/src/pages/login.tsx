@@ -13,7 +13,7 @@ import { SiGoogle } from "react-icons/si";
 export default function LoginPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { login } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -40,10 +40,20 @@ export default function LoginPage() {
         description: "You have been logged in successfully."
       });
       setLocation("/dashboard");
-    } catch (error) {
+    } catch (error: any) {
+      let errorMessage = "Login failed. Please try again.";
+      if (error?.code === "auth/user-not-found") {
+        errorMessage = "No account found with this email.";
+      } else if (error?.code === "auth/wrong-password") {
+        errorMessage = "Incorrect password.";
+      } else if (error?.code === "auth/invalid-credential") {
+        errorMessage = "Invalid email or password.";
+      } else if (error?.code === "auth/too-many-requests") {
+        errorMessage = "Too many attempts. Please try again later.";
+      }
       toast({
         title: "Error",
-        description: "Login failed. Please try again.",
+        description: errorMessage,
         variant: "destructive"
       });
     } finally {
@@ -54,16 +64,19 @@ export default function LoginPage() {
   const handleGoogleLogin = async () => {
     setIsLoading(true);
     try {
-      await login("user@company.com", "google");
+      await loginWithGoogle();
       toast({
         title: "Welcome!",
         description: "Signed in with Google successfully."
       });
       setLocation("/dashboard");
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = error?.code === "auth/popup-closed-by-user" 
+        ? "Sign-in cancelled." 
+        : "Google sign-in failed. Please try again.";
       toast({
         title: "Error",
-        description: "Google sign-in failed.",
+        description: errorMessage,
         variant: "destructive"
       });
     } finally {
