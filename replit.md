@@ -4,12 +4,16 @@
 Spendly is a comprehensive financial operating system for high-growth teams. It provides expense tracking, budget management, virtual cards, team management, payroll, invoicing, vendor management, and transaction monitoring in a unified platform.
 
 ## Recent Changes (January 29, 2026)
+- **Team Management**: Complete team member CRUD with roles, status toggling (active/inactive), and department assignment
+- **Department Management**: Full department CRUD with name, description, budget, color picker, and department head assignment
+- **Payroll System**: Complete payroll with add/edit/delete employees, batch processing, individual payments, payslip view/print, CSV/JSON export
+- **Notification System**: Multi-channel notifications (SMS via Twilio, Email via SendGrid, Push via Expo, In-app)
 - **KYC & Onboarding Flow**: Complete multi-step verification system with personal info, address, identity documents, and business information
 - **User Profiles**: New userProfiles table linked to Firebase UID for extended user data and KYC status tracking
 - **KYC Submissions**: kycSubmissions table for storing verification documents and personal details
 - **KYC Status Banner**: Dashboard shows dynamic status (not started, pending review, rejected, approved)
 - **PostgreSQL Database**: Migrated from in-memory storage to real PostgreSQL database (Neon-backed)
-- **Database Schema**: Full Drizzle ORM schema with 17 tables (added userProfiles, kycSubmissions)
+- **Database Schema**: Full Drizzle ORM schema with 24 tables (added departments, notifications, notificationSettings, pushTokens, payrollEntries)
 - Integrated Firebase authentication (email/password + Google sign-in)
 - Added Stripe and Paystack payment gateway configurations
 - Full application build from GitHub repository (https://github.com/agbanzy/spendly-g)

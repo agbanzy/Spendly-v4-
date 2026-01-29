@@ -82,6 +82,22 @@ const teamMemberSchema = z.object({
   department: z.string().optional().default('General'),
 });
 
+const departmentSchema = z.object({
+  name: z.string().min(1, "Department name is required"),
+  description: z.string().optional().nullable(),
+  headId: z.string().optional().nullable(),
+  budget: z.union([z.string(), z.number()]).optional().nullable().transform(val => {
+    if (val === null || val === undefined || val === '') return null;
+    return typeof val === 'string' ? parseFloat(val) || null : val;
+  }),
+  color: z.string().optional().default('#6366f1'),
+});
+
+const departmentUpdateSchema = departmentSchema.partial().extend({
+  status: z.string().optional(),
+  memberCount: z.number().optional(),
+});
+
 const payrollSchema = z.object({
   employeeId: z.string().optional(),
   employeeName: z.string().min(1),
@@ -952,10 +968,11 @@ export async function registerRoutes(
 
   app.post("/api/departments", async (req, res) => {
     try {
-      const { name, description, headId, budget, color } = req.body;
-      if (!name) {
-        return res.status(400).json({ error: "Department name is required" });
+      const result = departmentSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid department data", details: result.error.issues });
       }
+      const { name, description, headId, budget, color } = result.data;
       const dept = await storage.createDepartment({
         name,
         description: description || null,
@@ -975,7 +992,11 @@ export async function registerRoutes(
 
   app.patch("/api/departments/:id", async (req, res) => {
     try {
-      const { name, description, headId, budget, color, status, memberCount } = req.body;
+      const result = departmentUpdateSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid department data", details: result.error.issues });
+      }
+      const { name, description, headId, budget, color, status, memberCount } = result.data;
       const updateData: Record<string, any> = {};
       if (name !== undefined) updateData.name = name;
       if (description !== undefined) updateData.description = description;

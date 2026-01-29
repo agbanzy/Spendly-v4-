@@ -475,7 +475,7 @@ export default function Team() {
                   </div>
                   <h3 className="text-lg font-bold mb-1">No team members yet</h3>
                   <p className="text-sm text-muted-foreground mb-4">Add your first team member to get started.</p>
-                  <Button onClick={() => { resetMemberForm(); setEditingMember(null); setIsMemberOpen(true); }}><UserPlus className="h-4 w-4 mr-2" />Add Member</Button>
+                  <Button onClick={() => { resetMemberForm(); setEditingMember(null); setIsMemberOpen(true); }} data-testid="button-add-first-member"><UserPlus className="h-4 w-4 mr-2" />Add Member</Button>
                 </div>
               )}
             </CardContent>
@@ -545,7 +545,7 @@ export default function Team() {
                   </div>
                   <h3 className="text-lg font-bold mb-1">No departments yet</h3>
                   <p className="text-sm text-muted-foreground mb-4">Create your first department to organize your team.</p>
-                  <Button onClick={() => { resetDeptForm(); setEditingDept(null); setIsDeptOpen(true); }}><FolderPlus className="h-4 w-4 mr-2" />Create Department</Button>
+                  <Button onClick={() => { resetDeptForm(); setEditingDept(null); setIsDeptOpen(true); }} data-testid="button-add-first-department"><FolderPlus className="h-4 w-4 mr-2" />Create Department</Button>
                 </CardContent>
               </Card>
             )}
@@ -609,7 +609,7 @@ export default function Team() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsMemberOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setIsMemberOpen(false)} data-testid="button-cancel-member">Cancel</Button>
             <Button onClick={handleMemberSubmit} disabled={createMemberMutation.isPending || updateMemberMutation.isPending} data-testid="button-submit-member">
               {(createMemberMutation.isPending || updateMemberMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {editingMember ? "Update Member" : "Add Member"}
@@ -672,7 +672,7 @@ export default function Team() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeptOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setIsDeptOpen(false)} data-testid="button-cancel-dept">Cancel</Button>
             <Button onClick={handleDeptSubmit} disabled={createDeptMutation.isPending || updateDeptMutation.isPending} data-testid="button-submit-dept">
               {(createDeptMutation.isPending || updateDeptMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {editingDept ? "Update Department" : "Create Department"}
