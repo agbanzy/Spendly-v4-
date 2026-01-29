@@ -44,6 +44,9 @@ const expenseSchema = z.object({
   category: z.string().min(1),
   note: z.string().optional(),
   receiptUrl: z.string().optional(),
+  expenseType: z.enum(['spent', 'request']).optional().default('request'),
+  attachments: z.array(z.string()).optional().default([]),
+  taggedReviewers: z.array(z.string()).optional().default([]),
 });
 
 const transactionSchema = z.object({
@@ -321,7 +324,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid expense data", details: result.error.issues });
       }
-      const { merchant, amount, category, note, receiptUrl } = result.data;
+      const { merchant, amount, category, note, receiptUrl, expenseType, attachments, taggedReviewers } = result.data;
 
       const expense = await storage.createExpense({
         merchant,
@@ -329,12 +332,15 @@ export async function registerRoutes(
         currency: 'USD',
         date: new Date().toISOString().split('T')[0],
         category,
-        status: 'PENDING',
+        status: expenseType === 'spent' ? 'APPROVED' : 'PENDING',
         user: 'John Doe',
         userId: '1',
         department: 'General',
         note,
         receiptUrl,
+        expenseType: expenseType || 'request',
+        attachments: attachments || [],
+        taggedReviewers: taggedReviewers || [],
       });
       
       res.status(201).json(expense);

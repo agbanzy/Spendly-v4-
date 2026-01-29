@@ -106,6 +106,9 @@ export const expenses = pgTable("expenses", {
   department: text("department").notNull().default('General'),
   note: text("note"),
   receiptUrl: text("receipt_url"),
+  expenseType: text("expense_type").notNull().default('request'),
+  attachments: jsonb("attachments").$type<string[]>().default([]),
+  taggedReviewers: jsonb("tagged_reviewers").$type<string[]>().default([]),
 });
 
 // Transactions table
