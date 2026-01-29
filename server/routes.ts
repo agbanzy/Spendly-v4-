@@ -1036,6 +1036,100 @@ export async function registerRoutes(
     }
   });
 
+  // Stripe checkout session for card payments (non-African countries)
+  const checkoutSessionSchema = z.object({
+    amount: z.number().positive(),
+    currency: z.string().min(3).max(3),
+    countryCode: z.string().min(2).max(2),
+    successUrl: z.string().url(),
+    cancelUrl: z.string().url(),
+    metadata: z.record(z.any()).optional(),
+  });
+
+  app.post("/api/stripe/checkout-session", async (req, res) => {
+    try {
+      const result = checkoutSessionSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid checkout data", details: result.error.issues });
+      }
+
+      const { amount, currency, successUrl, cancelUrl, metadata } = result.data;
+      
+      const { getUncachableStripeClient } = await import('./stripeClient');
+      const stripe = await getUncachableStripeClient();
+      
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        mode: 'payment',
+        line_items: [{
+          price_data: {
+            currency: currency.toLowerCase(),
+            product_data: {
+              name: metadata?.description || 'Wallet Funding',
+            },
+            unit_amount: Math.round(amount * 100),
+          },
+          quantity: 1,
+        }],
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        metadata: metadata || {},
+      });
+      
+      res.json({
+        sessionId: session.id,
+        url: session.url,
+      });
+    } catch (error: any) {
+      console.error('Stripe checkout error:', error);
+      res.status(500).json({ error: error.message || "Failed to create checkout session" });
+    }
+  });
+
+  // Stripe payment confirmation endpoint
+  app.post("/api/stripe/confirm-payment", async (req, res) => {
+    try {
+      const { sessionId } = req.body;
+      if (!sessionId) {
+        return res.status(400).json({ error: "Session ID required" });
+      }
+
+      const { getUncachableStripeClient } = await import('./stripeClient');
+      const stripe = await getUncachableStripeClient();
+      
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      
+      if (session.payment_status === 'paid') {
+        const amount = (session.amount_total || 0) / 100;
+        const balances = await storage.getBalances();
+        await storage.updateBalances({ usd: balances.usd + amount });
+        
+        await storage.createTransaction({
+          type: 'Funding',
+          amount,
+          fee: 0,
+          status: 'Completed',
+          description: 'Card payment via Stripe',
+          currency: session.currency?.toUpperCase() || 'USD',
+          date: new Date().toISOString().split('T')[0],
+        });
+        
+        res.json({
+          success: true,
+          amount,
+          status: 'completed',
+        });
+      } else {
+        res.json({
+          success: false,
+          status: session.payment_status,
+        });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to confirm payment" });
+    }
+  });
+
   const paymentIntentSchema = z.object({
     amount: z.number().positive(),
     currency: z.string().min(1),
@@ -1399,6 +1493,106 @@ export async function registerRoutes(
       }
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to validate account" });
+    }
+  });
+
+  // ==================== PAYSTACK WEBHOOK ====================
+  const processedPaystackReferences = new Set<string>();
+  
+  app.post("/api/paystack/webhook", async (req, res) => {
+    try {
+      const crypto = await import('crypto');
+      const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
+      
+      if (paystackSecretKey) {
+        const hash = crypto.createHmac('sha512', paystackSecretKey)
+          .update(JSON.stringify(req.body))
+          .digest('hex');
+        
+        const signature = req.headers['x-paystack-signature'];
+        if (hash !== signature) {
+          console.error('Paystack webhook signature verification failed');
+          return res.status(401).json({ error: "Invalid signature" });
+        }
+      }
+      
+      const event = req.body;
+      const eventType = event.event;
+      
+      if (eventType === 'charge.success') {
+        const { reference, amount, metadata } = event.data;
+        
+        if (processedPaystackReferences.has(reference)) {
+          console.log(`Paystack reference ${reference} already processed`);
+          return res.status(200).json({ received: true });
+        }
+        
+        processedPaystackReferences.add(reference);
+        const amountInNaira = amount / 100;
+        
+        if (metadata?.type === 'wallet_funding') {
+          const balances = await storage.getBalances();
+          await storage.updateBalances({ local: balances.local + amountInNaira });
+          
+          await storage.createTransaction({
+            type: 'Funding',
+            amount: amountInNaira,
+            fee: 0,
+            status: 'Completed',
+            description: 'Card payment via Paystack',
+            currency: event.data.currency || 'NGN',
+            date: new Date().toISOString().split('T')[0],
+          });
+        }
+        
+        console.log(`Paystack payment confirmed: ${reference}`);
+      }
+      
+      res.status(200).json({ received: true });
+    } catch (error: any) {
+      console.error('Paystack webhook error:', error);
+      res.status(500).json({ error: "Webhook processing failed" });
+    }
+  });
+
+  // ==================== PAYSTACK CALLBACK ====================
+  app.get("/api/paystack/callback", async (req, res) => {
+    try {
+      const { reference } = req.query;
+      if (!reference || typeof reference !== 'string') {
+        return res.redirect('/dashboard?payment=failed');
+      }
+      
+      if (processedPaystackReferences.has(reference)) {
+        console.log(`Paystack reference ${reference} already processed via webhook`);
+        return res.redirect('/dashboard?payment=success');
+      }
+      
+      const verification = await paymentService.verifyPayment(reference, 'paystack');
+      
+      if (verification.status === 'success') {
+        processedPaystackReferences.add(reference);
+        
+        const balances = await storage.getBalances();
+        await storage.updateBalances({ local: balances.local + verification.amount });
+        
+        await storage.createTransaction({
+          type: 'Funding',
+          amount: verification.amount,
+          fee: 0,
+          status: 'Completed',
+          description: 'Card payment via Paystack',
+          currency: verification.currency || 'NGN',
+          date: new Date().toISOString().split('T')[0],
+        });
+        
+        res.redirect('/dashboard?payment=success');
+      } else {
+        res.redirect('/dashboard?payment=failed');
+      }
+    } catch (error: any) {
+      console.error('Paystack callback error:', error);
+      res.redirect('/dashboard?payment=failed');
     }
   });
 

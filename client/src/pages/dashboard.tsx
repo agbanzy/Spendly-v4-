@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useSearch } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -58,6 +59,7 @@ interface Bank {
 
 export default function Dashboard() {
   const { toast } = useToast();
+  const searchParams = useSearch();
   const [isFundingOpen, setIsFundingOpen] = useState(false);
   const [isWithdrawalOpen, setIsWithdrawalOpen] = useState(false);
   const [isSendMoneyOpen, setIsSendMoneyOpen] = useState(false);
@@ -68,6 +70,46 @@ export default function Dashboard() {
   const [isValidating, setIsValidating] = useState(false);
   const [showBalance, setShowBalance] = useState(true);
   const [fundingMethod, setFundingMethod] = useState<"card" | "bank" | "crypto">("card");
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams);
+    const paymentStatus = params.get('payment');
+    const sessionId = params.get('session_id');
+    
+    const handlePaymentCallback = async () => {
+      if (paymentStatus === 'success' && sessionId) {
+        try {
+          const res = await apiRequest("POST", "/api/stripe/confirm-payment", { sessionId });
+          const data = await res.json();
+          if (data.success) {
+            toast({ title: "Payment successful!", description: `$${data.amount} has been added to your wallet.` });
+            queryClient.invalidateQueries({ queryKey: ["/api/balances"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+          } else {
+            toast({ title: "Payment pending", description: "Your payment is being processed." });
+          }
+        } catch (error) {
+          toast({ title: "Payment verification failed", variant: "destructive" });
+        }
+        window.history.replaceState({}, '', '/dashboard');
+      } else if (paymentStatus === 'success') {
+        toast({ title: "Payment successful!", description: "Your wallet has been funded." });
+        queryClient.invalidateQueries({ queryKey: ["/api/balances"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+        window.history.replaceState({}, '', '/dashboard');
+      } else if (paymentStatus === 'cancelled') {
+        toast({ title: "Payment cancelled", variant: "destructive" });
+        window.history.replaceState({}, '', '/dashboard');
+      } else if (paymentStatus === 'failed') {
+        toast({ title: "Payment failed", description: "Please try again.", variant: "destructive" });
+        window.history.replaceState({}, '', '/dashboard');
+      }
+    };
+    
+    if (paymentStatus) {
+      handlePaymentCallback();
+    }
+  }, [searchParams, toast]);
 
   const { data: balances, isLoading: balancesLoading } = useQuery<CompanyBalances>({
     queryKey: ["/api/balances"],
@@ -99,14 +141,50 @@ export default function Dashboard() {
 
   const fundWalletMutation = useMutation({
     mutationFn: async (amount: string) => {
-      return apiRequest("POST", "/api/balances/fund", { amount });
+      const numAmount = parseFloat(amount);
+      const currency = settings?.currency || 'USD';
+      
+      if (fundingMethod === 'card') {
+        if (isPaystack) {
+          const res = await apiRequest("POST", "/api/payment/create-intent", {
+            amount: numAmount,
+            currency,
+            countryCode,
+            email: "user@example.com",
+            metadata: { type: 'wallet_funding' }
+          });
+          const data = await res.json();
+          if (data.authorizationUrl) {
+            window.location.href = data.authorizationUrl;
+          }
+          return data;
+        } else {
+          const res = await apiRequest("POST", "/api/stripe/checkout-session", {
+            amount: numAmount,
+            currency,
+            countryCode,
+            successUrl: `${window.location.origin}/dashboard?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+            cancelUrl: `${window.location.origin}/dashboard?payment=cancelled`,
+            metadata: { type: 'wallet_funding' }
+          });
+          const data = await res.json();
+          if (data.url) {
+            window.location.href = data.url;
+          }
+          return data;
+        }
+      } else {
+        return apiRequest("POST", "/api/balances/fund", { amount });
+      }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/balances"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
-      toast({ title: "Wallet funded successfully", description: `$${fundingAmount} has been added to your wallet.` });
-      setIsFundingOpen(false);
-      setFundingAmount("");
+    onSuccess: (data) => {
+      if (fundingMethod !== 'card' || !data?.url) {
+        queryClient.invalidateQueries({ queryKey: ["/api/balances"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+        toast({ title: "Wallet funded successfully", description: `$${fundingAmount} has been added to your wallet.` });
+        setIsFundingOpen(false);
+        setFundingAmount("");
+      }
     },
     onError: () => {
       toast({ title: "Failed to fund wallet", variant: "destructive" });
@@ -115,7 +193,17 @@ export default function Dashboard() {
 
   const withdrawMutation = useMutation({
     mutationFn: async (amount: string) => {
-      return apiRequest("POST", "/api/balances/withdraw", { amount });
+      const numAmount = parseFloat(amount);
+      return apiRequest("POST", "/api/wallet/payout", { 
+        amount: numAmount,
+        countryCode,
+        recipientDetails: {
+          accountNumber: "1234567890",
+          bankCode: "000",
+          accountName: "User Account",
+        },
+        reason: "Wallet withdrawal"
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/balances"] });
@@ -131,7 +219,18 @@ export default function Dashboard() {
 
   const sendMoneyMutation = useMutation({
     mutationFn: async (data: typeof sendMoneyData) => {
-      return apiRequest("POST", "/api/balances/send", data);
+      const numAmount = parseFloat(data.amount);
+      return apiRequest("POST", "/api/payment/transfer", { 
+        amount: numAmount,
+        countryCode,
+        reason: data.note || "Money transfer",
+        recipientDetails: {
+          accountNumber: data.recipient,
+          bankCode: data.bankCode,
+          accountName: accountValidation?.name || "Recipient",
+          currency: settings?.currency || 'USD',
+        }
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/balances"] });

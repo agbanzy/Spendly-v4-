@@ -100,12 +100,15 @@ export function getCurrencyForCountry(countryCode: string): { currency: string; 
 }
 
 export const paymentService = {
-  async createPaymentIntent(amount: number, currency: string, countryCode: string, metadata?: any) {
+  async createPaymentIntent(amount: number, currency: string, countryCode: string, metadata?: any, callbackUrl?: string) {
     const provider = getPaymentProvider(countryCode);
     
     if (provider === 'paystack') {
       const email = metadata?.email || 'customer@example.com';
-      const result = await paystackClient.initializeTransaction(email, amount, currency, metadata);
+      const paystackCallback = callbackUrl || (process.env.REPLIT_DOMAINS ? 
+        `https://${process.env.REPLIT_DOMAINS.split(',')[0]}/api/paystack/callback` : 
+        undefined);
+      const result = await paystackClient.initializeTransaction(email, amount, currency, metadata, paystackCallback);
       return {
         provider: 'paystack',
         authorizationUrl: result.data.authorization_url,

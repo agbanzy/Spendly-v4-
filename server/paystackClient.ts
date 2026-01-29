@@ -42,14 +42,18 @@ async function paystackRequest(endpoint: string, method: string = 'GET', body?: 
 }
 
 export const paystackClient = {
-  async initializeTransaction(email: string, amount: number, currency: string = 'NGN', metadata?: any) {
+  async initializeTransaction(email: string, amount: number, currency: string = 'NGN', metadata?: any, callbackUrl?: string) {
     const amountInKobo = Math.round(amount * 100);
-    return paystackRequest('/transaction/initialize', 'POST', {
+    const payload: any = {
       email,
       amount: amountInKobo,
       currency,
       metadata,
-    });
+    };
+    if (callbackUrl) {
+      payload.callback_url = callbackUrl;
+    }
+    return paystackRequest('/transaction/initialize', 'POST', payload);
   },
 
   async verifyTransaction(reference: string) {
