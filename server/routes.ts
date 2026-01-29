@@ -1,12 +1,111 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { z } from "zod";
+
+const expenseSchema = z.object({
+  merchant: z.string().min(1),
+  amount: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  category: z.string().min(1),
+  note: z.string().optional(),
+});
+
+const transactionSchema = z.object({
+  type: z.string().min(1),
+  amount: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  description: z.string().optional(),
+  fee: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) || 0 : val || 0),
+});
+
+const billSchema = z.object({
+  name: z.string().min(1),
+  provider: z.string().optional().default(''),
+  amount: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  dueDate: z.string().min(1),
+  category: z.string().optional().default('Other'),
+});
+
+const budgetSchema = z.object({
+  name: z.string().min(1),
+  category: z.string().min(1),
+  limit: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  period: z.string().optional().default('monthly'),
+});
+
+const cardSchema = z.object({
+  name: z.string().min(1),
+  limit: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  type: z.string().optional().default('Visa'),
+  color: z.string().optional().default('indigo'),
+});
+
+const teamMemberSchema = z.object({
+  name: z.string().min(1),
+  email: z.string().email(),
+  role: z.string().optional().default('EMPLOYEE'),
+  department: z.string().optional().default('General'),
+});
+
+const payrollSchema = z.object({
+  employeeId: z.string().optional(),
+  employeeName: z.string().min(1),
+  department: z.string().optional().default('General'),
+  salary: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  bonus: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) || 0 : val || 0),
+  deductions: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) || 0 : val || 0),
+  payDate: z.string().optional(),
+});
+
+const invoiceSchema = z.object({
+  client: z.string().min(1),
+  clientEmail: z.string().optional().default(''),
+  amount: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  dueDate: z.string().optional(),
+  items: z.array(z.any()).optional().default([]),
+});
+
+const vendorSchema = z.object({
+  name: z.string().min(1),
+  email: z.string().optional().default(''),
+  phone: z.string().optional().default(''),
+  address: z.string().optional().default(''),
+  category: z.string().optional().default('Other'),
+});
+
+const expenseUpdateSchema = expenseSchema.partial();
+const transactionUpdateSchema = transactionSchema.partial();
+const billUpdateSchema = billSchema.partial().extend({
+  status: z.string().optional(),
+});
+const budgetUpdateSchema = budgetSchema.partial().extend({
+  spent: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) : val),
+});
+const cardUpdateSchema = cardSchema.partial().extend({
+  status: z.string().optional(),
+  balance: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) : val),
+});
+const teamMemberUpdateSchema = teamMemberSchema.partial().extend({
+  status: z.string().optional(),
+});
+const payrollUpdateSchema = payrollSchema.partial().extend({
+  status: z.enum(['pending', 'processing', 'paid']).optional(),
+  netPay: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) : val),
+});
+const invoiceUpdateSchema = invoiceSchema.partial().extend({
+  status: z.string().optional(),
+});
+const vendorUpdateSchema = vendorSchema.partial().extend({
+  status: z.string().optional(),
+  totalPaid: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  pendingPayments: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) : val),
+});
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Balances
+  
+  // ==================== BALANCES ====================
   app.get("/api/balances", async (req, res) => {
     try {
       const balances = await storage.getBalances();
@@ -16,7 +115,119 @@ export async function registerRoutes(
     }
   });
 
-  // Expenses
+  app.patch("/api/balances", async (req, res) => {
+    try {
+      const balances = await storage.updateBalances(req.body);
+      res.json(balances);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update balances" });
+    }
+  });
+
+  app.post("/api/balances/fund", async (req, res) => {
+    try {
+      const { amount } = req.body;
+      const parsedAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+      
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        return res.status(400).json({ error: "Invalid amount" });
+      }
+
+      const currentBalances = await storage.getBalances();
+      const newLocal = (currentBalances?.local || 0) + parsedAmount;
+      
+      await storage.createTransaction({
+        type: "Funding",
+        amount: parsedAmount,
+        fee: 0,
+        status: 'Completed',
+        date: new Date().toISOString().split('T')[0],
+        description: "Wallet Funding",
+        currency: 'USD',
+      });
+      
+      const updatedBalances = await storage.updateBalances({ local: newLocal });
+      res.json(updatedBalances);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fund wallet" });
+    }
+  });
+
+  app.post("/api/balances/withdraw", async (req, res) => {
+    try {
+      const { amount } = req.body;
+      const parsedAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+      
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        return res.status(400).json({ error: "Invalid amount" });
+      }
+
+      const currentBalances = await storage.getBalances();
+      const currentLocal = currentBalances?.local || 0;
+      
+      if (parsedAmount > currentLocal) {
+        return res.status(400).json({ error: "Insufficient funds" });
+      }
+
+      const newLocal = currentLocal - parsedAmount;
+      
+      await storage.createTransaction({
+        type: "Withdrawal",
+        amount: parsedAmount,
+        fee: 0,
+        status: 'Completed',
+        date: new Date().toISOString().split('T')[0],
+        description: "Wallet Withdrawal",
+        currency: 'USD',
+      });
+      
+      const updatedBalances = await storage.updateBalances({ local: newLocal });
+      res.json(updatedBalances);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to withdraw" });
+    }
+  });
+
+  app.post("/api/balances/send", async (req, res) => {
+    try {
+      const { amount, recipient, note } = req.body;
+      const parsedAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+      
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        return res.status(400).json({ error: "Invalid amount" });
+      }
+      
+      if (!recipient) {
+        return res.status(400).json({ error: "Recipient required" });
+      }
+
+      const currentBalances = await storage.getBalances();
+      const currentLocal = currentBalances?.local || 0;
+      
+      if (parsedAmount > currentLocal) {
+        return res.status(400).json({ error: "Insufficient funds" });
+      }
+
+      const newLocal = currentLocal - parsedAmount;
+      
+      await storage.createTransaction({
+        type: "Payout",
+        amount: parsedAmount,
+        fee: 0,
+        status: 'Completed',
+        date: new Date().toISOString().split('T')[0],
+        description: `Payment to ${recipient}${note ? ` - ${note}` : ''}`,
+        currency: 'USD',
+      });
+      
+      const updatedBalances = await storage.updateBalances({ local: newLocal });
+      res.json(updatedBalances);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to send money" });
+    }
+  });
+
+  // ==================== EXPENSES ====================
   app.get("/api/expenses", async (req, res) => {
     try {
       const expenses = await storage.getExpenses();
@@ -26,17 +237,29 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/expenses/:id", async (req, res) => {
+    try {
+      const expense = await storage.getExpense(req.params.id);
+      if (!expense) {
+        return res.status(404).json({ error: "Expense not found" });
+      }
+      res.json(expense);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch expense" });
+    }
+  });
+
   app.post("/api/expenses", async (req, res) => {
     try {
-      const { merchant, amount, category, note } = req.body;
-      
-      if (!merchant || !amount || !category) {
-        return res.status(400).json({ error: "Missing required fields" });
+      const result = expenseSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid expense data", details: result.error.issues });
       }
+      const { merchant, amount, category, note } = result.data;
 
       const expense = await storage.createExpense({
         merchant,
-        amount: parseFloat(amount),
+        amount,
         currency: 'USD',
         date: new Date().toISOString().split('T')[0],
         category,
@@ -53,7 +276,35 @@ export async function registerRoutes(
     }
   });
 
-  // Transactions
+  app.patch("/api/expenses/:id", async (req, res) => {
+    try {
+      const result = expenseUpdateSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid expense data", details: result.error.issues });
+      }
+      const expense = await storage.updateExpense(req.params.id, result.data);
+      if (!expense) {
+        return res.status(404).json({ error: "Expense not found" });
+      }
+      res.json(expense);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update expense" });
+    }
+  });
+
+  app.delete("/api/expenses/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteExpense(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Expense not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete expense" });
+    }
+  });
+
+  // ==================== TRANSACTIONS ====================
   app.get("/api/transactions", async (req, res) => {
     try {
       const transactions = await storage.getTransactions();
@@ -63,7 +314,71 @@ export async function registerRoutes(
     }
   });
 
-  // Bills
+  app.get("/api/transactions/:id", async (req, res) => {
+    try {
+      const transaction = await storage.getTransaction(req.params.id);
+      if (!transaction) {
+        return res.status(404).json({ error: "Transaction not found" });
+      }
+      res.json(transaction);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch transaction" });
+    }
+  });
+
+  app.post("/api/transactions", async (req, res) => {
+    try {
+      const result = transactionSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid transaction data", details: result.error.issues });
+      }
+      const { type, amount, description, fee } = result.data;
+
+      const transaction = await storage.createTransaction({
+        type,
+        amount,
+        fee: fee || 0,
+        status: 'Completed',
+        date: new Date().toISOString().split('T')[0],
+        description: description || '',
+        currency: 'USD',
+      });
+      
+      res.status(201).json(transaction);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create transaction" });
+    }
+  });
+
+  app.patch("/api/transactions/:id", async (req, res) => {
+    try {
+      const result = transactionUpdateSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid transaction data", details: result.error.issues });
+      }
+      const transaction = await storage.updateTransaction(req.params.id, result.data);
+      if (!transaction) {
+        return res.status(404).json({ error: "Transaction not found" });
+      }
+      res.json(transaction);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update transaction" });
+    }
+  });
+
+  app.delete("/api/transactions/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteTransaction(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Transaction not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete transaction" });
+    }
+  });
+
+  // ==================== BILLS ====================
   app.get("/api/bills", async (req, res) => {
     try {
       const bills = await storage.getBills();
@@ -73,7 +388,71 @@ export async function registerRoutes(
     }
   });
 
-  // Budgets
+  app.get("/api/bills/:id", async (req, res) => {
+    try {
+      const bill = await storage.getBill(req.params.id);
+      if (!bill) {
+        return res.status(404).json({ error: "Bill not found" });
+      }
+      res.json(bill);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch bill" });
+    }
+  });
+
+  app.post("/api/bills", async (req, res) => {
+    try {
+      const result = billSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid bill data", details: result.error.issues });
+      }
+      const { name, provider, amount, dueDate, category } = result.data;
+
+      const bill = await storage.createBill({
+        name,
+        provider: provider || '',
+        amount,
+        dueDate,
+        category: category || 'Other',
+        status: 'Unpaid',
+        currency: 'USD',
+      });
+      
+      res.status(201).json(bill);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create bill" });
+    }
+  });
+
+  app.patch("/api/bills/:id", async (req, res) => {
+    try {
+      const result = billUpdateSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid bill data", details: result.error.issues });
+      }
+      const bill = await storage.updateBill(req.params.id, result.data);
+      if (!bill) {
+        return res.status(404).json({ error: "Bill not found" });
+      }
+      res.json(bill);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update bill" });
+    }
+  });
+
+  app.delete("/api/bills/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteBill(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Bill not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete bill" });
+    }
+  });
+
+  // ==================== BUDGETS ====================
   app.get("/api/budgets", async (req, res) => {
     try {
       const budgets = await storage.getBudgets();
@@ -83,7 +462,70 @@ export async function registerRoutes(
     }
   });
 
-  // Cards
+  app.get("/api/budgets/:id", async (req, res) => {
+    try {
+      const budget = await storage.getBudget(req.params.id);
+      if (!budget) {
+        return res.status(404).json({ error: "Budget not found" });
+      }
+      res.json(budget);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch budget" });
+    }
+  });
+
+  app.post("/api/budgets", async (req, res) => {
+    try {
+      const result = budgetSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid budget data", details: result.error.issues });
+      }
+      const { name, category, limit, period } = result.data;
+
+      const budget = await storage.createBudget({
+        name,
+        category,
+        limit,
+        spent: 0,
+        currency: 'USD',
+        period: period || 'monthly',
+      });
+      
+      res.status(201).json(budget);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create budget" });
+    }
+  });
+
+  app.patch("/api/budgets/:id", async (req, res) => {
+    try {
+      const result = budgetUpdateSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid budget data", details: result.error.issues });
+      }
+      const budget = await storage.updateBudget(req.params.id, result.data);
+      if (!budget) {
+        return res.status(404).json({ error: "Budget not found" });
+      }
+      res.json(budget);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update budget" });
+    }
+  });
+
+  app.delete("/api/budgets/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteBudget(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Budget not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete budget" });
+    }
+  });
+
+  // ==================== CARDS ====================
   app.get("/api/cards", async (req, res) => {
     try {
       const cards = await storage.getCards();
@@ -93,7 +535,74 @@ export async function registerRoutes(
     }
   });
 
-  // Team
+  app.get("/api/cards/:id", async (req, res) => {
+    try {
+      const card = await storage.getCard(req.params.id);
+      if (!card) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+      res.json(card);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch card" });
+    }
+  });
+
+  app.post("/api/cards", async (req, res) => {
+    try {
+      const result = cardSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid card data", details: result.error.issues });
+      }
+      const { name, limit, type, color } = result.data;
+
+      const last4 = String(Math.floor(1000 + Math.random() * 9000));
+      
+      const card = await storage.createCard({
+        name,
+        last4,
+        balance: limit,
+        limit,
+        type: type || 'Visa',
+        color: color || 'indigo',
+        currency: 'USD',
+        status: 'Active',
+      });
+      
+      res.status(201).json(card);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create card" });
+    }
+  });
+
+  app.patch("/api/cards/:id", async (req, res) => {
+    try {
+      const result = cardUpdateSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid card data", details: result.error.issues });
+      }
+      const card = await storage.updateCard(req.params.id, result.data);
+      if (!card) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+      res.json(card);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update card" });
+    }
+  });
+
+  app.delete("/api/cards/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteCard(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete card" });
+    }
+  });
+
+  // ==================== TEAM ====================
   app.get("/api/team", async (req, res) => {
     try {
       const team = await storage.getTeam();
@@ -103,7 +612,71 @@ export async function registerRoutes(
     }
   });
 
-  // AI Insights
+  app.get("/api/team/:id", async (req, res) => {
+    try {
+      const member = await storage.getTeamMember(req.params.id);
+      if (!member) {
+        return res.status(404).json({ error: "Team member not found" });
+      }
+      res.json(member);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch team member" });
+    }
+  });
+
+  app.post("/api/team", async (req, res) => {
+    try {
+      const result = teamMemberSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid team member data", details: result.error.issues });
+      }
+      const { name, email, role, department } = result.data;
+
+      const member = await storage.createTeamMember({
+        name,
+        email,
+        role: role || 'EMPLOYEE',
+        department: department || 'General',
+        status: 'Active',
+        joinedAt: new Date().toISOString().split('T')[0],
+        permissions: ['CREATE_EXPENSE'],
+      });
+      
+      res.status(201).json(member);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create team member" });
+    }
+  });
+
+  app.patch("/api/team/:id", async (req, res) => {
+    try {
+      const result = teamMemberUpdateSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid team member data", details: result.error.issues });
+      }
+      const member = await storage.updateTeamMember(req.params.id, result.data);
+      if (!member) {
+        return res.status(404).json({ error: "Team member not found" });
+      }
+      res.json(member);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update team member" });
+    }
+  });
+
+  app.delete("/api/team/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteTeamMember(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Team member not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete team member" });
+    }
+  });
+
+  // ==================== AI INSIGHTS ====================
   app.get("/api/insights", async (req, res) => {
     try {
       const insights = await storage.getInsights();
@@ -113,7 +686,7 @@ export async function registerRoutes(
     }
   });
 
-  // Payroll
+  // ==================== PAYROLL ====================
   app.get("/api/payroll", async (req, res) => {
     try {
       const payroll = await storage.getPayroll();
@@ -123,7 +696,116 @@ export async function registerRoutes(
     }
   });
 
-  // Invoices
+  app.get("/api/payroll/:id", async (req, res) => {
+    try {
+      const entry = await storage.getPayrollEntry(req.params.id);
+      if (!entry) {
+        return res.status(404).json({ error: "Payroll entry not found" });
+      }
+      res.json(entry);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch payroll entry" });
+    }
+  });
+
+  app.post("/api/payroll", async (req, res) => {
+    try {
+      const result = payrollSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid payroll data", details: result.error.issues });
+      }
+      const { employeeId, employeeName, department, salary, bonus, deductions, payDate } = result.data;
+
+      const salaryNum = salary;
+      const bonusNum = bonus || 0;
+      const deductionsNum = deductions || 0;
+      
+      const entry = await storage.createPayrollEntry({
+        employeeId: employeeId || String(Date.now()),
+        employeeName,
+        department: department || 'General',
+        salary: salaryNum,
+        bonus: bonusNum,
+        deductions: deductionsNum,
+        netPay: salaryNum + bonusNum - deductionsNum,
+        status: 'pending',
+        payDate: payDate || new Date().toISOString().split('T')[0],
+      });
+      
+      res.status(201).json(entry);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create payroll entry" });
+    }
+  });
+
+  app.patch("/api/payroll/:id", async (req, res) => {
+    try {
+      const result = payrollUpdateSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid payroll data", details: result.error.issues });
+      }
+      const entry = await storage.updatePayrollEntry(req.params.id, result.data);
+      if (!entry) {
+        return res.status(404).json({ error: "Payroll entry not found" });
+      }
+      res.json(entry);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update payroll entry" });
+    }
+  });
+
+  app.delete("/api/payroll/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deletePayrollEntry(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Payroll entry not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete payroll entry" });
+    }
+  });
+
+  app.post("/api/payroll/process", async (req, res) => {
+    try {
+      const entries = await storage.getPayrollEntries();
+      const pendingEntries = entries.filter(e => e.status === "pending");
+      
+      if (pendingEntries.length === 0) {
+        return res.status(400).json({ error: "No pending payroll entries to process" });
+      }
+
+      const processedEntries = [];
+      for (const entry of pendingEntries) {
+        const updated = await storage.updatePayrollEntry(entry.id, { status: "paid" });
+        if (updated) {
+          processedEntries.push(updated);
+        }
+      }
+
+      const totalPaid = processedEntries.reduce((sum, e) => sum + e.netPay, 0);
+      
+      await storage.createTransaction({
+        type: "Payout",
+        amount: totalPaid,
+        fee: 0,
+        status: 'Completed',
+        date: new Date().toISOString().split('T')[0],
+        description: `Payroll - ${processedEntries.length} employees`,
+        currency: 'USD',
+      });
+
+      res.json({ 
+        message: "Payroll processed successfully",
+        processed: processedEntries.length,
+        totalPaid,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to process payroll" });
+    }
+  });
+
+  // ==================== INVOICES ====================
   app.get("/api/invoices", async (req, res) => {
     try {
       const invoices = await storage.getInvoices();
@@ -133,13 +815,25 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/invoices/:id", async (req, res) => {
+    try {
+      const invoice = await storage.getInvoice(req.params.id);
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch invoice" });
+    }
+  });
+
   app.post("/api/invoices", async (req, res) => {
     try {
-      const { client, clientEmail, amount, dueDate, items } = req.body;
-      
-      if (!client || !amount) {
-        return res.status(400).json({ error: "Missing required fields" });
+      const result = invoiceSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid invoice data", details: result.error.issues });
       }
+      const { client, clientEmail, amount, dueDate, items } = result.data;
 
       const invoiceNumber = `INV-2026-${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`;
       
@@ -147,7 +841,7 @@ export async function registerRoutes(
         invoiceNumber,
         client,
         clientEmail: clientEmail || '',
-        amount: parseFloat(amount),
+        amount,
         dueDate: dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         issuedDate: new Date().toISOString().split('T')[0],
         status: 'pending',
@@ -160,7 +854,35 @@ export async function registerRoutes(
     }
   });
 
-  // Vendors
+  app.patch("/api/invoices/:id", async (req, res) => {
+    try {
+      const result = invoiceUpdateSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid invoice data", details: result.error.issues });
+      }
+      const invoice = await storage.updateInvoice(req.params.id, result.data);
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update invoice" });
+    }
+  });
+
+  app.delete("/api/invoices/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteInvoice(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete invoice" });
+    }
+  });
+
+  // ==================== VENDORS ====================
   app.get("/api/vendors", async (req, res) => {
     try {
       const vendors = await storage.getVendors();
@@ -170,13 +892,25 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/vendors/:id", async (req, res) => {
+    try {
+      const vendor = await storage.getVendor(req.params.id);
+      if (!vendor) {
+        return res.status(404).json({ error: "Vendor not found" });
+      }
+      res.json(vendor);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch vendor" });
+    }
+  });
+
   app.post("/api/vendors", async (req, res) => {
     try {
-      const { name, email, phone, address, category } = req.body;
-      
-      if (!name) {
-        return res.status(400).json({ error: "Vendor name is required" });
+      const result = vendorSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid vendor data", details: result.error.issues });
       }
+      const { name, email, phone, address, category } = result.data;
 
       const vendor = await storage.createVendor({
         name,
@@ -193,6 +927,53 @@ export async function registerRoutes(
       res.status(201).json(vendor);
     } catch (error) {
       res.status(500).json({ error: "Failed to create vendor" });
+    }
+  });
+
+  app.patch("/api/vendors/:id", async (req, res) => {
+    try {
+      const result = vendorUpdateSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid vendor data", details: result.error.issues });
+      }
+      const vendor = await storage.updateVendor(req.params.id, result.data);
+      if (!vendor) {
+        return res.status(404).json({ error: "Vendor not found" });
+      }
+      res.json(vendor);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update vendor" });
+    }
+  });
+
+  app.delete("/api/vendors/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteVendor(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Vendor not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete vendor" });
+    }
+  });
+
+  // ==================== SETTINGS ====================
+  app.get("/api/settings", async (req, res) => {
+    try {
+      const settings = await storage.getSettings();
+      res.json(settings);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch settings" });
+    }
+  });
+
+  app.patch("/api/settings", async (req, res) => {
+    try {
+      const settings = await storage.updateSettings(req.body);
+      res.json(settings);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update settings" });
     }
   });
 

@@ -227,6 +227,23 @@ export interface Vendor {
   lastPayment: string;
 }
 
+export interface CompanySettings {
+  companyName: string;
+  companyEmail: string;
+  companyPhone: string;
+  companyAddress: string;
+  currency: string;
+  timezone: string;
+  fiscalYearStart: string;
+  dateFormat: string;
+  language: string;
+  notificationsEnabled: boolean;
+  twoFactorEnabled: boolean;
+  autoApproveBelow: number;
+  requireReceipts: boolean;
+  expenseCategories: string[];
+}
+
 // Category icons mapping
 export const categoryIcons: Record<string, string> = {
   'Software': 'code',
