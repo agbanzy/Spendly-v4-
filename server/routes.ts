@@ -2010,6 +2010,93 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== TRANSACTION PIN ====================
+  const crypto = await import('crypto');
+  
+  function hashPin(pin: string): string {
+    return crypto.createHash('sha256').update(pin).digest('hex');
+  }
+  
+  const setPinSchema = z.object({
+    firebaseUid: z.string().min(1),
+    pin: z.string().length(4).regex(/^\d{4}$/, "PIN must be 4 digits"),
+  });
+  
+  const verifyPinSchema = z.object({
+    firebaseUid: z.string().min(1),
+    pin: z.string().length(4),
+  });
+
+  app.post("/api/user/set-pin", async (req, res) => {
+    try {
+      const result = setPinSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid PIN format. Must be 4 digits." });
+      }
+      
+      const { firebaseUid, pin } = result.data;
+      const pinHash = hashPin(pin);
+      
+      const profile = await storage.getUserProfile(firebaseUid);
+      if (!profile) {
+        return res.status(404).json({ error: "User profile not found" });
+      }
+      
+      await storage.updateUserProfile(firebaseUid, {
+        transactionPinHash: pinHash,
+        transactionPinEnabled: true,
+      });
+      
+      res.json({ success: true, message: "Transaction PIN set successfully" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to set PIN" });
+    }
+  });
+
+  app.post("/api/user/verify-pin", async (req, res) => {
+    try {
+      const result = verifyPinSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid PIN format" });
+      }
+      
+      const { firebaseUid, pin } = result.data;
+      const profile = await storage.getUserProfile(firebaseUid);
+      
+      if (!profile) {
+        return res.status(404).json({ error: "User profile not found" });
+      }
+      
+      if (!profile.transactionPinEnabled || !profile.transactionPinHash) {
+        return res.status(400).json({ error: "Transaction PIN not set" });
+      }
+      
+      const pinHash = hashPin(pin);
+      const valid = pinHash === profile.transactionPinHash;
+      
+      res.json({ valid });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to verify PIN" });
+    }
+  });
+
+  app.post("/api/user/disable-pin", async (req, res) => {
+    try {
+      const { firebaseUid } = req.body;
+      if (!firebaseUid) {
+        return res.status(400).json({ error: "Firebase UID required" });
+      }
+      
+      await storage.updateUserProfile(firebaseUid, {
+        transactionPinEnabled: false,
+      });
+      
+      res.json({ success: true, message: "Transaction PIN disabled" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to disable PIN" });
+    }
+  });
+
   // ==================== ACCOUNT VALIDATION ====================
   const validateAccountSchema = z.object({
     accountNumber: z.string().min(1),

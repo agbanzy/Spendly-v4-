@@ -329,6 +329,8 @@ export const userProfiles = pgTable("user_profiles", {
   kycStatus: text("kyc_status").notNull().default('not_started'),
   onboardingCompleted: boolean("onboarding_completed").notNull().default(false),
   onboardingStep: integer("onboarding_step").notNull().default(1),
+  transactionPinHash: text("transaction_pin_hash"),
+  transactionPinEnabled: boolean("transaction_pin_enabled").notNull().default(false),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
