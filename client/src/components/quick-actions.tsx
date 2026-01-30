@@ -358,17 +358,20 @@ export function QuickActions({ isOpen: controlledOpen }: QuickActionsProps) {
 
   return (
     <>
-      <div className={`fixed bottom-6 right-6 z-50 transition-all duration-300`}>
+      <div className={`fixed bottom-6 right-6 z-[60] transition-all duration-300`}>
         <div className={`flex flex-col-reverse gap-3 transition-all duration-300 ${isOpen ? "mb-4 opacity-100 translate-y-0" : "mb-0 opacity-0 translate-y-10 pointer-events-none"}`}>
           {actions.map((action, idx) => (
             <button
               key={idx}
-              onClick={action.onClick}
-              className="flex items-center gap-3 group animate-slide-up justify-end"
+              onClick={(e) => {
+                e.stopPropagation();
+                action.onClick();
+              }}
+              className="flex items-center gap-3 group animate-slide-up justify-end relative z-[70]"
               style={{ animationDelay: `${idx * 40}ms` }}
               data-testid={`quick-action-${action.label.toLowerCase().replace(/\s/g, "-")}`}
             >
-              <div className="bg-background border px-4 py-2 rounded-xl shadow-lg opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-4 group-hover:translate-x-0 min-w-[160px] text-right">
+              <div className="bg-background border px-4 py-2 rounded-xl shadow-lg opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-4 group-hover:translate-x-0 min-w-[160px] text-right pointer-events-none">
                 <p className="text-xs font-bold uppercase tracking-wider">{action.label}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">{action.description}</p>
               </div>
