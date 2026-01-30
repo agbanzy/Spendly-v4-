@@ -73,7 +73,7 @@ export default function Cards() {
   const formatCurrency = (amount: number | string, cardCurrency?: string) => {
     const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
     const symbol = cardCurrency ? (currencySymbols[cardCurrency] || '$') : currencySymbol;
-    return `${symbol}${num.toLocaleString()}`;
+    return `${symbol}${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
   const [formData, setFormData] = useState({
     name: "",

@@ -50,7 +50,7 @@ export default function VendorsPage() {
   
   const formatCurrency = (amount: number | string) => {
     const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
-    return `${currencySymbol}${num.toLocaleString()}`;
+    return `${currencySymbol}${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   const { data: vendors = [], isLoading } = useQuery<Vendor[]>({
