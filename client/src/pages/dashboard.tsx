@@ -49,7 +49,7 @@ import {
   BadgeCheck,
 } from "lucide-react";
 import { Link } from "wouter";
-import type { Expense, Transaction, CompanyBalances, AIInsight, CompanySettings, UserProfile } from "@shared/schema";
+import type { Expense, Transaction, CompanyBalances, AIInsight, CompanySettings, UserProfile, VirtualAccount } from "@shared/schema";
 import { isPaystackRegion } from "@/lib/constants";
 import { useAuth } from "@/lib/auth";
 
@@ -68,6 +68,9 @@ export default function Dashboard() {
   const [fundingAmount, setFundingAmount] = useState("");
   const [withdrawalAmount, setWithdrawalAmount] = useState("");
   const [sendMoneyData, setSendMoneyData] = useState({ recipient: "", amount: "", note: "", bankCode: "" });
+  const [withdrawalData, setWithdrawalData] = useState({ accountNumber: "", bankCode: "", accountName: "" });
+  const [withdrawalValidation, setWithdrawalValidation] = useState<{ name: string; validated: boolean } | null>(null);
+  const [isValidatingWithdrawal, setIsValidatingWithdrawal] = useState(false);
   const [accountValidation, setAccountValidation] = useState<{ name: string; validated: boolean } | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const [showBalance, setShowBalance] = useState(true);
@@ -128,6 +131,13 @@ export default function Dashboard() {
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
   });
+
+  const { data: virtualAccounts } = useQuery<VirtualAccount[]>({
+    queryKey: ["/api/virtual-accounts"],
+  });
+
+  // Get primary virtual account for deposits
+  const primaryVirtualAccount = virtualAccounts?.find(a => a.status === 'active') || virtualAccounts?.[0];
 
   const countryCode = settings?.countryCode || "US";
   const isPaystack = isPaystackRegion(countryCode);
@@ -207,13 +217,16 @@ export default function Dashboard() {
   const withdrawMutation = useMutation({
     mutationFn: async (amount: string) => {
       const numAmount = parseFloat(amount);
+      if (!withdrawalValidation?.validated || !withdrawalData.accountNumber || !withdrawalData.bankCode) {
+        throw new Error("Please validate your bank account first");
+      }
       return apiRequest("POST", "/api/wallet/payout", { 
         amount: numAmount,
         countryCode,
         recipientDetails: {
-          accountNumber: "1234567890",
-          bankCode: "000",
-          accountName: "User Account",
+          accountNumber: withdrawalData.accountNumber,
+          bankCode: withdrawalData.bankCode,
+          accountName: withdrawalValidation.name || withdrawalData.accountName,
         },
         reason: "Wallet withdrawal"
       });
@@ -224,6 +237,8 @@ export default function Dashboard() {
       toast({ title: "Withdrawal initiated successfully", description: "Funds will arrive in 1-3 business days." });
       setIsWithdrawalOpen(false);
       setWithdrawalAmount("");
+      setWithdrawalData({ accountNumber: "", bankCode: "", accountName: "" });
+      setWithdrawalValidation(null);
     },
     onError: () => {
       toast({ title: "Failed to withdraw", variant: "destructive" });
@@ -282,6 +297,33 @@ export default function Dashboard() {
       toast({ title: "Could not validate account", variant: "destructive" });
     } finally {
       setIsValidating(false);
+    }
+  };
+
+  const validateWithdrawalAccount = async () => {
+    if (!withdrawalData.accountNumber || !withdrawalData.bankCode) {
+      toast({ title: "Please enter account number and select bank", variant: "destructive" });
+      return;
+    }
+    
+    setIsValidatingWithdrawal(true);
+    try {
+      const res = await apiRequest("POST", "/api/payment/validate-account", {
+        accountNumber: withdrawalData.accountNumber,
+        bankCode: withdrawalData.bankCode,
+        countryCode,
+      });
+      const data = await res.json();
+      if (data.success) {
+        setWithdrawalValidation({ name: data.accountName, validated: true });
+        toast({ title: "Account validated", description: `Account belongs to: ${data.accountName}` });
+      } else {
+        toast({ title: "Validation failed", variant: "destructive" });
+      }
+    } catch (error) {
+      toast({ title: "Could not validate account", variant: "destructive" });
+    } finally {
+      setIsValidatingWithdrawal(false);
     }
   };
 
@@ -487,6 +529,45 @@ export default function Dashboard() {
         </Card>
       </div>
 
+      {primaryVirtualAccount && (
+        <Card className="glass overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-gradient-to-br from-primary to-indigo-600 rounded-xl shadow-lg">
+                  <Building className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Your Virtual Account</p>
+                  <p className="text-sm font-medium">{primaryVirtualAccount.name || 'Spendly Account'}</p>
+                </div>
+              </div>
+              <Badge variant="outline" className="text-xs">{primaryVirtualAccount.status === 'active' ? 'Active' : 'Inactive'}</Badge>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-3 bg-muted/50 rounded-xl">
+                <p className="text-xs text-muted-foreground mb-1">Bank Name</p>
+                <p className="text-sm font-bold">{primaryVirtualAccount.bankName || 'Wema Bank'}</p>
+              </div>
+              <div className="p-3 bg-muted/50 rounded-xl">
+                <p className="text-xs text-muted-foreground mb-1">Account Number</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-bold font-mono">{primaryVirtualAccount.accountNumber}</p>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(primaryVirtualAccount.accountNumber)}>
+                    <Copy className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+              <div className="p-3 bg-muted/50 rounded-xl">
+                <p className="text-xs text-muted-foreground mb-1">Currency</p>
+                <p className="text-sm font-bold">{primaryVirtualAccount.currency || 'NGN'}</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mt-3">Transfer funds to this account to add money to your wallet instantly.</p>
+          </CardContent>
+        </Card>
+      )}
+
       {insights && insights.length > 0 && (
         <div className="space-y-4">
           <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
@@ -646,30 +727,36 @@ export default function Dashboard() {
             {fundingMethod === "bank" && (
               <div className="p-4 bg-muted/50 rounded-xl space-y-3">
                 <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Bank Transfer Details</p>
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Bank Name</span>
-                    <span className="text-sm font-bold">Spendly Bank</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Account Number</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold">1234567890</span>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard("1234567890")}>
-                        <Copy className="h-3 w-3" />
-                      </Button>
+                {primaryVirtualAccount ? (
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Bank Name</span>
+                      <span className="text-sm font-bold">{primaryVirtualAccount.bankName || 'Wema Bank'}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Account Number</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold font-mono">{primaryVirtualAccount.accountNumber}</span>
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(primaryVirtualAccount.accountNumber)}>
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-muted-foreground">Account Name</span>
+                      <span className="text-sm font-bold">{primaryVirtualAccount.name || 'Spendly Account'}</span>
                     </div>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Reference</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold">SPD-{Date.now().toString().slice(-6)}</span>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(`SPD-${Date.now().toString().slice(-6)}`)}>
-                        <Copy className="h-3 w-3" />
-                      </Button>
-                    </div>
+                ) : (
+                  <div className="text-center py-4">
+                    <p className="text-sm text-muted-foreground mb-2">No virtual account found</p>
+                    <Button variant="outline" size="sm" onClick={() => {
+                      toast({ title: "Creating virtual account...", description: "Please complete onboarding to get your virtual account." });
+                    }}>
+                      Create Virtual Account
+                    </Button>
                   </div>
-                </div>
+                )}
               </div>
             )}
             
@@ -702,6 +789,62 @@ export default function Dashboard() {
               <p className="text-xs text-muted-foreground mb-1">Available Balance</p>
               <p className="text-2xl font-bold">${balances?.local.toLocaleString() || '0'}</p>
             </div>
+            
+            <div className="space-y-2">
+              <Label>Select Bank</Label>
+              <Select 
+                value={withdrawalData.bankCode} 
+                onValueChange={(value) => {
+                  setWithdrawalData({ ...withdrawalData, bankCode: value });
+                  setWithdrawalValidation(null);
+                }}
+              >
+                <SelectTrigger data-testid="select-withdrawal-bank">
+                  <SelectValue placeholder="Select your bank" />
+                </SelectTrigger>
+                <SelectContent className="max-h-60">
+                  {banks?.map((bank) => (
+                    <SelectItem key={bank.code} value={bank.code}>{bank.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="withdrawal-account">Account Number</Label>
+              <div className="flex gap-2">
+                <Input 
+                  id="withdrawal-account"
+                  value={withdrawalData.accountNumber}
+                  onChange={(e) => {
+                    setWithdrawalData({ ...withdrawalData, accountNumber: e.target.value });
+                    setWithdrawalValidation(null);
+                  }}
+                  placeholder="Enter account number"
+                  className="flex-1"
+                  data-testid="input-withdrawal-account"
+                />
+                <Button 
+                  variant="outline" 
+                  onClick={validateWithdrawalAccount}
+                  disabled={isValidatingWithdrawal || !withdrawalData.accountNumber || !withdrawalData.bankCode}
+                  data-testid="button-validate-withdrawal-account"
+                >
+                  {isValidatingWithdrawal ? <Loader2 className="h-4 w-4 animate-spin" /> : <BadgeCheck className="h-4 w-4" />}
+                </Button>
+              </div>
+            </div>
+            
+            {withdrawalValidation?.validated && (
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950 rounded-xl text-emerald-800 dark:text-emerald-200 text-sm flex items-center gap-2">
+                <CheckCircle className="h-4 w-4 shrink-0" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Account Name</p>
+                  <p className="font-bold">{withdrawalValidation.name}</p>
+                </div>
+              </div>
+            )}
+            
             <div className="space-y-2">
               <Label htmlFor="withdrawal-amount">Amount to Withdraw ($)</Label>
               <Input 
@@ -729,7 +872,11 @@ export default function Dashboard() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsWithdrawalOpen(false)}>Cancel</Button>
-            <Button onClick={() => withdrawMutation.mutate(withdrawalAmount)} disabled={!withdrawalAmount || withdrawMutation.isPending || parseFloat(withdrawalAmount) > (balances?.local || 0)} data-testid="button-confirm-withdrawal">
+            <Button 
+              onClick={() => withdrawMutation.mutate(withdrawalAmount)} 
+              disabled={!withdrawalAmount || !withdrawalValidation?.validated || withdrawMutation.isPending || parseFloat(withdrawalAmount) > parseFloat(String(balances?.local || 0))} 
+              data-testid="button-confirm-withdrawal"
+            >
               {withdrawMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Withdraw ${withdrawalAmount || '0'}
             </Button>
