@@ -19,7 +19,7 @@ export const REGION_CONFIGS: RegionConfig[] = [
   },
   {
     region: 'Europe',
-    countries: ['GB', 'DE', 'FR', 'ES', 'IT', 'NL', 'BE', 'AT', 'CH', 'SE', 'NO', 'DK', 'FI', 'IE', 'PT'],
+    countries: ['DE', 'FR', 'ES', 'IT', 'NL', 'BE', 'AT', 'CH', 'SE', 'NO', 'DK', 'FI', 'IE', 'PT'],
     currency: 'EUR',
     paymentProvider: 'stripe',
     currencySymbol: '€',
