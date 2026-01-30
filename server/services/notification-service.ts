@@ -208,12 +208,14 @@ class NotificationService {
 
   async sendEmail(config: EmailConfig): Promise<void> {
     const fromEmail = process.env.AWS_SES_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || 'noreply@spendly.app';
+    const fromName = process.env.AWS_SES_FROM_NAME || 'Spendly';
+    const formattedFrom = `${fromName} <${fromEmail}>`;
 
     // Use AWS SES if available
     if (this.emailProvider === 'aws' && this.sesClient) {
       try {
         const command = new SendEmailCommand({
-          Source: fromEmail,
+          Source: formattedFrom,
           Destination: {
             ToAddresses: [config.to],
           },
