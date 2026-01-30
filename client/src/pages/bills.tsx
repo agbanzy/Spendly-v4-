@@ -58,65 +58,113 @@ import {
   Building2,
   Sparkles,
 } from "lucide-react";
-import type { Bill } from "@shared/schema";
+import type { Bill, CompanySettings } from "@shared/schema";
 
-const utilityProviders = {
-  airtime: [
-    { id: "mtn", name: "MTN", logo: "🟡" },
-    { id: "glo", name: "Glo", logo: "🟢" },
-    { id: "airtel", name: "Airtel", logo: "🔴" },
-    { id: "9mobile", name: "9Mobile", logo: "🟢" },
-    { id: "verizon", name: "Verizon", logo: "🔴" },
-    { id: "tmobile", name: "T-Mobile", logo: "🟣" },
-    { id: "att", name: "AT&T", logo: "🔵" },
-  ],
-  data: [
-    { id: "mtn-data", name: "MTN Data", logo: "🟡" },
-    { id: "glo-data", name: "Glo Data", logo: "🟢" },
-    { id: "airtel-data", name: "Airtel Data", logo: "🔴" },
-    { id: "9mobile-data", name: "9Mobile Data", logo: "🟢" },
-    { id: "spectranet", name: "Spectranet", logo: "🔵" },
-    { id: "smile", name: "Smile", logo: "🟣" },
-  ],
-  electricity: [
-    { id: "eko", name: "Eko Electric", logo: "⚡" },
-    { id: "ikeja", name: "Ikeja Electric", logo: "⚡" },
-    { id: "abuja", name: "Abuja Electric", logo: "⚡" },
-    { id: "ibadan", name: "Ibadan Electric", logo: "⚡" },
-    { id: "pge", name: "PG&E", logo: "⚡" },
-    { id: "coned", name: "Con Edison", logo: "⚡" },
-  ],
-  cable: [
-    { id: "dstv", name: "DSTV", logo: "📺" },
-    { id: "gotv", name: "GOTV", logo: "📺" },
-    { id: "startimes", name: "Startimes", logo: "📺" },
-    { id: "netflix", name: "Netflix", logo: "📺" },
-    { id: "hulu", name: "Hulu", logo: "📺" },
-  ],
-  internet: [
-    { id: "spectranet", name: "Spectranet", logo: "🌐" },
-    { id: "smile", name: "Smile", logo: "🌐" },
-    { id: "swift", name: "Swift", logo: "🌐" },
-    { id: "xfinity", name: "Xfinity", logo: "🌐" },
-    { id: "spectrum", name: "Spectrum", logo: "🌐" },
-  ],
+// Country-specific utility providers
+const utilityProvidersByRegion = {
+  Africa: {
+    airtime: [
+      { id: "mtn", name: "MTN", logo: "🟡" },
+      { id: "glo", name: "Glo", logo: "🟢" },
+      { id: "airtel", name: "Airtel", logo: "🔴" },
+      { id: "9mobile", name: "9Mobile", logo: "🟢" },
+      { id: "safaricom", name: "Safaricom", logo: "🟢" },
+      { id: "vodacom", name: "Vodacom", logo: "🔴" },
+    ],
+    data: [
+      { id: "mtn-data", name: "MTN Data", logo: "🟡" },
+      { id: "glo-data", name: "Glo Data", logo: "🟢" },
+      { id: "airtel-data", name: "Airtel Data", logo: "🔴" },
+      { id: "9mobile-data", name: "9Mobile Data", logo: "🟢" },
+      { id: "spectranet", name: "Spectranet", logo: "🔵" },
+      { id: "smile", name: "Smile", logo: "🟣" },
+    ],
+    electricity: [
+      { id: "eko", name: "Eko Electric (EKEDC)", logo: "⚡" },
+      { id: "ikeja", name: "Ikeja Electric (IKEDC)", logo: "⚡" },
+      { id: "abuja", name: "Abuja Electric (AEDC)", logo: "⚡" },
+      { id: "ibadan", name: "Ibadan Electric (IBEDC)", logo: "⚡" },
+      { id: "kplc", name: "Kenya Power", logo: "⚡" },
+      { id: "eskom", name: "Eskom", logo: "⚡" },
+    ],
+    cable: [
+      { id: "dstv", name: "DSTV", logo: "📺" },
+      { id: "gotv", name: "GOTV", logo: "📺" },
+      { id: "startimes", name: "Startimes", logo: "📺" },
+      { id: "showmax", name: "Showmax", logo: "📺" },
+    ],
+    internet: [
+      { id: "spectranet", name: "Spectranet", logo: "🌐" },
+      { id: "smile", name: "Smile", logo: "🌐" },
+      { id: "swift", name: "Swift Networks", logo: "🌐" },
+      { id: "ntel", name: "ntel", logo: "🌐" },
+    ],
+  },
+  "US/Europe": {
+    airtime: [
+      { id: "verizon", name: "Verizon", logo: "🔴" },
+      { id: "tmobile", name: "T-Mobile", logo: "🟣" },
+      { id: "att", name: "AT&T", logo: "🔵" },
+      { id: "vodafone", name: "Vodafone", logo: "🔴" },
+      { id: "ee", name: "EE", logo: "🟢" },
+      { id: "o2", name: "O2", logo: "🔵" },
+    ],
+    data: [
+      { id: "verizon-data", name: "Verizon Data", logo: "🔴" },
+      { id: "tmobile-data", name: "T-Mobile Data", logo: "🟣" },
+      { id: "att-data", name: "AT&T Data", logo: "🔵" },
+    ],
+    electricity: [
+      { id: "pge", name: "PG&E", logo: "⚡" },
+      { id: "coned", name: "Con Edison", logo: "⚡" },
+      { id: "duke", name: "Duke Energy", logo: "⚡" },
+      { id: "edf", name: "EDF Energy", logo: "⚡" },
+      { id: "british-gas", name: "British Gas", logo: "⚡" },
+    ],
+    cable: [
+      { id: "netflix", name: "Netflix", logo: "📺" },
+      { id: "hulu", name: "Hulu", logo: "📺" },
+      { id: "hbo", name: "HBO Max", logo: "📺" },
+      { id: "disney", name: "Disney+", logo: "📺" },
+      { id: "sky", name: "Sky", logo: "📺" },
+    ],
+    internet: [
+      { id: "xfinity", name: "Xfinity", logo: "🌐" },
+      { id: "spectrum", name: "Spectrum", logo: "🌐" },
+      { id: "att-fiber", name: "AT&T Fiber", logo: "🌐" },
+      { id: "virgin", name: "Virgin Media", logo: "🌐" },
+      { id: "bt", name: "BT Broadband", logo: "🌐" },
+    ],
+  },
 };
 
+// Currency-specific placeholders
+const currencyPlaceholders: Record<string, { phone: string; meter: string; smartcard: string }> = {
+  NGN: { phone: "0801 234 5678", meter: "45678901234", smartcard: "1234567890" },
+  KES: { phone: "0712 345 678", meter: "12345678", smartcard: "1234567890" },
+  GHS: { phone: "024 123 4567", meter: "12345678901", smartcard: "1234567890" },
+  ZAR: { phone: "082 123 4567", meter: "12345678901234", smartcard: "1234567890" },
+  USD: { phone: "(555) 123-4567", meter: "123456789", smartcard: "1234567890" },
+  EUR: { phone: "+49 123 456789", meter: "DE12345678", smartcard: "1234567890" },
+  GBP: { phone: "07123 456789", meter: "A12B34567", smartcard: "1234567890" },
+};
+
+// Data plan options
 const dataPlanOptions = [
-  { value: "500mb", label: "500MB - 1 Day", price: 2 },
-  { value: "1gb", label: "1GB - 7 Days", price: 5 },
-  { value: "2gb", label: "2GB - 30 Days", price: 10 },
-  { value: "5gb", label: "5GB - 30 Days", price: 20 },
-  { value: "10gb", label: "10GB - 30 Days", price: 35 },
-  { value: "25gb", label: "25GB - 30 Days", price: 75 },
-  { value: "unlimited", label: "Unlimited - 30 Days", price: 100 },
+  { value: "1gb", label: "1GB", price: 5 },
+  { value: "2gb", label: "2GB", price: 10 },
+  { value: "5gb", label: "5GB", price: 20 },
+  { value: "10gb", label: "10GB", price: 35 },
+  { value: "unlimited", label: "Unlimited", price: 50 },
 ];
 
+// Cable TV plan options
 const cablePlans = [
-  { value: "compact", label: "Compact", price: 15 },
-  { value: "compact-plus", label: "Compact Plus", price: 25 },
-  { value: "premium", label: "Premium", price: 45 },
-  { value: "premium-asia", label: "Premium + Asia", price: 55 },
+  { value: "basic", label: "Basic", price: 15 },
+  { value: "standard", label: "Standard", price: 30 },
+  { value: "premium", label: "Premium", price: 50 },
+  { value: "sports", label: "Sports+", price: 65 },
+  { value: "ultimate", label: "Ultimate", price: 85 },
 ];
 
 export default function Bills() {
@@ -142,6 +190,26 @@ export default function Bills() {
     dueDate: "",
     category: "Software",
   });
+
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ["/api/settings"],
+  });
+
+  // Currency and region configuration
+  const currencySymbols: Record<string, string> = {
+    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
+  };
+  const currency = settings?.currency || "USD";
+  const currencySymbol = currencySymbols[currency] || "$";
+  const region = settings?.region === "Africa" ? "Africa" : "US/Europe";
+  const placeholders = currencyPlaceholders[currency] || currencyPlaceholders["USD"];
+  
+  const formatCurrency = (amount: number) => {
+    return `${currencySymbol}${amount.toLocaleString()}`;
+  };
+
+  // Get region-specific utility providers
+  const utilityProviders = utilityProvidersByRegion[region];
 
   const { data: bills, isLoading } = useQuery<Bill[]>({
     queryKey: ["/api/bills"],
@@ -241,7 +309,7 @@ export default function Bills() {
 
   const handleSubmit = () => {
     if (editingBill) {
-      updateMutation.mutate({ id: editingBill.id, data: { ...formData, amount: parseFloat(formData.amount) } });
+      updateMutation.mutate({ id: editingBill.id, data: { ...formData, amount: formData.amount } });
     } else {
       createMutation.mutate(formData);
     }
@@ -278,8 +346,8 @@ export default function Bills() {
       bill.provider.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const totalBills = bills?.reduce((sum, b) => sum + b.amount, 0) || 0;
-  const paidBills = bills?.filter((b) => b.status === "Paid").reduce((sum, b) => sum + b.amount, 0) || 0;
+  const totalBills = bills?.reduce((sum, b) => sum + Number(b.amount), 0) || 0;
+  const paidBills = bills?.filter((b) => b.status === "Paid").reduce((sum, b) => sum + Number(b.amount), 0) || 0;
   const unpaidBills = totalBills - paidBills;
   const overdueBills = bills?.filter((b) => b.status === "Overdue").length || 0;
 
@@ -356,7 +424,7 @@ export default function Bills() {
               </div>
             </div>
             {isLoading ? <Skeleton className="h-8 w-24" /> : (
-              <p className="text-2xl font-black" data-testid="text-total-bills">${totalBills.toLocaleString()}</p>
+              <p className="text-2xl font-black" data-testid="text-total-bills">{formatCurrency(totalBills)}</p>
             )}
           </CardContent>
         </Card>
@@ -369,7 +437,7 @@ export default function Bills() {
               </div>
             </div>
             {isLoading ? <Skeleton className="h-8 w-24" /> : (
-              <p className="text-2xl font-black text-emerald-600">${paidBills.toLocaleString()}</p>
+              <p className="text-2xl font-black text-emerald-600">{formatCurrency(paidBills)}</p>
             )}
           </CardContent>
         </Card>
@@ -382,7 +450,7 @@ export default function Bills() {
               </div>
             </div>
             {isLoading ? <Skeleton className="h-8 w-24" /> : (
-              <p className="text-2xl font-black text-amber-600">${unpaidBills.toLocaleString()}</p>
+              <p className="text-2xl font-black text-amber-600">{formatCurrency(unpaidBills)}</p>
             )}
           </CardContent>
         </Card>
@@ -455,7 +523,7 @@ export default function Bills() {
                   </div>
                   <div className="text-right flex items-center gap-4">
                     <div>
-                      <p className="text-base font-bold">${bill.amount.toLocaleString()}</p>
+                      <p className="text-base font-bold">{formatCurrency(Number(bill.amount))}</p>
                       <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
                         <Calendar className="h-3 w-3" />
                         <span>Due {new Date(bill.dueDate).toLocaleDateString()}</span>
@@ -515,7 +583,7 @@ export default function Bills() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="amount">Amount ($)</Label>
+                <Label htmlFor="amount">Amount ({currencySymbol})</Label>
                 <Input id="amount" type="number" value={formData.amount} onChange={(e) => setFormData({ ...formData, amount: e.target.value })} placeholder="0.00" className="bg-muted/50" data-testid="input-bill-amount" />
               </div>
               <div className="space-y-2">
@@ -598,7 +666,7 @@ export default function Bills() {
                   type="tel" 
                   value={utilityForm.phoneNumber} 
                   onChange={(e) => setUtilityForm({ ...utilityForm, phoneNumber: e.target.value })} 
-                  placeholder="+1 (555) 123-4567" 
+                  placeholder={placeholders.phone} 
                   className="bg-muted/50"
                   data-testid="input-phone"
                 />
@@ -612,7 +680,7 @@ export default function Bills() {
                   id="meter" 
                   value={utilityForm.meterNumber} 
                   onChange={(e) => setUtilityForm({ ...utilityForm, meterNumber: e.target.value })} 
-                  placeholder="Enter meter number" 
+                  placeholder={placeholders.meter} 
                   className="bg-muted/50"
                   data-testid="input-meter"
                 />
@@ -626,7 +694,7 @@ export default function Bills() {
                   id="smartcard" 
                   value={utilityForm.smartCardNumber} 
                   onChange={(e) => setUtilityForm({ ...utilityForm, smartCardNumber: e.target.value })} 
-                  placeholder="Enter smart card number" 
+                  placeholder={placeholders.smartcard} 
                   className="bg-muted/50"
                   data-testid="input-smartcard"
                 />
@@ -640,7 +708,7 @@ export default function Bills() {
                   id="account" 
                   value={utilityForm.meterNumber} 
                   onChange={(e) => setUtilityForm({ ...utilityForm, meterNumber: e.target.value })} 
-                  placeholder="Enter account number" 
+                  placeholder={placeholders.meter} 
                   className="bg-muted/50"
                   data-testid="input-account"
                 />
@@ -655,7 +723,7 @@ export default function Bills() {
                   <SelectContent>
                     {dataPlanOptions.map((plan) => (
                       <SelectItem key={plan.value} value={plan.value}>
-                        {plan.label} - ${plan.price}
+                        {plan.label} - {formatCurrency(plan.price)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -671,7 +739,7 @@ export default function Bills() {
                   <SelectContent>
                     {cablePlans.map((plan) => (
                       <SelectItem key={plan.value} value={plan.value}>
-                        {plan.label} - ${plan.price}/month
+                        {plan.label} - {formatCurrency(plan.price)}/month
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -681,7 +749,7 @@ export default function Bills() {
 
             {(utilityType === "airtime" || utilityType === "electricity" || utilityType === "internet") && (
               <div className="space-y-2">
-                <Label htmlFor="utility-amount">Amount ($)</Label>
+                <Label htmlFor="utility-amount">Amount ({currencySymbol})</Label>
                 <Input 
                   id="utility-amount" 
                   type="number" 
@@ -701,7 +769,7 @@ export default function Bills() {
                         onClick={() => setUtilityForm({ ...utilityForm, amount: String(amount) })}
                         className="text-xs"
                       >
-                        ${amount}
+                        {formatCurrency(amount)}
                       </Button>
                     ))}
                   </div>
@@ -713,7 +781,7 @@ export default function Bills() {
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Amount</span>
                 <span className="font-bold">
-                  ${utilityType === "data" 
+                  {currencySymbol}{utilityType === "data" 
                     ? (dataPlanOptions.find(p => p.value === utilityForm.plan)?.price || 0).toFixed(2)
                     : utilityType === "cable"
                     ? (cablePlans.find(p => p.value === utilityForm.plan)?.price || 0).toFixed(2)
@@ -722,12 +790,12 @@ export default function Bills() {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Fee</span>
-                <span className="font-bold text-emerald-600">$0.00</span>
+                <span className="font-bold text-emerald-600">{currencySymbol}0.00</span>
               </div>
               <div className="border-t pt-2 flex justify-between">
                 <span className="font-bold">Total</span>
                 <span className="font-bold text-primary">
-                  ${utilityType === "data" 
+                  {currencySymbol}{utilityType === "data" 
                     ? (dataPlanOptions.find(p => p.value === utilityForm.plan)?.price || 0).toFixed(2)
                     : utilityType === "cable"
                     ? (cablePlans.find(p => p.value === utilityForm.plan)?.price || 0).toFixed(2)
