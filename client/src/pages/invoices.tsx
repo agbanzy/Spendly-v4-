@@ -30,7 +30,8 @@ import {
   Mail,
   CreditCard,
   Copy,
-  Banknote
+  Banknote,
+  Trash2
 } from "lucide-react";
 import type { Invoice } from "@shared/schema";
 
@@ -43,6 +44,20 @@ interface VirtualAccount {
   currency: string;
 }
 
+interface LineItem {
+  id: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+const emptyLineItem = (): LineItem => ({
+  id: crypto.randomUUID(),
+  description: "",
+  quantity: 1,
+  unitPrice: 0
+});
+
 export default function InvoicesPage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
@@ -50,6 +65,45 @@ export default function InvoicesPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isViewOpen, setIsViewOpen] = useState(false);
+  
+  const [invoiceForm, setInvoiceForm] = useState({
+    clientName: "",
+    clientEmail: "",
+    invoiceDate: new Date().toISOString().split('T')[0],
+    dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    notes: ""
+  });
+  const [lineItems, setLineItems] = useState<LineItem[]>([emptyLineItem()]);
+  
+  const addLineItem = () => {
+    setLineItems([...lineItems, emptyLineItem()]);
+  };
+  
+  const removeLineItem = (id: string) => {
+    if (lineItems.length > 1) {
+      setLineItems(lineItems.filter(item => item.id !== id));
+    }
+  };
+  
+  const updateLineItem = (id: string, field: keyof LineItem, value: string | number) => {
+    setLineItems(lineItems.map(item => 
+      item.id === id ? { ...item, [field]: value } : item
+    ));
+  };
+  
+  const calculateLineTotal = (item: LineItem) => item.quantity * item.unitPrice;
+  const calculateSubtotal = () => lineItems.reduce((sum, item) => sum + calculateLineTotal(item), 0);
+  
+  const resetForm = () => {
+    setInvoiceForm({
+      clientName: "",
+      clientEmail: "",
+      invoiceDate: new Date().toISOString().split('T')[0],
+      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      notes: ""
+    });
+    setLineItems([emptyLineItem()]);
+  };
 
   const { data: invoices = [], isLoading } = useQuery<Invoice[]>({
     queryKey: ["/api/invoices"]
@@ -95,16 +149,39 @@ export default function InvoicesPage() {
   );
 
   const handleCreateInvoice = async () => {
+    if (!invoiceForm.clientName || !invoiceForm.clientEmail) {
+      toast({
+        title: "Error",
+        description: "Please fill in client name and email.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    if (lineItems.some(item => !item.description || item.unitPrice <= 0)) {
+      toast({
+        title: "Error",
+        description: "Please fill in all line item details.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
     setIsCreating(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
     
-    toast({
-      title: "Invoice created",
-      description: "Your invoice has been created successfully."
-    });
-    
-    setIsCreating(false);
-    setIsCreateOpen(false);
+    try {
+      await createInvoiceMutation.mutateAsync({
+        client: invoiceForm.clientName,
+        clientEmail: invoiceForm.clientEmail,
+        amount: calculateSubtotal(),
+        dueDate: invoiceForm.dueDate
+      });
+      resetForm();
+    } catch (error) {
+      // Error handled by mutation
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const handleSendInvoice = (invoice: Invoice) => {
@@ -181,48 +258,135 @@ export default function InvoicesPage() {
                 Fill in the details to create a new invoice.
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4 py-4">
+            <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Client Name</Label>
-                  <Input placeholder="e.g., TechCorp Inc." data-testid="input-client-name" />
+                  <Input 
+                    placeholder="e.g., TechCorp Inc." 
+                    value={invoiceForm.clientName}
+                    onChange={(e) => setInvoiceForm({...invoiceForm, clientName: e.target.value})}
+                    data-testid="input-client-name" 
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Client Email</Label>
-                  <Input type="email" placeholder="billing@company.com" data-testid="input-client-email" />
+                  <Input 
+                    type="email" 
+                    placeholder="billing@company.com" 
+                    value={invoiceForm.clientEmail}
+                    onChange={(e) => setInvoiceForm({...invoiceForm, clientEmail: e.target.value})}
+                    data-testid="input-client-email" 
+                  />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Invoice Date</Label>
-                  <Input type="date" defaultValue="2026-01-29" />
+                  <Input 
+                    type="date" 
+                    value={invoiceForm.invoiceDate}
+                    onChange={(e) => setInvoiceForm({...invoiceForm, invoiceDate: e.target.value})}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Due Date</Label>
-                  <Input type="date" defaultValue="2026-02-28" />
+                  <Input 
+                    type="date" 
+                    value={invoiceForm.dueDate}
+                    onChange={(e) => setInvoiceForm({...invoiceForm, dueDate: e.target.value})}
+                  />
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label>Description</Label>
-                <Textarea placeholder="Services rendered..." />
+              
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-base font-semibold">Line Items</Label>
+                  <Button type="button" variant="outline" size="sm" onClick={addLineItem} data-testid="button-add-line-item">
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Item
+                  </Button>
+                </div>
+                
+                <div className="space-y-3">
+                  {lineItems.map((item, index) => (
+                    <div key={item.id} className="p-3 border rounded-lg bg-muted/30 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-muted-foreground">Item {index + 1}</span>
+                        {lineItems.length > 1 && (
+                          <Button 
+                            type="button" 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-7 w-7 text-destructive hover:text-destructive"
+                            onClick={() => removeLineItem(item.id)}
+                            data-testid={`button-remove-item-${index}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs">Description</Label>
+                        <Input 
+                          placeholder="Service or product description..."
+                          value={item.description}
+                          onChange={(e) => updateLineItem(item.id, 'description', e.target.value)}
+                          data-testid={`input-item-description-${index}`}
+                        />
+                      </div>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="space-y-2">
+                          <Label className="text-xs">Quantity</Label>
+                          <Input 
+                            type="number" 
+                            min="1"
+                            value={item.quantity}
+                            onChange={(e) => updateLineItem(item.id, 'quantity', parseInt(e.target.value) || 1)}
+                            data-testid={`input-item-quantity-${index}`}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-xs">Unit Price</Label>
+                          <Input 
+                            type="number" 
+                            min="0"
+                            step="0.01"
+                            placeholder="0.00"
+                            value={item.unitPrice || ""}
+                            onChange={(e) => updateLineItem(item.id, 'unitPrice', parseFloat(e.target.value) || 0)}
+                            data-testid={`input-item-price-${index}`}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-xs">Total</Label>
+                          <Input 
+                            type="text" 
+                            value={`$${calculateLineTotal(item).toFixed(2)}`}
+                            disabled 
+                            className="bg-muted"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                
+                <div className="flex justify-end pt-2 border-t">
+                  <div className="text-right">
+                    <p className="text-sm text-muted-foreground">Subtotal</p>
+                    <p className="text-xl font-bold">${calculateSubtotal().toFixed(2)}</p>
+                  </div>
+                </div>
               </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label>Quantity</Label>
-                  <Input type="number" defaultValue="1" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Rate</Label>
-                  <Input type="number" placeholder="0.00" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Amount</Label>
-                  <Input type="number" placeholder="0.00" disabled />
-                </div>
-              </div>
+              
               <div className="space-y-2">
                 <Label>Notes</Label>
-                <Textarea placeholder="Additional notes or payment instructions..." />
+                <Textarea 
+                  placeholder="Additional notes or payment instructions..."
+                  value={invoiceForm.notes}
+                  onChange={(e) => setInvoiceForm({...invoiceForm, notes: e.target.value})}
+                />
               </div>
             </div>
             <DialogFooter>

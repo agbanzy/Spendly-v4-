@@ -68,7 +68,7 @@ export default function SignupPage() {
         title: "Account created!",
         description: "Welcome to Spendly. Let's get you set up."
       });
-      setLocation("/dashboard");
+      setLocation("/onboarding");
     } catch (error: any) {
       let errorMessage = "Signup failed. Please try again.";
       if (error?.code === "auth/email-already-in-use") {
@@ -96,7 +96,7 @@ export default function SignupPage() {
         title: "Welcome!",
         description: "Signed up with Google successfully."
       });
-      setLocation("/dashboard");
+      setLocation("/onboarding");
     } catch (error: any) {
       const errorMessage = error?.code === "auth/popup-closed-by-user" 
         ? "Sign-up cancelled." 

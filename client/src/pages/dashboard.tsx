@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useSearch } from "wouter";
+import { useSearch, useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -61,6 +61,7 @@ interface Bank {
 export default function Dashboard() {
   const { toast } = useToast();
   const { user } = useAuth();
+  const [, setLocation] = useLocation();
   const searchParams = useSearch();
   const [isFundingOpen, setIsFundingOpen] = useState(false);
   const [isWithdrawalOpen, setIsWithdrawalOpen] = useState(false);
@@ -336,9 +337,38 @@ export default function Dashboard() {
   };
 
   const showKycBanner = userProfile && userProfile.kycStatus !== 'approved';
+  const showOnboardingPrompt = user && !userProfile;
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500 texture-mesh min-h-screen">
+      {showOnboardingPrompt && (
+        <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/50 dark:to-purple-950/50">
+          <CardContent className="p-4 flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-full bg-indigo-100 dark:bg-indigo-900">
+                <Sparkles className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+              </div>
+              <div>
+                <p className="font-semibold text-indigo-900 dark:text-indigo-100">
+                  Welcome to Spendly! Complete Your Setup
+                </p>
+                <p className="text-sm text-indigo-700 dark:text-indigo-300">
+                  Set up your profile and verify your identity to unlock all features including payments and transfers.
+                </p>
+              </div>
+            </div>
+            <Button 
+              onClick={() => setLocation('/onboarding')}
+              className="bg-indigo-600 hover:bg-indigo-700"
+              data-testid="button-start-onboarding"
+            >
+              Start Onboarding
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+      
       {showKycBanner && (
         <Card className={`${
           userProfile?.kycStatus === 'pending_review' 
