@@ -92,6 +92,24 @@ export default function SignupPage() {
     setIsLoading(true);
     try {
       await loginWithGoogle();
+      
+      // Check if user has a profile (returning user vs new user)
+      const auth = await import("firebase/auth");
+      const currentUser = auth.getAuth().currentUser;
+      if (currentUser) {
+        const profileRes = await fetch(`/api/user-profile/${currentUser.uid}`);
+        if (profileRes.ok) {
+          // Returning user with existing profile - go to dashboard
+          toast({
+            title: "Welcome back!",
+            description: "Signed in with Google successfully."
+          });
+          setLocation("/dashboard");
+          return;
+        }
+      }
+      
+      // New user without profile - go to onboarding
       toast({
         title: "Welcome!",
         description: "Signed up with Google successfully."

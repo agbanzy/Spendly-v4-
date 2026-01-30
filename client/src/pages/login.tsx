@@ -65,11 +65,29 @@ export default function LoginPage() {
     setIsLoading(true);
     try {
       await loginWithGoogle();
+      
+      // Check if user has a profile (new user vs returning user)
+      const auth = await import("firebase/auth");
+      const currentUser = auth.getAuth().currentUser;
+      if (currentUser) {
+        const profileRes = await fetch(`/api/user-profile/${currentUser.uid}`);
+        if (profileRes.ok) {
+          // Returning user with existing profile - go to dashboard
+          toast({
+            title: "Welcome back!",
+            description: "Signed in with Google successfully."
+          });
+          setLocation("/dashboard");
+          return;
+        }
+      }
+      
+      // New user without profile - go to onboarding
       toast({
         title: "Welcome!",
-        description: "Signed in with Google successfully."
+        description: "Please complete your profile setup."
       });
-      setLocation("/dashboard");
+      setLocation("/onboarding");
     } catch (error: any) {
       const errorMessage = error?.code === "auth/popup-closed-by-user" 
         ? "Sign-in cancelled." 

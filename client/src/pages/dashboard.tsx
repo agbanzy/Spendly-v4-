@@ -359,7 +359,6 @@ export default function Dashboard() {
             </div>
             <Button 
               onClick={() => setLocation('/onboarding')}
-              className="bg-indigo-600 hover:bg-indigo-700"
               data-testid="button-start-onboarding"
             >
               Start Onboarding

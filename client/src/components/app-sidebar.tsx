@@ -19,6 +19,7 @@ import {
   UserCog,
   ScrollText,
   Lock,
+  Database,
 } from "lucide-react";
 import {
   Sidebar,
@@ -62,6 +63,10 @@ const adminItems = [
   { title: "Audit Logs", url: "/admin/audit-logs", icon: ScrollText },
   { title: "Organization", url: "/admin/organization", icon: Building2 },
   { title: "Security", url: "/admin/security", icon: Lock },
+  { title: "Wallets", url: "/admin/wallets", icon: Wallet },
+  { title: "Payouts", url: "/admin/payouts", icon: DollarSign },
+  { title: "Exchange Rates", url: "/admin/exchange-rates", icon: ArrowRightLeft },
+  { title: "Database", url: "/admin/database", icon: Database },
 ];
 
 export function AppSidebar() {

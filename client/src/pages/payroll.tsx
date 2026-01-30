@@ -38,6 +38,20 @@ import {
 } from "lucide-react";
 import type { PayrollEntry } from "@shared/schema";
 
+interface Settings {
+  currency: string;
+}
+
+const currencySymbols: Record<string, string> = {
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  NGN: '₦',
+  KES: 'KSh',
+  GHS: '₵',
+  ZAR: 'R',
+};
+
 export default function PayrollPage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
@@ -57,6 +71,17 @@ export default function PayrollPage() {
     deductions: "",
     payDate: new Date().toISOString().split('T')[0],
   });
+
+  const { data: settings } = useQuery<Settings>({
+    queryKey: ["/api/settings"]
+  });
+
+  const currency = settings?.currency || 'USD';
+  const currencySymbol = currencySymbols[currency] || currency;
+
+  const formatCurrency = (amount: number) => {
+    return `${currencySymbol}${amount.toLocaleString()}`;
+  };
 
   const { data: payrollEntries = [], isLoading } = useQuery<PayrollEntry[]>({
     queryKey: ["/api/payroll"]
@@ -287,19 +312,19 @@ export default function PayrollPage() {
         <div class="details">
           <div class="row">
             <span class="label">Basic Salary</span>
-            <span class="value">$${Number(selectedEntry.salary).toLocaleString()}</span>
+            <span class="value">${currencySymbol}${Number(selectedEntry.salary).toLocaleString()}</span>
           </div>
           <div class="row">
             <span class="label">Bonus</span>
-            <span class="value bonus">+$${Number(selectedEntry.bonus).toLocaleString()}</span>
+            <span class="value bonus">+${currencySymbol}${Number(selectedEntry.bonus).toLocaleString()}</span>
           </div>
           <div class="row">
             <span class="label">Deductions</span>
-            <span class="value deduction">-$${Number(selectedEntry.deductions).toLocaleString()}</span>
+            <span class="value deduction">-${currencySymbol}${Number(selectedEntry.deductions).toLocaleString()}</span>
           </div>
           <div class="row total">
             <span class="label">Net Pay</span>
-            <span class="value">$${Number(selectedEntry.netPay).toLocaleString()}</span>
+            <span class="value">${currencySymbol}${Number(selectedEntry.netPay).toLocaleString()}</span>
           </div>
         </div>
         <div class="footer">
@@ -392,7 +417,7 @@ export default function PayrollPage() {
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900 text-indigo-600"><Wallet className="h-5 w-5" /></div>
               <div>
-                <p className="text-2xl font-bold">${totalPayroll.toLocaleString()}</p>
+                <p className="text-2xl font-bold">{formatCurrency(totalPayroll)}</p>
                 <p className="text-sm text-muted-foreground">Total Payroll</p>
               </div>
             </div>
@@ -403,7 +428,7 @@ export default function PayrollPage() {
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900 text-emerald-600"><CheckCircle2 className="h-5 w-5" /></div>
               <div>
-                <p className="text-2xl font-bold">${paidThisMonth.toLocaleString()}</p>
+                <p className="text-2xl font-bold">{formatCurrency(paidThisMonth)}</p>
                 <p className="text-sm text-muted-foreground">Paid This Month</p>
               </div>
             </div>
@@ -414,7 +439,7 @@ export default function PayrollPage() {
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900 text-amber-600"><Clock className="h-5 w-5" /></div>
               <div>
-                <p className="text-2xl font-bold">${pendingPayroll.toLocaleString()}</p>
+                <p className="text-2xl font-bold">{formatCurrency(pendingPayroll)}</p>
                 <p className="text-sm text-muted-foreground">Pending</p>
               </div>
             </div>
@@ -447,7 +472,7 @@ export default function PayrollPage() {
                 <div key={dept.name} className="p-3 rounded-lg border bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => setDepartmentFilter(dept.name)} data-testid={`button-department-${index}`}>
                   <p className="font-medium text-sm" data-testid={`text-department-name-${index}`}>{dept.name}</p>
                   <p className="text-2xl font-bold" data-testid={`text-department-count-${index}`}>{dept.count}</p>
-                  <p className="text-xs text-muted-foreground">${dept.total.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground">{formatCurrency(dept.total)}</p>
                 </div>
               ))}
             </div>
@@ -498,12 +523,12 @@ export default function PayrollPage() {
                         </div>
                       </div>
                       <div className="hidden md:flex items-center gap-8">
-                        <div className="text-right"><p className="text-sm text-muted-foreground">Salary</p><p className="font-medium">${Number(entry.salary).toLocaleString()}</p></div>
-                        <div className="text-right"><p className="text-sm text-muted-foreground">Bonus</p><p className="font-medium text-emerald-600">+${Number(entry.bonus).toLocaleString()}</p></div>
-                        <div className="text-right"><p className="text-sm text-muted-foreground">Deductions</p><p className="font-medium text-rose-600">-${Number(entry.deductions).toLocaleString()}</p></div>
+                        <div className="text-right"><p className="text-sm text-muted-foreground">Salary</p><p className="font-medium">{formatCurrency(Number(entry.salary))}</p></div>
+                        <div className="text-right"><p className="text-sm text-muted-foreground">Bonus</p><p className="font-medium text-emerald-600">+{formatCurrency(Number(entry.bonus))}</p></div>
+                        <div className="text-right"><p className="text-sm text-muted-foreground">Deductions</p><p className="font-medium text-rose-600">-{formatCurrency(Number(entry.deductions))}</p></div>
                       </div>
                       <div className="flex items-center gap-4">
-                        <div className="text-right"><p className="text-sm text-muted-foreground">Net Pay</p><p className="text-lg font-bold">${Number(entry.netPay).toLocaleString()}</p></div>
+                        <div className="text-right"><p className="text-sm text-muted-foreground">Net Pay</p><p className="text-lg font-bold">{formatCurrency(Number(entry.netPay))}</p></div>
                         {getStatusBadge(entry.status)}
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" data-testid={`button-payroll-menu-${entry.id}`}><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
@@ -554,7 +579,7 @@ export default function PayrollPage() {
             <div className="p-4 rounded-lg bg-muted">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm text-muted-foreground">Total to be paid</span>
-                <span className="text-2xl font-bold">${pendingPayroll.toLocaleString()}</span>
+                <span className="text-2xl font-bold">{formatCurrency(pendingPayroll)}</span>
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Employees</span>
@@ -567,7 +592,7 @@ export default function PayrollPage() {
                 {payrollEntries.filter(e => e.status === "pending").map((entry) => (
                   <div key={entry.id} className="flex items-center justify-between p-2 rounded border bg-background">
                     <span className="text-sm">{entry.employeeName}</span>
-                    <span className="text-sm font-medium">${Number(entry.netPay).toLocaleString()}</span>
+                    <span className="text-sm font-medium">{formatCurrency(Number(entry.netPay))}</span>
                   </div>
                 ))}
               </div>
@@ -580,7 +605,7 @@ export default function PayrollPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsRunPayrollOpen(false)}>Cancel</Button>
             <Button onClick={() => processPayrollMutation.mutate()} disabled={processPayrollMutation.isPending || pendingPayroll === 0} data-testid="button-confirm-payroll">
-              {processPayrollMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Processing...</> : <><Send className="mr-2 h-4 w-4" />Process ${pendingPayroll.toLocaleString()}</>}
+              {processPayrollMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Processing...</> : <><Send className="mr-2 h-4 w-4" />Process {formatCurrency(pendingPayroll)}</>}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -604,17 +629,17 @@ export default function PayrollPage() {
                 </div>
               </div>
               <div className="p-4 rounded-lg bg-muted space-y-2">
-                <div className="flex justify-between"><span className="text-muted-foreground">Salary</span><span>${Number(selectedEntry.salary).toLocaleString()}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Bonus</span><span className="text-emerald-600">+${Number(selectedEntry.bonus).toLocaleString()}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Deductions</span><span className="text-rose-600">-${Number(selectedEntry.deductions).toLocaleString()}</span></div>
-                <div className="flex justify-between border-t pt-2 font-bold"><span>Net Pay</span><span>${Number(selectedEntry.netPay).toLocaleString()}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Salary</span><span>{formatCurrency(Number(selectedEntry.salary))}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Bonus</span><span className="text-emerald-600">+{formatCurrency(Number(selectedEntry.bonus))}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Deductions</span><span className="text-rose-600">-{formatCurrency(Number(selectedEntry.deductions))}</span></div>
+                <div className="flex justify-between border-t pt-2 font-bold"><span>Net Pay</span><span>{formatCurrency(Number(selectedEntry.netPay))}</span></div>
               </div>
             </div>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsPayIndividualOpen(false)} data-testid="button-cancel-pay">Cancel</Button>
             <Button onClick={() => selectedEntry && payIndividualMutation.mutate(selectedEntry.id)} disabled={payIndividualMutation.isPending} data-testid="button-confirm-pay-individual">
-              {payIndividualMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Processing...</> : <><DollarSign className="mr-2 h-4 w-4" />Pay ${selectedEntry ? Number(selectedEntry.netPay).toLocaleString() : 0}</>}
+              {payIndividualMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Processing...</> : <><DollarSign className="mr-2 h-4 w-4" />Pay {selectedEntry ? formatCurrency(Number(selectedEntry.netPay)) : formatCurrency(0)}</>}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -654,19 +679,19 @@ export default function PayrollPage() {
               <div className="rounded-lg border overflow-hidden">
                 <div className="flex justify-between p-3 border-b">
                   <span className="text-muted-foreground">Basic Salary</span>
-                  <span className="font-medium">${Number(selectedEntry.salary).toLocaleString()}</span>
+                  <span className="font-medium">{formatCurrency(Number(selectedEntry.salary))}</span>
                 </div>
                 <div className="flex justify-between p-3 border-b">
                   <span className="text-muted-foreground">Bonus</span>
-                  <span className="font-medium text-emerald-600">+${Number(selectedEntry.bonus).toLocaleString()}</span>
+                  <span className="font-medium text-emerald-600">+{formatCurrency(Number(selectedEntry.bonus))}</span>
                 </div>
                 <div className="flex justify-between p-3 border-b">
                   <span className="text-muted-foreground">Deductions</span>
-                  <span className="font-medium text-rose-600">-${Number(selectedEntry.deductions).toLocaleString()}</span>
+                  <span className="font-medium text-rose-600">-{formatCurrency(Number(selectedEntry.deductions))}</span>
                 </div>
                 <div className="flex justify-between p-3 bg-muted font-bold">
                   <span>Net Pay</span>
-                  <span>${Number(selectedEntry.netPay).toLocaleString()}</span>
+                  <span>{formatCurrency(Number(selectedEntry.netPay))}</span>
                 </div>
               </div>
 
@@ -714,15 +739,15 @@ export default function PayrollPage() {
             </div>
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="salary">Salary ($) *</Label>
+                <Label htmlFor="salary">Salary ({currencySymbol}) *</Label>
                 <Input id="salary" type="number" value={formData.salary} onChange={(e) => setFormData({ ...formData, salary: e.target.value })} placeholder="0" data-testid="input-salary" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="bonus">Bonus ($)</Label>
+                <Label htmlFor="bonus">Bonus ({currencySymbol})</Label>
                 <Input id="bonus" type="number" value={formData.bonus} onChange={(e) => setFormData({ ...formData, bonus: e.target.value })} placeholder="0" data-testid="input-bonus" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="deductions">Deductions ($)</Label>
+                <Label htmlFor="deductions">Deductions ({currencySymbol})</Label>
                 <Input id="deductions" type="number" value={formData.deductions} onChange={(e) => setFormData({ ...formData, deductions: e.target.value })} placeholder="0" data-testid="input-deductions" />
               </div>
             </div>
@@ -733,7 +758,7 @@ export default function PayrollPage() {
             <div className="p-3 bg-muted rounded-lg">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Net Pay</span>
-                <span className="font-bold">${((parseFloat(formData.salary) || 0) + (parseFloat(formData.bonus) || 0) - (parseFloat(formData.deductions) || 0)).toLocaleString()}</span>
+                <span className="font-bold">{formatCurrency((parseFloat(formData.salary) || 0) + (parseFloat(formData.bonus) || 0) - (parseFloat(formData.deductions) || 0))}</span>
               </div>
             </div>
           </div>

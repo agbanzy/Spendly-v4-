@@ -116,7 +116,7 @@ export default function InvoicesPage() {
   });
 
   const createInvoiceMutation = useMutation({
-    mutationFn: async (invoiceData: { client: string; clientEmail: string; amount: number; dueDate: string }) => {
+    mutationFn: async (invoiceData: { client: string; clientEmail: string; amount: number; dueDate: string; items: { description: string; quantity: number; rate: number }[] }) => {
       return apiRequest("/api/invoices", {
         method: "POST",
         body: JSON.stringify(invoiceData)
@@ -174,7 +174,12 @@ export default function InvoicesPage() {
         client: invoiceForm.clientName,
         clientEmail: invoiceForm.clientEmail,
         amount: calculateSubtotal(),
-        dueDate: invoiceForm.dueDate
+        dueDate: invoiceForm.dueDate,
+        items: lineItems.map(item => ({
+          description: item.description,
+          quantity: item.quantity,
+          rate: item.unitPrice
+        }))
       });
       resetForm();
     } catch (error) {
@@ -628,6 +633,41 @@ export default function InvoicesPage() {
                   <p className="font-medium">{selectedInvoice.dueDate}</p>
                 </div>
               </div>
+
+              {/* Line Items Section */}
+              {selectedInvoice.items && (selectedInvoice.items as any[]).length > 0 && (
+                <div className="border-t pt-4">
+                  <h4 className="text-sm font-semibold mb-3">Line Items</h4>
+                  <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="text-left p-2 font-medium">Description</th>
+                          <th className="text-right p-2 font-medium">Qty</th>
+                          <th className="text-right p-2 font-medium">Rate</th>
+                          <th className="text-right p-2 font-medium">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(selectedInvoice.items as { description: string; quantity: number; rate: number }[]).map((item, idx) => (
+                          <tr key={idx} className="border-t">
+                            <td className="p-2">{item.description}</td>
+                            <td className="p-2 text-right">{item.quantity}</td>
+                            <td className="p-2 text-right">${item.rate.toFixed(2)}</td>
+                            <td className="p-2 text-right font-medium">${(item.quantity * item.rate).toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-muted/50 border-t">
+                        <tr>
+                          <td colSpan={3} className="p-2 text-right font-medium">Total:</td>
+                          <td className="p-2 text-right font-bold">${Number(selectedInvoice.amount).toFixed(2)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               {/* Payment Details Section */}
               {selectedInvoice.status !== "paid" && (
