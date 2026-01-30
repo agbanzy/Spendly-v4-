@@ -1,5 +1,7 @@
 import { storage } from '../storage';
 import type { InsertNotification, NotificationSettings } from '@shared/schema';
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
 
 interface SendNotificationOptions {
   userId: string;
@@ -22,38 +24,85 @@ interface SmsConfig {
   body: string;
 }
 
+type EmailProvider = 'aws' | 'sendgrid' | 'none';
+type SmsProvider = 'aws' | 'twilio' | 'none';
+
 class NotificationService {
   private twilioClient: any = null;
   private sendgridClient: any = null;
+  private sesClient: SESClient | null = null;
+  private snsClient: SNSClient | null = null;
+  private emailProvider: EmailProvider = 'none';
+  private smsProvider: SmsProvider = 'none';
 
   constructor() {
     this.initializeClients();
   }
 
   private initializeClients() {
-    if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+    // Initialize AWS SES for email (preferred)
+    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_REGION) {
+      try {
+        this.sesClient = new SESClient({
+          region: process.env.AWS_REGION,
+          credentials: {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+          },
+        });
+        this.emailProvider = 'aws';
+        console.log('AWS SES client initialized');
+      } catch (error) {
+        console.log('AWS SES client initialization failed:', error);
+      }
+    }
+
+    // Initialize AWS SNS for SMS (preferred)
+    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_REGION) {
+      try {
+        this.snsClient = new SNSClient({
+          region: process.env.AWS_REGION,
+          credentials: {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+          },
+        });
+        this.smsProvider = 'aws';
+        console.log('AWS SNS client initialized');
+      } catch (error) {
+        console.log('AWS SNS client initialization failed:', error);
+      }
+    }
+
+    // Fallback to SendGrid for email
+    if (this.emailProvider === 'none' && process.env.SENDGRID_API_KEY) {
+      try {
+        const sgMail = require('@sendgrid/mail');
+        sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+        this.sendgridClient = sgMail;
+        this.emailProvider = 'sendgrid';
+        console.log('SendGrid client initialized (fallback)');
+      } catch (error) {
+        console.log('SendGrid client not available');
+      }
+    }
+
+    // Fallback to Twilio for SMS
+    if (this.smsProvider === 'none' && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
       try {
         const twilio = require('twilio');
         this.twilioClient = twilio(
           process.env.TWILIO_ACCOUNT_SID,
           process.env.TWILIO_AUTH_TOKEN
         );
-        console.log('Twilio client initialized');
+        this.smsProvider = 'twilio';
+        console.log('Twilio client initialized (fallback)');
       } catch (error) {
         console.log('Twilio client not available');
       }
     }
 
-    if (process.env.SENDGRID_API_KEY) {
-      try {
-        const sgMail = require('@sendgrid/mail');
-        sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-        this.sendgridClient = sgMail;
-        console.log('SendGrid client initialized');
-      } catch (error) {
-        console.log('SendGrid client not available');
-      }
-    }
+    console.log(`Notification providers - Email: ${this.emailProvider}, SMS: ${this.smsProvider}`);
   }
 
   async send(options: SendNotificationOptions): Promise<void> {
@@ -158,43 +207,109 @@ class NotificationService {
   }
 
   async sendEmail(config: EmailConfig): Promise<void> {
-    if (!this.sendgridClient) {
-      console.log('SendGrid not configured, skipping email:', config.subject);
-      return;
+    const fromEmail = process.env.AWS_SES_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || 'noreply@spendly.app';
+
+    // Use AWS SES if available
+    if (this.emailProvider === 'aws' && this.sesClient) {
+      try {
+        const command = new SendEmailCommand({
+          Source: fromEmail,
+          Destination: {
+            ToAddresses: [config.to],
+          },
+          Message: {
+            Subject: {
+              Data: config.subject,
+              Charset: 'UTF-8',
+            },
+            Body: {
+              Html: {
+                Data: config.html,
+                Charset: 'UTF-8',
+              },
+              Text: {
+                Data: config.text || config.html.replace(/<[^>]*>/g, ''),
+                Charset: 'UTF-8',
+              },
+            },
+          },
+        });
+
+        await this.sesClient.send(command);
+        console.log('Email sent via AWS SES to:', config.to);
+        return;
+      } catch (error) {
+        console.error('Failed to send email via AWS SES:', error);
+        throw error;
+      }
     }
 
-    try {
-      await this.sendgridClient.send({
-        to: config.to,
-        from: process.env.SENDGRID_FROM_EMAIL || 'noreply@spendly.app',
-        subject: config.subject,
-        text: config.text || config.html.replace(/<[^>]*>/g, ''),
-        html: config.html,
-      });
-      console.log('Email sent to:', config.to);
-    } catch (error) {
-      console.error('Failed to send email:', error);
-      throw error;
+    // Fallback to SendGrid
+    if (this.emailProvider === 'sendgrid' && this.sendgridClient) {
+      try {
+        await this.sendgridClient.send({
+          to: config.to,
+          from: fromEmail,
+          subject: config.subject,
+          text: config.text || config.html.replace(/<[^>]*>/g, ''),
+          html: config.html,
+        });
+        console.log('Email sent via SendGrid to:', config.to);
+        return;
+      } catch (error) {
+        console.error('Failed to send email via SendGrid:', error);
+        throw error;
+      }
     }
+
+    console.log('No email provider configured, skipping email:', config.subject);
   }
 
   async sendSms(config: SmsConfig): Promise<void> {
-    if (!this.twilioClient) {
-      console.log('Twilio not configured, skipping SMS:', config.body);
-      return;
+    // Use AWS SNS if available
+    if (this.smsProvider === 'aws' && this.snsClient) {
+      try {
+        const command = new PublishCommand({
+          PhoneNumber: config.to,
+          Message: config.body,
+          MessageAttributes: {
+            'AWS.SNS.SMS.SenderID': {
+              DataType: 'String',
+              StringValue: process.env.AWS_SNS_SENDER_ID || 'Spendly',
+            },
+            'AWS.SNS.SMS.SMSType': {
+              DataType: 'String',
+              StringValue: 'Transactional',
+            },
+          },
+        });
+
+        await this.snsClient.send(command);
+        console.log('SMS sent via AWS SNS to:', config.to);
+        return;
+      } catch (error) {
+        console.error('Failed to send SMS via AWS SNS:', error);
+        throw error;
+      }
     }
 
-    try {
-      await this.twilioClient.messages.create({
-        body: config.body,
-        from: process.env.TWILIO_PHONE_NUMBER,
-        to: config.to,
-      });
-      console.log('SMS sent to:', config.to);
-    } catch (error) {
-      console.error('Failed to send SMS:', error);
-      throw error;
+    // Fallback to Twilio
+    if (this.smsProvider === 'twilio' && this.twilioClient) {
+      try {
+        await this.twilioClient.messages.create({
+          body: config.body,
+          from: process.env.TWILIO_PHONE_NUMBER,
+          to: config.to,
+        });
+        console.log('SMS sent via Twilio to:', config.to);
+        return;
+      } catch (error) {
+        console.error('Failed to send SMS via Twilio:', error);
+        throw error;
+      }
     }
+
+    console.log('No SMS provider configured, skipping SMS:', config.body);
   }
 
   async sendPushNotification(
