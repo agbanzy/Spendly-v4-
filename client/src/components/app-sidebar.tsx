@@ -15,6 +15,10 @@ import {
   FileSpreadsheet,
   DollarSign,
   Building2,
+  Shield,
+  UserCog,
+  ScrollText,
+  Lock,
 } from "lucide-react";
 import {
   Sidebar,
@@ -50,6 +54,14 @@ const financeItems = [
 const managementItems = [
   { title: "Team", url: "/team", icon: Users },
   { title: "Settings", url: "/settings", icon: Settings },
+];
+
+const adminItems = [
+  { title: "Admin Dashboard", url: "/admin", icon: Shield },
+  { title: "User Management", url: "/admin/users", icon: UserCog },
+  { title: "Audit Logs", url: "/admin/audit-logs", icon: ScrollText },
+  { title: "Organization", url: "/admin/organization", icon: Building2 },
+  { title: "Security", url: "/admin/security", icon: Lock },
 ];
 
 export function AppSidebar() {
@@ -141,6 +153,30 @@ export function AppSidebar() {
                   <SidebarMenuButton
                     asChild
                     isActive={location === item.url}
+                    data-testid={`nav-${item.title.toLowerCase().replace(/\s/g, "-")}`}
+                  >
+                    <Link href={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel className="text-xs font-bold uppercase tracking-widest text-muted-foreground px-4">
+            Admin
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {adminItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={location === item.url || location.startsWith(item.url + '/')}
                     data-testid={`nav-${item.title.toLowerCase().replace(/\s/g, "-")}`}
                   >
                     <Link href={item.url}>

@@ -2754,5 +2754,135 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== ADMIN ROUTES ====================
+
+  // Get audit logs
+  app.get("/api/admin/audit-logs", async (req, res) => {
+    try {
+      const logs = await storage.getAuditLogs();
+      res.json(logs);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch audit logs" });
+    }
+  });
+
+  // Create audit log
+  app.post("/api/admin/audit-logs", async (req, res) => {
+    try {
+      const { userId, userName, action, entityType, entityId, details, ipAddress, userAgent } = req.body;
+      if (!userId || !userName || !action || !entityType) {
+        return res.status(400).json({ error: "userId, userName, action, and entityType are required" });
+      }
+      const log = await storage.createAuditLog({
+        userId,
+        userName,
+        action,
+        entityType,
+        entityId,
+        details: details || {},
+        ipAddress,
+        userAgent,
+        createdAt: new Date().toISOString(),
+      });
+      res.status(201).json(log);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to create audit log" });
+    }
+  });
+
+  // Get organization settings
+  app.get("/api/admin/organization", async (req, res) => {
+    try {
+      const settings = await storage.getOrganizationSettings();
+      res.json(settings || {
+        id: '1',
+        name: 'My Organization',
+        currency: 'USD',
+        timezone: 'UTC',
+        fiscalYearStart: 'January',
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch organization settings" });
+    }
+  });
+
+  // Update organization settings
+  app.put("/api/admin/organization", async (req, res) => {
+    try {
+      const data = req.body;
+      const settings = await storage.updateOrganizationSettings({
+        ...data,
+        updatedAt: new Date().toISOString(),
+      });
+      res.json(settings);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to update organization settings" });
+    }
+  });
+
+  // Get system settings
+  app.get("/api/admin/settings", async (req, res) => {
+    try {
+      const settings = await storage.getSystemSettings();
+      res.json(settings);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch system settings" });
+    }
+  });
+
+  // Update system setting
+  app.put("/api/admin/settings/:key", async (req, res) => {
+    try {
+      const { key } = req.params;
+      const { value, description, category } = req.body;
+      const setting = await storage.updateSystemSetting(key, {
+        value,
+        description,
+        category,
+        updatedAt: new Date().toISOString(),
+      });
+      res.json(setting);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to update system setting" });
+    }
+  });
+
+  // Update security settings (simplified)
+  app.put("/api/admin/security", async (req, res) => {
+    try {
+      const settings = req.body;
+      // In a real app, you'd store these in system_settings table
+      res.json({ success: true, ...settings });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to update security settings" });
+    }
+  });
+
+  // Get role permissions
+  app.get("/api/admin/roles", async (req, res) => {
+    try {
+      const roles = await storage.getRolePermissions();
+      res.json(roles);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch role permissions" });
+    }
+  });
+
+  // Update role permissions
+  app.put("/api/admin/roles/:role", async (req, res) => {
+    try {
+      const { role } = req.params;
+      const { permissions, description } = req.body;
+      const updated = await storage.updateRolePermissions(role, {
+        permissions,
+        description,
+        updatedAt: new Date().toISOString(),
+      });
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to update role permissions" });
+    }
+  });
+
   return httpServer;
 }

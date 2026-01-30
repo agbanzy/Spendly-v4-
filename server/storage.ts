@@ -5,14 +5,15 @@ import {
   teamMembers, payrollEntries, invoices, vendors, reports,
   cardTransactions, virtualAccounts, companyBalances, companySettings,
   userProfiles, kycSubmissions, notifications, notificationSettings, pushTokens,
-  departments,
+  departments, auditLogs, organizationSettings, systemSettings, rolePermissions,
   type User, type InsertUser, type Expense, type Transaction, type Bill, 
   type Budget, type VirtualCard, type TeamMember, type PayrollEntry, 
   type Invoice, type Vendor, type Report, type CardTransaction, 
   type VirtualAccount, type CompanyBalances, type CompanySettings, type AIInsight,
   type UserProfile, type InsertUserProfile, type KycSubmission, type InsertKycSubmission,
   type Notification, type InsertNotification, type NotificationSettings, type InsertNotificationSettings,
-  type PushToken, type InsertPushToken, type Department
+  type PushToken, type InsertPushToken, type Department,
+  type AuditLog, type OrganizationSettings, type SystemSettings, type RolePermissions
 } from "@shared/schema";
 
 export interface IStorage {
@@ -129,6 +130,16 @@ export interface IStorage {
   createPushToken(token: InsertPushToken): Promise<PushToken>;
   deletePushToken(token: string): Promise<boolean>;
   deactivatePushToken(token: string): Promise<void>;
+  
+  // Admin methods
+  getAuditLogs(): Promise<AuditLog[]>;
+  createAuditLog(log: Omit<AuditLog, 'id'>): Promise<AuditLog>;
+  getOrganizationSettings(): Promise<OrganizationSettings | undefined>;
+  updateOrganizationSettings(data: Partial<OrganizationSettings>): Promise<OrganizationSettings>;
+  getSystemSettings(): Promise<SystemSettings[]>;
+  updateSystemSetting(key: string, data: Partial<SystemSettings>): Promise<SystemSettings>;
+  getRolePermissions(): Promise<RolePermissions[]>;
+  updateRolePermissions(role: string, data: Partial<RolePermissions>): Promise<RolePermissions>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -695,6 +706,72 @@ export class DatabaseStorage implements IStorage {
 
   async deactivatePushToken(token: string): Promise<void> {
     await db.update(pushTokens).set({ active: false } as any).where(eq(pushTokens.token, token));
+  }
+
+  // ==================== ADMIN METHODS ====================
+
+  async getAuditLogs(): Promise<AuditLog[]> {
+    return await db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(100);
+  }
+
+  async createAuditLog(log: Omit<AuditLog, 'id'>): Promise<AuditLog> {
+    const result = await db.insert(auditLogs).values(log as any).returning();
+    return result[0];
+  }
+
+  async getOrganizationSettings(): Promise<OrganizationSettings | undefined> {
+    const result = await db.select().from(organizationSettings).limit(1);
+    return result[0];
+  }
+
+  async updateOrganizationSettings(data: Partial<OrganizationSettings>): Promise<OrganizationSettings> {
+    const existing = await this.getOrganizationSettings();
+    if (existing) {
+      const result = await db.update(organizationSettings)
+        .set(data as any)
+        .where(eq(organizationSettings.id, existing.id))
+        .returning();
+      return result[0];
+    } else {
+      const result = await db.insert(organizationSettings).values(data as any).returning();
+      return result[0];
+    }
+  }
+
+  async getSystemSettings(): Promise<SystemSettings[]> {
+    return await db.select().from(systemSettings);
+  }
+
+  async updateSystemSetting(key: string, data: Partial<SystemSettings>): Promise<SystemSettings> {
+    const existing = await db.select().from(systemSettings).where(eq(systemSettings.key, key)).limit(1);
+    if (existing.length > 0) {
+      const result = await db.update(systemSettings)
+        .set(data as any)
+        .where(eq(systemSettings.key, key))
+        .returning();
+      return result[0];
+    } else {
+      const result = await db.insert(systemSettings).values({ ...data, key } as any).returning();
+      return result[0];
+    }
+  }
+
+  async getRolePermissions(): Promise<RolePermissions[]> {
+    return await db.select().from(rolePermissions);
+  }
+
+  async updateRolePermissions(role: string, data: Partial<RolePermissions>): Promise<RolePermissions> {
+    const existing = await db.select().from(rolePermissions).where(eq(rolePermissions.role, role)).limit(1);
+    if (existing.length > 0) {
+      const result = await db.update(rolePermissions)
+        .set(data as any)
+        .where(eq(rolePermissions.role, role))
+        .returning();
+      return result[0];
+    } else {
+      const result = await db.insert(rolePermissions).values({ ...data, role } as any).returning();
+      return result[0];
+    }
   }
 }
 

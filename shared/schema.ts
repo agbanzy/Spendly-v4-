@@ -384,6 +384,66 @@ export const kycSubmissions = pgTable("kyc_submissions", {
   updatedAt: text("updated_at").notNull(),
 });
 
+// Audit Logs table
+export const auditLogs = pgTable("audit_logs", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  userId: text("user_id").notNull(),
+  userName: text("user_name").notNull(),
+  action: text("action").notNull(),
+  entityType: text("entity_type").notNull(),
+  entityId: text("entity_id"),
+  details: jsonb("details").$type<Record<string, any>>().default({}),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+});
+
+// Organization Settings table
+export const organizationSettings = pgTable("organization_settings", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().default('My Organization'),
+  logo: text("logo"),
+  website: text("website"),
+  email: text("email"),
+  phone: text("phone"),
+  address: text("address"),
+  city: text("city"),
+  state: text("state"),
+  country: text("country").default('US'),
+  postalCode: text("postal_code"),
+  taxId: text("tax_id"),
+  currency: text("currency").default('USD'),
+  timezone: text("timezone").default('UTC'),
+  fiscalYearStart: text("fiscal_year_start").default('January'),
+  industry: text("industry"),
+  size: text("size"),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+});
+
+// System Settings table
+export const systemSettings = pgTable("system_settings", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  key: text("key").notNull().unique(),
+  value: text("value"),
+  category: text("category").notNull().default('general'),
+  description: text("description"),
+  isPublic: boolean("is_public").default(false),
+  updatedBy: text("updated_by"),
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+});
+
+// Role Permissions table
+export const rolePermissions = pgTable("role_permissions", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  role: text("role").notNull(),
+  permissions: jsonb("permissions").$type<string[]>().default([]),
+  description: text("description"),
+  isSystem: boolean("is_system").default(false),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+});
+
 // ==================== INSERT SCHEMAS ====================
 
 export const insertUserSchema = createInsertSchema(users).pick({
@@ -410,6 +470,10 @@ export const insertCardTransactionSchema = createInsertSchema(cardTransactions).
 export const insertVirtualAccountSchema = createInsertSchema(virtualAccounts).omit({ id: true });
 export const insertUserProfileSchema = createInsertSchema(userProfiles).omit({ id: true });
 export const insertKycSubmissionSchema = createInsertSchema(kycSubmissions).omit({ id: true });
+export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true });
+export const insertOrganizationSettingsSchema = createInsertSchema(organizationSettings).omit({ id: true });
+export const insertSystemSettingsSchema = createInsertSchema(systemSettings).omit({ id: true });
+export const insertRolePermissionsSchema = createInsertSchema(rolePermissions).omit({ id: true });
 
 // ==================== TYPES ====================
 
@@ -460,6 +524,18 @@ export type UserProfile = typeof userProfiles.$inferSelect;
 
 export type InsertKycSubmission = z.infer<typeof insertKycSubmissionSchema>;
 export type KycSubmission = typeof kycSubmissions.$inferSelect;
+
+export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+export type AuditLog = typeof auditLogs.$inferSelect;
+
+export type InsertOrganizationSettings = z.infer<typeof insertOrganizationSettingsSchema>;
+export type OrganizationSettings = typeof organizationSettings.$inferSelect;
+
+export type InsertSystemSettings = z.infer<typeof insertSystemSettingsSchema>;
+export type SystemSettings = typeof systemSettings.$inferSelect;
+
+export type InsertRolePermissions = z.infer<typeof insertRolePermissionsSchema>;
+export type RolePermissions = typeof rolePermissions.$inferSelect;
 
 export type CompanyBalances = typeof companyBalances.$inferSelect;
 export type CompanySettings = typeof companySettings.$inferSelect;

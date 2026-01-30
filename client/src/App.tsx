@@ -31,6 +31,11 @@ import ForgotPassword from "@/pages/forgot-password";
 import Terms from "@/pages/terms";
 import Privacy from "@/pages/privacy";
 import Onboarding from "@/pages/onboarding";
+import Admin from "@/pages/admin";
+import AdminUsers from "@/pages/admin-users";
+import AdminAuditLogs from "@/pages/admin-audit-logs";
+import AdminOrganization from "@/pages/admin-organization";
+import AdminSecurity from "@/pages/admin-security";
 
 function AuthLoading() {
   return (
@@ -77,6 +82,11 @@ function AppRouter() {
       <Route path="/payroll">{() => <ProtectedRoute component={Payroll} />}</Route>
       <Route path="/invoices">{() => <ProtectedRoute component={Invoices} />}</Route>
       <Route path="/vendors">{() => <ProtectedRoute component={Vendors} />}</Route>
+      <Route path="/admin">{() => <ProtectedRoute component={Admin} />}</Route>
+      <Route path="/admin/users">{() => <ProtectedRoute component={AdminUsers} />}</Route>
+      <Route path="/admin/audit-logs">{() => <ProtectedRoute component={AdminAuditLogs} />}</Route>
+      <Route path="/admin/organization">{() => <ProtectedRoute component={AdminOrganization} />}</Route>
+      <Route path="/admin/security">{() => <ProtectedRoute component={AdminSecurity} />}</Route>
       <Route component={NotFound} />
     </Switch>
   );
