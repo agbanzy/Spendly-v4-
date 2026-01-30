@@ -190,19 +190,20 @@ export async function registerRoutes(
       }
 
       const currentBalances = await storage.getBalances();
-      const newLocal = (currentBalances?.local || 0) + parsedAmount;
+      const currentLocal = parseFloat(String(currentBalances?.local || 0));
+      const newLocal = currentLocal + parsedAmount;
       
       await storage.createTransaction({
         type: "Funding",
-        amount: parsedAmount,
-        fee: 0,
+        amount: String(parsedAmount),
+        fee: "0",
         status: 'Completed',
         date: new Date().toISOString().split('T')[0],
         description: "Wallet Funding",
         currency: 'USD',
       });
       
-      const updatedBalances = await storage.updateBalances({ local: newLocal });
+      const updatedBalances = await storage.updateBalances({ local: String(newLocal) });
       res.json(updatedBalances);
     } catch (error) {
       res.status(500).json({ error: "Failed to fund wallet" });
@@ -219,7 +220,7 @@ export async function registerRoutes(
       }
 
       const currentBalances = await storage.getBalances();
-      const currentLocal = currentBalances?.local || 0;
+      const currentLocal = parseFloat(String(currentBalances?.local || 0));
       
       if (parsedAmount > currentLocal) {
         return res.status(400).json({ error: "Insufficient funds" });
@@ -228,16 +229,16 @@ export async function registerRoutes(
       const newLocal = currentLocal - parsedAmount;
       
       await storage.createTransaction({
-        type: "Payout" as any,
-        amount: parsedAmount,
-        fee: 0,
+        type: "Payout",
+        amount: String(parsedAmount),
+        fee: "0",
         status: 'Completed',
         date: new Date().toISOString().split('T')[0],
         description: "Wallet Withdrawal",
         currency: 'USD',
       });
       
-      const updatedBalances = await storage.updateBalances({ local: newLocal });
+      const updatedBalances = await storage.updateBalances({ local: String(newLocal) });
       res.json(updatedBalances);
     } catch (error) {
       res.status(500).json({ error: "Failed to withdraw" });
@@ -258,7 +259,7 @@ export async function registerRoutes(
       }
 
       const currentBalances = await storage.getBalances();
-      const currentLocal = currentBalances?.local || 0;
+      const currentLocal = parseFloat(String(currentBalances?.local || 0));
       
       if (parsedAmount > currentLocal) {
         return res.status(400).json({ error: "Insufficient funds" });
@@ -268,15 +269,15 @@ export async function registerRoutes(
       
       await storage.createTransaction({
         type: "Payout",
-        amount: parsedAmount,
-        fee: 0,
+        amount: String(parsedAmount),
+        fee: "0",
         status: 'Completed',
         date: new Date().toISOString().split('T')[0],
         description: `Payment to ${recipient}${note ? ` - ${note}` : ''}`,
         currency: 'USD',
       });
       
-      const updatedBalances = await storage.updateBalances({ local: newLocal });
+      const updatedBalances = await storage.updateBalances({ local: String(newLocal) });
       res.json(updatedBalances);
     } catch (error) {
       res.status(500).json({ error: "Failed to send money" });
@@ -432,9 +433,9 @@ export async function registerRoutes(
       const { type, amount, description, fee } = result.data;
 
       const transaction = await storage.createTransaction({
-        type: type as any,
-        amount,
-        fee: fee || 0,
+        type: type,
+        amount: String(amount),
+        fee: String(fee || 0),
         status: 'Completed',
         date: new Date().toISOString().split('T')[0],
         description: description || '',
@@ -718,14 +719,13 @@ export async function registerRoutes(
       
       // Create funding transaction
       await storage.createTransaction({
-        description: `Card funding - ${card.name}`,
-        amount,
+        description: `Card funding - ${card.name} (****${card.last4})`,
+        amount: String(amount),
+        fee: "0",
         type: 'Funding',
         status: 'Completed',
         date: new Date().toISOString().split('T')[0],
-        account: `Virtual Card ****${card.last4}`,
-        category: 'Card Funding',
-        reference: `FUND-${Date.now()}`,
+        currency: 'USD',
       });
       
       res.json({ 
@@ -888,14 +888,13 @@ export async function registerRoutes(
       
       // Create transaction record
       await storage.createTransaction({
-        description: `Deposit to ${account.name}`,
-        amount,
+        description: `Deposit to ${account.name} (${account.accountNumber})`,
+        amount: String(amount),
+        fee: "0",
         type: 'Deposit',
         status: 'Completed',
         date: new Date().toISOString().split('T')[0],
-        account: account.accountNumber,
-        category: 'Virtual Account',
-        reference: reference || `DEP-${Date.now()}`,
+        currency: 'USD',
       });
       
       res.json({ 
@@ -931,14 +930,13 @@ export async function registerRoutes(
       
       // Create transaction record
       await storage.createTransaction({
-        description: `Withdrawal from ${account.name}`,
-        amount,
+        description: `Withdrawal from ${account.name} (${account.accountNumber})`,
+        amount: String(amount),
+        fee: "0",
         type: 'Payout',
         status: 'Completed',
         date: new Date().toISOString().split('T')[0],
-        account: account.accountNumber,
-        category: 'Virtual Account',
-        reference: reference || `WTH-${Date.now()}`,
+        currency: 'USD',
       });
       
       res.json({ 
@@ -1208,15 +1206,15 @@ export async function registerRoutes(
       
       if (report.type === "expense" || report.type === "Expense Summary") {
         reportData.expenses = expenses;
-        reportData.totalAmount = expenses.reduce((sum, e) => sum + e.amount, 0);
+        reportData.totalAmount = expenses.reduce((sum, e) => sum + parseFloat(String(e.amount)), 0);
         reportData.count = expenses.length;
       } else if (report.type === "budget" || report.type === "Budget Report") {
         reportData.budgets = budgets;
-        reportData.totalBudget = budgets.reduce((sum, b) => sum + b.limit, 0);
-        reportData.totalSpent = budgets.reduce((sum, b) => sum + b.spent, 0);
+        reportData.totalBudget = budgets.reduce((sum, b) => sum + parseFloat(String(b.limit)), 0);
+        reportData.totalSpent = budgets.reduce((sum, b) => sum + parseFloat(String(b.spent)), 0);
       } else if (report.type === "transaction" || report.type === "Transaction Report") {
         reportData.transactions = transactions;
-        reportData.totalAmount = transactions.reduce((sum, t) => sum + t.amount, 0);
+        reportData.totalAmount = transactions.reduce((sum, t) => sum + parseFloat(String(t.amount)), 0);
       } else {
         reportData.expenses = expenses;
         reportData.transactions = transactions;
@@ -1328,12 +1326,12 @@ export async function registerRoutes(
         }
       }
 
-      const totalPaid = processedEntries.reduce((sum, e) => sum + e.netPay, 0);
+      const totalPaid = processedEntries.reduce((sum, e) => sum + parseFloat(String(e.netPay)), 0);
       
       await storage.createTransaction({
         type: "Payout",
-        amount: totalPaid,
-        fee: 0,
+        amount: String(totalPaid),
+        fee: "0",
         status: 'Completed',
         date: new Date().toISOString().split('T')[0],
         description: `Payroll - ${processedEntries.length} employees`,
@@ -1366,8 +1364,8 @@ export async function registerRoutes(
       
       await storage.createTransaction({
         type: "Payout",
-        amount: Number(entry.netPay),
-        fee: 0,
+        amount: String(entry.netPay),
+        fee: "0",
         status: 'Completed',
         date: new Date().toISOString().split('T')[0],
         description: `Salary payment - ${entry.employeeName}`,
@@ -1677,12 +1675,13 @@ export async function registerRoutes(
       if (session.payment_status === 'paid') {
         const amount = (session.amount_total || 0) / 100;
         const balances = await storage.getBalances();
-        await storage.updateBalances({ usd: balances.usd + amount });
+        const currentUsd = parseFloat(String(balances.usd || 0));
+        await storage.updateBalances({ usd: String(currentUsd + amount) });
         
         await storage.createTransaction({
           type: 'Funding',
-          amount,
-          fee: 0,
+          amount: String(amount),
+          fee: "0",
           status: 'Completed',
           description: 'Card payment via Stripe',
           currency: session.currency?.toUpperCase() || 'USD',
@@ -1855,17 +1854,19 @@ export async function registerRoutes(
 
       if (paymentMethod === 'wallet') {
         const balances = await storage.getBalances();
-        if (balances.usd < bill.amount) {
+        const currentUsd = parseFloat(String(balances.usd || 0));
+        const billAmount = parseFloat(String(bill.amount || 0));
+        if (currentUsd < billAmount) {
           return res.status(400).json({ error: "Insufficient wallet balance" });
         }
         
-        await storage.updateBalances({ usd: balances.usd - bill.amount });
+        await storage.updateBalances({ usd: String(currentUsd - billAmount) });
         await storage.updateBill(billId, { status: 'Paid' });
         
         await storage.createTransaction({
           type: 'Bill',
-          amount: bill.amount,
-          fee: 0,
+          amount: String(bill.amount),
+          fee: "0",
           status: 'Completed',
           date: new Date().toISOString().split('T')[0],
           description: `Bill payment - ${bill.name}`,
@@ -1950,7 +1951,8 @@ export async function registerRoutes(
       const { amount, countryCode, recipientDetails, reason } = result.data;
       
       const balances = await storage.getBalances();
-      if (balances.usd < amount) {
+      const currentUsd = parseFloat(String(balances.usd || 0));
+      if (currentUsd < amount) {
         return res.status(400).json({ error: "Insufficient wallet balance" });
       }
       
@@ -1961,12 +1963,12 @@ export async function registerRoutes(
         reason
       );
       
-      await storage.updateBalances({ usd: balances.usd - amount });
+      await storage.updateBalances({ usd: String(currentUsd - amount) });
       
       await storage.createTransaction({
         type: 'Payout',
-        amount,
-        fee: 0,
+        amount: String(amount),
+        fee: "0",
         status: 'Processing',
         date: new Date().toISOString().split('T')[0],
         description: reason,
@@ -2000,16 +2002,17 @@ export async function registerRoutes(
       const { type, provider, amount, reference } = result.data;
       
       const balances = await storage.getBalances();
-      if (balances.local < amount) {
+      const currentLocal = parseFloat(String(balances.local || 0));
+      if (currentLocal < amount) {
         return res.status(400).json({ error: "Insufficient wallet balance" });
       }
       
-      await storage.updateBalances({ local: balances.local - amount });
+      await storage.updateBalances({ local: String(currentLocal - amount) });
       
       await storage.createTransaction({
-        type: 'Expense' as any,
-        amount,
-        fee: 0,
+        type: 'Payout',
+        amount: String(amount),
+        fee: "0",
         status: 'Completed',
         date: new Date().toISOString().split('T')[0],
         description: `${type.charAt(0).toUpperCase() + type.slice(1)} - ${provider} (${reference})`,
@@ -2190,7 +2193,8 @@ export async function registerRoutes(
         
         if (metadata?.type === 'wallet_funding') {
           const balances = await storage.getBalances();
-          await storage.updateBalances({ local: balances.local + amountValue });
+          const currentLocal = parseFloat(String(balances.local || 0));
+          await storage.updateBalances({ local: String(currentLocal + amountValue) });
           
           await storage.createTransaction({
             type: 'Funding',
@@ -2386,12 +2390,13 @@ export async function registerRoutes(
         processedPaystackReferences.add(reference);
         
         const balances = await storage.getBalances();
-        await storage.updateBalances({ local: balances.local + verification.amount });
+        const currentLocal = parseFloat(String(balances.local || 0));
+        await storage.updateBalances({ local: String(currentLocal + verification.amount) });
         
         await storage.createTransaction({
           type: 'Funding',
-          amount: verification.amount,
-          fee: 0,
+          amount: String(verification.amount),
+          fee: "0",
           status: 'Completed',
           description: 'Card payment via Paystack',
           currency: verification.currency || 'NGN',
@@ -2491,8 +2496,8 @@ export async function registerRoutes(
         const amountInNaira = result.data.amount / 100;
         await storage.createTransaction({
           type: 'Payout',
-          amount: amountInNaira,
-          fee: 0,
+          amount: String(amountInNaira),
+          fee: "0",
           status: 'Completed',
           description: metadata?.description || 'Auto-debit charge',
           currency: 'NGN',
@@ -2535,29 +2540,29 @@ export async function registerRoutes(
       const transactions = await storage.getTransactions();
       const budgets = await storage.getBudgets();
       
-      const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+      const totalExpenses = expenses.reduce((sum, e) => sum + parseFloat(String(e.amount)), 0);
       const totalIncome = transactions
         .filter(t => t.type === 'Deposit' || t.type === 'Funding' || t.type === 'Refund')
-        .reduce((sum, t) => sum + t.amount, 0);
+        .reduce((sum, t) => sum + parseFloat(String(t.amount)), 0);
       const totalOutflow = transactions
         .filter(t => t.type === 'Payout' || t.type === 'Bill')
-        .reduce((sum, t) => sum + t.amount, 0);
+        .reduce((sum, t) => sum + parseFloat(String(t.amount)), 0);
       
       const categoryBreakdown: Record<string, number> = {};
       expenses.forEach(e => {
-        categoryBreakdown[e.category] = (categoryBreakdown[e.category] || 0) + e.amount;
+        categoryBreakdown[e.category] = (categoryBreakdown[e.category] || 0) + parseFloat(String(e.amount));
       });
       
       const departmentBreakdown: Record<string, number> = {};
       expenses.forEach(e => {
-        departmentBreakdown[e.department || 'Other'] = (departmentBreakdown[e.department || 'Other'] || 0) + e.amount;
+        departmentBreakdown[e.department || 'Other'] = (departmentBreakdown[e.department || 'Other'] || 0) + parseFloat(String(e.amount));
       });
       
       const budgetUtilization = budgets.map(b => ({
         name: b.name,
-        budget: b.limit,
-        spent: b.spent,
-        percentage: Math.round((b.spent / b.limit) * 100),
+        budget: parseFloat(String(b.limit)),
+        spent: parseFloat(String(b.spent)),
+        percentage: Math.round((parseFloat(String(b.spent)) / parseFloat(String(b.limit))) * 100) || 0,
       }));
       
       res.json({
