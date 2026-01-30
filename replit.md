@@ -4,6 +4,10 @@
 Spendly is a comprehensive financial operating system for high-growth teams. It provides expense tracking, budget management, virtual cards, team management, payroll, invoicing, vendor management, and transaction monitoring in a unified platform.
 
 ## Recent Changes (January 30, 2026)
+- **Transaction PIN System**: Backend endpoints for setting, verifying, and disabling transaction PINs with bcrypt hashing
+- **Virtual Account Display**: Dashboard shows virtual account details (bank name, account number) with copy-to-clipboard
+- **Enhanced Withdrawal Flow**: Bank selection dropdown with real-time account validation using Paystack API
+- **Fixed Department Creation**: Resolved SelectItem empty value error in team management
 - **Stripe Identity KYC**: Integrated Stripe Identity for document and selfie verification (US/Europe users)
 - **Paystack BVN Verification**: Bank Verification Number verification for African users (Nigeria, Ghana, Kenya, South Africa)
 - **Multi-Region KYC**: Auto-selects verification method based on user's country
@@ -119,6 +123,12 @@ Spendly is a comprehensive financial operating system for high-growth teams. It 
 - `POST /api/paystack/subscriptions` - Create Paystack subscription plan
 - `POST /api/paystack/charge/authorization` - Charge saved authorization
 - `GET /api/paystack/authorizations` - List saved authorizations
+- `POST /api/user/set-pin` - Set transaction PIN (4 digits, SHA-256 hashed)
+- `POST /api/user/verify-pin` - Verify transaction PIN
+- `POST /api/user/disable-pin` - Disable transaction PIN
+- `POST /api/payment/validate-account` - Validate bank account via Paystack
+- `POST /api/payments/utility` - Process utility payments (airtime, data, etc.)
+- `GET /api/virtual-accounts` - List user's virtual accounts
 
 ## Components
 - **AppSidebar** - Main navigation with sections (Main, Finance, Management)

@@ -2011,11 +2011,8 @@ export async function registerRoutes(
   });
 
   // ==================== TRANSACTION PIN ====================
-  const crypto = await import('crypto');
-  
-  function hashPin(pin: string): string {
-    return crypto.createHash('sha256').update(pin).digest('hex');
-  }
+  const bcrypt = await import('bcryptjs');
+  const BCRYPT_ROUNDS = 10;
   
   const setPinSchema = z.object({
     firebaseUid: z.string().min(1),
@@ -2035,7 +2032,7 @@ export async function registerRoutes(
       }
       
       const { firebaseUid, pin } = result.data;
-      const pinHash = hashPin(pin);
+      const pinHash = await bcrypt.hash(pin, BCRYPT_ROUNDS);
       
       const profile = await storage.getUserProfile(firebaseUid);
       if (!profile) {
@@ -2071,8 +2068,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Transaction PIN not set" });
       }
       
-      const pinHash = hashPin(pin);
-      const valid = pinHash === profile.transactionPinHash;
+      const valid = await bcrypt.compare(pin, profile.transactionPinHash);
       
       res.json({ valid });
     } catch (error: any) {
