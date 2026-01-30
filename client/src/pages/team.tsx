@@ -138,10 +138,22 @@ export default function Team() {
     mutationFn: async (data: typeof memberForm) => {
       return apiRequest("POST", "/api/team", data);
     },
-    onSuccess: () => {
+    onSuccess: (data: { inviteEmailSent?: boolean; inviteEmailError?: string }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/team"] });
       queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
-      toast({ title: "Team member added successfully" });
+      if (data?.inviteEmailSent) {
+        toast({ 
+          title: "Team member added", 
+          description: "An invite email has been sent to the new team member."
+        });
+      } else {
+        toast({ 
+          title: "Team member added", 
+          description: data?.inviteEmailError 
+            ? `Invite email failed: ${data.inviteEmailError}` 
+            : "Team member created but invite email could not be sent."
+        });
+      }
       setIsMemberOpen(false);
       resetMemberForm();
     },

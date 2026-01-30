@@ -1075,7 +1075,23 @@ export async function registerRoutes(
         permissions: ['CREATE_EXPENSE'],
       });
       
-      res.status(201).json(member);
+      // Send team invite email
+      const emailResult = await notificationService.sendTeamInvite({
+        email,
+        name,
+        role: role || 'Employee',
+        department: department || undefined,
+      });
+      
+      if (!emailResult.success) {
+        console.warn('Team invite email failed:', emailResult.error);
+      }
+      
+      res.status(201).json({ 
+        ...member, 
+        inviteEmailSent: emailResult.success,
+        inviteEmailError: emailResult.success ? undefined : emailResult.error
+      });
     } catch (error) {
       res.status(500).json({ error: "Failed to create team member" });
     }

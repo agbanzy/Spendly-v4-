@@ -485,6 +485,75 @@ class NotificationService {
       channels: ['in_app', 'push'],
     });
   }
+
+  async sendTeamInvite(config: { 
+    email: string; 
+    name: string; 
+    role: string; 
+    department?: string;
+    invitedBy?: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    const appUrl = process.env.REPLIT_DEV_DOMAIN 
+      ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
+      : 'https://spendly.app';
+    
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>You're Invited to Spendly</title>
+      </head>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+          <h1 style="color: white; margin: 0; font-size: 28px;">Welcome to Spendly!</h1>
+        </div>
+        <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px;">
+          <p style="font-size: 16px;">Hi <strong>${config.name}</strong>,</p>
+          <p style="font-size: 16px;">You've been invited to join your team on Spendly as a <strong>${config.role}</strong>${config.department ? ` in the ${config.department} department` : ''}.</p>
+          <p style="font-size: 16px;">Spendly is your team's expense management platform where you can:</p>
+          <ul style="font-size: 15px; color: #555;">
+            <li>Submit and track expenses</li>
+            <li>Manage budgets and approvals</li>
+            <li>Access virtual cards for company spending</li>
+            <li>View real-time financial insights</li>
+          </ul>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${appUrl}/login" style="background: #6366f1; color: white; padding: 14px 40px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Get Started</a>
+          </div>
+          <p style="font-size: 14px; color: #666;">If you have any questions, please contact your team administrator${config.invitedBy ? ` or reply to this email` : ''}.</p>
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 25px 0;">
+          <p style="font-size: 12px; color: #999; text-align: center;">This email was sent by Spendly. If you didn't expect this invitation, you can safely ignore this email.</p>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const text = `Hi ${config.name},
+
+You've been invited to join your team on Spendly as a ${config.role}${config.department ? ` in the ${config.department} department` : ''}.
+
+Get started at: ${appUrl}/login
+
+If you have any questions, please contact your team administrator.
+
+- The Spendly Team`;
+
+    try {
+      await this.sendEmail({
+        to: config.email,
+        subject: `You're invited to join Spendly`,
+        html,
+        text,
+      });
+      console.log('Team invite email sent successfully to:', config.email);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send team invite email:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
 }
 
 export const notificationService = new NotificationService();
