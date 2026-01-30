@@ -2087,16 +2087,16 @@ export async function registerRoutes(
         }
         
         processedPaystackReferences.add(reference);
-        const amountInNaira = amount / 100;
+        const amountValue = amount / 100;
         
         if (metadata?.type === 'wallet_funding') {
           const balances = await storage.getBalances();
-          await storage.updateBalances({ local: balances.local + amountInNaira });
+          await storage.updateBalances({ local: balances.local + amountValue });
           
           await storage.createTransaction({
             type: 'Funding',
-            amount: amountInNaira,
-            fee: 0,
+            amount: amountValue.toString(),
+            fee: '0',
             status: 'Completed',
             description: 'Card payment via Paystack',
             currency: event.data.currency || 'NGN',
@@ -2105,6 +2105,160 @@ export async function registerRoutes(
         }
         
         console.log(`Paystack payment confirmed: ${reference}`);
+      }
+
+      // Handle dedicated virtual account assignment
+      if (eventType === 'dedicatedaccount.assign.success') {
+        const { customer, dedicated_account } = event.data;
+        console.log(`DVA assigned: ${dedicated_account.account_number} for customer ${customer.customer_code}`);
+        
+        // Store the DVA assignment for future reference
+        try {
+          await storage.createFundingSource({
+            userId: customer.email || customer.customer_code,
+            sourceType: 'virtual_account',
+            provider: 'paystack',
+            accountNumber: dedicated_account.account_number,
+            bankName: dedicated_account.bank?.name || 'Wema Bank',
+            accountName: customer.first_name ? `${customer.first_name} ${customer.last_name || ''}` : customer.email,
+            currency: 'NGN',
+            isActive: true,
+            metadata: { customerCode: customer.customer_code, assignedAt: new Date().toISOString() },
+          });
+        } catch (err) {
+          console.log('DVA funding source may already exist, skipping creation');
+        }
+      }
+
+      // Handle virtual account funding (incoming bank transfer via DVA)
+      if (eventType === 'charge.success' && event.data.channel === 'dedicated_nuban') {
+        const { reference, amount, customer } = event.data;
+        
+        // In-memory idempotency check
+        if (processedPaystackReferences.has(reference)) {
+          console.log(`DVA funding reference ${reference} already processed (memory)`);
+          return res.status(200).json({ received: true });
+        }
+        
+        // Storage-level idempotency: check if transaction with this reference already exists
+        const existingTransactions = await storage.getWalletTransactions({});
+        const alreadyProcessed = existingTransactions.some((t: any) => t.reference === reference);
+        if (alreadyProcessed) {
+          console.log(`DVA funding reference ${reference} already exists in storage`);
+          processedPaystackReferences.add(reference);
+          return res.status(200).json({ received: true });
+        }
+        
+        processedPaystackReferences.add(reference);
+        const amountValue = amount / 100;
+        
+        // Find user wallet by customer code, email, or userId
+        // Priority: 1) Paystack customer code in metadata, 2) userId matches email
+        const wallets = await storage.getWallets();
+        let userWallet = wallets.find((w: any) => 
+          w.metadata?.paystackCustomerCode === customer?.customer_code
+        );
+        
+        // Fallback: match by email if no customer code match
+        if (!userWallet) {
+          userWallet = wallets.find((w: any) => w.userId === customer?.email);
+        }
+
+        if (userWallet) {
+          // Credit the wallet
+          await storage.creditWallet(
+            userWallet.id,
+            amountValue,
+            'virtual_account_funding',
+            `Bank transfer via DVA - Ref: ${reference}`,
+            reference,
+            { provider: 'paystack', channel: 'dedicated_nuban', customerCode: customer?.customer_code }
+          );
+          console.log(`Wallet ${userWallet.id} credited with ${amountValue} via DVA (${reference})`);
+        } else {
+          console.warn(`No wallet found for customer ${customer?.customer_code || customer?.email}. DVA funding not credited. Consider manual reconciliation.`);
+        }
+      }
+
+      // Handle transfer success (payout completed)
+      if (eventType === 'transfer.success') {
+        const { reference } = event.data;
+        
+        // In-memory idempotency check
+        if (processedPaystackReferences.has(`transfer:${reference}`)) {
+          console.log(`Transfer success ${reference} already processed (memory)`);
+          return res.status(200).json({ received: true });
+        }
+        
+        // Find payout by provider reference (storage-level lookup)
+        const payouts = await storage.getPayouts({ providerReference: reference });
+        const payout = payouts[0]; // First match
+        
+        if (payout) {
+          // State guard: only update if not already completed (storage-level idempotency)
+          if (payout.status !== 'completed') {
+            processedPaystackReferences.add(`transfer:${reference}`);
+            
+            await storage.updatePayout(payout.id, {
+              status: 'completed',
+              processedAt: new Date().toISOString(),
+            });
+
+            // Update related expense if applicable
+            if (payout.relatedEntityType === 'expense' && payout.relatedEntityId) {
+              await storage.updateExpense(payout.relatedEntityId, {
+                status: 'PAID',
+                payoutStatus: 'completed',
+              });
+            }
+
+            console.log(`Payout ${payout.id} completed via transfer ${reference}`);
+          } else {
+            console.log(`Payout ${payout.id} already completed, skipping webhook update`);
+          }
+        } else {
+          console.warn(`No payout found for transfer reference ${reference}`);
+        }
+      }
+
+      // Handle transfer failure
+      if (eventType === 'transfer.failed' || eventType === 'transfer.reversed') {
+        const { reference, reason } = event.data;
+        
+        // In-memory idempotency check
+        if (processedPaystackReferences.has(`transfer:${reference}`)) {
+          console.log(`Transfer failure ${reference} already processed (memory)`);
+          return res.status(200).json({ received: true });
+        }
+        
+        // Find payout by provider reference (storage-level lookup)
+        const payouts = await storage.getPayouts({ providerReference: reference });
+        const payout = payouts[0]; // First match
+        
+        if (payout) {
+          // State guard: only update if not already in terminal state
+          if (payout.status !== 'failed' && payout.status !== 'completed') {
+            processedPaystackReferences.add(`transfer:${reference}`);
+            
+            await storage.updatePayout(payout.id, {
+              status: 'failed',
+              failureReason: reason || eventType,
+            });
+
+            // Update related expense if applicable
+            if (payout.relatedEntityType === 'expense' && payout.relatedEntityId) {
+              await storage.updateExpense(payout.relatedEntityId, {
+                payoutStatus: 'failed',
+              });
+            }
+
+            console.log(`Payout ${payout.id} failed: ${reason}`);
+          } else {
+            console.log(`Payout ${payout.id} already in terminal state (${payout.status}), skipping webhook update`);
+          }
+        } else {
+          console.warn(`No payout found for transfer reference ${reference}`);
+        }
       }
       
       res.status(200).json({ received: true });
@@ -3136,6 +3290,805 @@ export async function registerRoutes(
       res.json(updated);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to update role permissions" });
+    }
+  });
+
+  // ==================== WALLET ROUTES ====================
+  
+  // Get all wallets (admin) or user's wallets
+  app.get("/api/wallets", async (req, res) => {
+    try {
+      const { userId } = req.query;
+      const walletsList = await storage.getWallets(userId as string);
+      res.json(walletsList);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch wallets" });
+    }
+  });
+
+  // Get wallet by ID
+  app.get("/api/wallets/:id", async (req, res) => {
+    try {
+      const wallet = await storage.getWallet(req.params.id);
+      if (!wallet) {
+        return res.status(404).json({ error: "Wallet not found" });
+      }
+      res.json(wallet);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch wallet" });
+    }
+  });
+
+  // Create wallet
+  app.post("/api/wallets", async (req, res) => {
+    try {
+      const { userId, currency, type } = req.body;
+      
+      // Check if wallet already exists for this user/currency
+      const existing = await storage.getWalletByUserId(userId, currency);
+      if (existing) {
+        return res.status(400).json({ error: "Wallet already exists for this currency" });
+      }
+      
+      const wallet = await storage.createWallet({
+        userId,
+        currency: currency || 'USD',
+        type: type || 'personal',
+        balance: '0',
+        availableBalance: '0',
+        pendingBalance: '0',
+        status: 'active',
+      });
+      res.status(201).json(wallet);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to create wallet" });
+    }
+  });
+
+  // Get wallet transactions
+  app.get("/api/wallets/:id/transactions", async (req, res) => {
+    try {
+      const transactions = await storage.getWalletTransactions(req.params.id);
+      res.json(transactions);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch wallet transactions" });
+    }
+  });
+
+  // Fund wallet (credit)
+  app.post("/api/wallets/:id/fund", async (req, res) => {
+    try {
+      const { amount, reference, description, metadata } = req.body;
+      const transaction = await storage.creditWallet(
+        req.params.id,
+        parseFloat(amount),
+        'funding',
+        description || 'Wallet funding',
+        reference || `FUND-${Date.now()}`,
+        metadata
+      );
+      res.json(transaction);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fund wallet" });
+    }
+  });
+
+  // Withdraw from wallet (debit)
+  app.post("/api/wallets/:id/withdraw", async (req, res) => {
+    try {
+      const { amount, reference, description, metadata } = req.body;
+      const transaction = await storage.debitWallet(
+        req.params.id,
+        parseFloat(amount),
+        'withdrawal',
+        description || 'Wallet withdrawal',
+        reference || `WD-${Date.now()}`,
+        metadata
+      );
+      res.json(transaction);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to withdraw from wallet" });
+    }
+  });
+
+  // ==================== EXCHANGE RATES ROUTES ====================
+  
+  app.get("/api/exchange-rates", async (req, res) => {
+    try {
+      const rates = await storage.getExchangeRates();
+      res.json(rates);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch exchange rates" });
+    }
+  });
+
+  app.post("/api/exchange-rates", async (req, res) => {
+    try {
+      const { baseCurrency, targetCurrency, rate, source } = req.body;
+      const exchangeRate = await storage.createExchangeRate({
+        baseCurrency,
+        targetCurrency,
+        rate: rate.toString(),
+        source: source || 'manual',
+        validFrom: new Date().toISOString(),
+      });
+      res.status(201).json(exchangeRate);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to create exchange rate" });
+    }
+  });
+
+  app.get("/api/exchange-rates/:base/:target", async (req, res) => {
+    try {
+      const { base, target } = req.params;
+      const rate = await storage.getExchangeRate(base, target);
+      if (!rate) {
+        return res.status(404).json({ error: "Exchange rate not found" });
+      }
+      res.json(rate);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch exchange rate" });
+    }
+  });
+
+  // ==================== PAYOUT DESTINATIONS ROUTES ====================
+  
+  app.get("/api/payout-destinations", async (req, res) => {
+    try {
+      const { userId, vendorId } = req.query;
+      const destinations = await storage.getPayoutDestinations(
+        userId as string,
+        vendorId as string
+      );
+      res.json(destinations);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch payout destinations" });
+    }
+  });
+
+  app.post("/api/payout-destinations", async (req, res) => {
+    try {
+      const destination = await storage.createPayoutDestination(req.body);
+      res.status(201).json(destination);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to create payout destination" });
+    }
+  });
+
+  app.put("/api/payout-destinations/:id", async (req, res) => {
+    try {
+      const destination = await storage.updatePayoutDestination(req.params.id, req.body);
+      if (!destination) {
+        return res.status(404).json({ error: "Payout destination not found" });
+      }
+      res.json(destination);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to update payout destination" });
+    }
+  });
+
+  app.delete("/api/payout-destinations/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deletePayoutDestination(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Payout destination not found" });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to delete payout destination" });
+    }
+  });
+
+  // ==================== PAYOUT ROUTES ====================
+  
+  app.get("/api/payouts", async (req, res) => {
+    try {
+      const { recipientType, recipientId, status } = req.query;
+      const payoutsList = await storage.getPayouts({
+        recipientType: recipientType as string,
+        recipientId: recipientId as string,
+        status: status as string,
+      });
+      res.json(payoutsList);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch payouts" });
+    }
+  });
+
+  app.get("/api/payouts/:id", async (req, res) => {
+    try {
+      const payout = await storage.getPayout(req.params.id);
+      if (!payout) {
+        return res.status(404).json({ error: "Payout not found" });
+      }
+      res.json(payout);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch payout" });
+    }
+  });
+
+  // Initiate payout (expense reimbursement, payroll, vendor payment)
+  app.post("/api/payouts", async (req, res) => {
+    try {
+      const { 
+        type, amount, currency, recipientType, recipientId, recipientName,
+        destinationId, relatedEntityType, relatedEntityId, initiatedBy
+      } = req.body;
+
+      // Get payout destination
+      let destination = null;
+      let provider = 'stripe';
+      
+      if (destinationId) {
+        destination = await storage.getPayoutDestination(destinationId);
+        if (destination) {
+          provider = destination.provider;
+        }
+      }
+
+      // Create payout record
+      const payout = await storage.createPayout({
+        type,
+        amount: amount.toString(),
+        currency: currency || 'USD',
+        status: 'pending',
+        recipientType,
+        recipientId,
+        recipientName,
+        destinationId,
+        provider,
+        relatedEntityType,
+        relatedEntityId,
+        initiatedBy,
+      });
+
+      res.status(201).json(payout);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to create payout" });
+    }
+  });
+
+  // Process payout (actually send money via Stripe/Paystack)
+  app.post("/api/payouts/:id/process", async (req, res) => {
+    try {
+      const payout = await storage.getPayout(req.params.id);
+      if (!payout) {
+        return res.status(404).json({ error: "Payout not found" });
+      }
+
+      if (payout.status !== 'pending') {
+        return res.status(400).json({ error: "Payout already processed" });
+      }
+
+      // Get destination details
+      const destination = payout.destinationId 
+        ? await storage.getPayoutDestination(payout.destinationId)
+        : null;
+
+      if (!destination) {
+        return res.status(400).json({ error: "No payout destination configured" });
+      }
+
+      // Determine country for provider selection
+      const countryCode = destination.country || 'US';
+      
+      try {
+        // Initiate transfer via payment service
+        const transferResult = await paymentService.initiateTransfer(
+          parseFloat(payout.amount),
+          {
+            accountNumber: destination.accountNumber,
+            bankCode: destination.bankCode,
+            accountName: destination.accountName,
+            stripeAccountId: destination.providerRecipientId,
+            currency: destination.currency,
+          },
+          countryCode,
+          `Payout: ${payout.type} - ${payout.id}`
+        );
+
+        // Update payout status
+        const updatedPayout = await storage.updatePayout(payout.id, {
+          status: 'processing',
+          providerTransferId: transferResult.transferId || transferResult.transferCode,
+          providerReference: transferResult.reference,
+          processedAt: new Date().toISOString(),
+        });
+
+        // If related to an expense, update expense payout status
+        if (payout.relatedEntityType === 'expense' && payout.relatedEntityId) {
+          await storage.updateExpense(payout.relatedEntityId, {
+            payoutStatus: 'processing',
+            payoutId: payout.id,
+          });
+        }
+
+        // Credit recipient wallet if they have one
+        if (payout.recipientType === 'employee' && payout.recipientId) {
+          const recipientWallet = await storage.getWalletByUserId(payout.recipientId, payout.currency);
+          if (recipientWallet) {
+            await storage.creditWallet(
+              recipientWallet.id,
+              parseFloat(payout.amount),
+              payout.type,
+              `Payout received: ${payout.type}`,
+              `PO-${payout.id}`,
+              { payoutId: payout.id }
+            );
+          }
+        }
+
+        res.json(updatedPayout);
+      } catch (transferError: any) {
+        // Update payout as failed
+        await storage.updatePayout(payout.id, {
+          status: 'failed',
+          failureReason: transferError.message,
+        });
+        res.status(500).json({ error: transferError.message || "Transfer failed" });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to process payout" });
+    }
+  });
+
+  // ==================== BILL PAYMENT FROM WALLET ====================
+  
+  app.post("/api/bills/:id/pay", async (req, res) => {
+    try {
+      const { walletId } = req.body;
+      
+      const bill = await storage.getBill(req.params.id);
+      if (!bill) {
+        return res.status(404).json({ error: "Bill not found" });
+      }
+
+      if (bill.status === 'Paid') {
+        return res.status(400).json({ error: "Bill already paid" });
+      }
+
+      const wallet = await storage.getWallet(walletId);
+      if (!wallet) {
+        return res.status(404).json({ error: "Wallet not found" });
+      }
+
+      const billAmount = parseFloat(bill.amount);
+      
+      // Debit wallet
+      const transaction = await storage.debitWallet(
+        walletId,
+        billAmount,
+        'bill_payment',
+        `Bill payment: ${bill.name}`,
+        `BILL-${bill.id}`,
+        { billId: bill.id }
+      );
+
+      // Update bill status
+      const updatedBill = await storage.updateBill(bill.id, {
+        status: 'Paid',
+      });
+
+      // Create a transaction record
+      await storage.createTransaction({
+        type: 'Bill',
+        amount: bill.amount,
+        fee: '0',
+        status: 'Completed',
+        date: new Date().toISOString(),
+        description: `Bill payment: ${bill.name}`,
+        currency: wallet.currency,
+      });
+
+      res.json({ bill: updatedBill, walletTransaction: transaction });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to pay bill" });
+    }
+  });
+
+  // ==================== EXPENSE APPROVAL & PAYOUT FLOW ====================
+  
+  // Approve expense and initiate payout
+  app.post("/api/expenses/:id/approve-and-pay", async (req, res) => {
+    try {
+      const { approvedBy, vendorId } = req.body;
+      
+      const expense = await storage.getExpense(req.params.id);
+      if (!expense) {
+        return res.status(404).json({ error: "Expense not found" });
+      }
+
+      if (expense.status !== 'PENDING') {
+        return res.status(400).json({ error: "Expense is not pending" });
+      }
+
+      // Update expense status
+      const updatedExpense = await storage.updateExpense(expense.id, {
+        status: 'APPROVED',
+        vendorId: vendorId || expense.vendorId,
+        payoutStatus: 'pending',
+      });
+
+      // Determine recipient (employee or vendor)
+      const recipientType = vendorId ? 'vendor' : 'employee';
+      const recipientId = vendorId || expense.userId;
+      let recipientName = expense.user;
+
+      if (vendorId) {
+        const vendor = await storage.getVendor(vendorId);
+        if (vendor) {
+          recipientName = vendor.name;
+        }
+      }
+
+      // Get recipient's payout destination
+      const destinations = await storage.getPayoutDestinations(
+        recipientType === 'employee' ? recipientId : undefined,
+        recipientType === 'vendor' ? recipientId : undefined
+      );
+      const defaultDestination = destinations.find(d => d.isDefault) || destinations[0];
+
+      // Create payout
+      const payout = await storage.createPayout({
+        type: 'expense_reimbursement',
+        amount: expense.amount,
+        currency: expense.currency,
+        status: 'pending',
+        recipientType,
+        recipientId,
+        recipientName,
+        destinationId: defaultDestination?.id,
+        provider: defaultDestination?.provider || 'stripe',
+        relatedEntityType: 'expense',
+        relatedEntityId: expense.id,
+        initiatedBy: approvedBy,
+      });
+
+      // Update expense with payout ID
+      await storage.updateExpense(expense.id, {
+        payoutId: payout.id,
+      });
+
+      // Send notification
+      await notificationService.sendNotification({
+        userId: expense.userId,
+        type: 'expense_approved',
+        title: 'Expense Approved',
+        message: `Your expense request for ${expense.currency} ${expense.amount} has been approved`,
+        data: { expenseId: expense.id, payoutId: payout.id },
+      });
+
+      res.json({ expense: updatedExpense, payout });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to approve expense" });
+    }
+  });
+
+  // ==================== PAYROLL BATCH PAYOUT ====================
+  
+  app.post("/api/payroll/batch-payout", async (req, res) => {
+    try {
+      const { payrollIds, initiatedBy } = req.body;
+      
+      const results = [];
+      
+      for (const payrollId of payrollIds) {
+        try {
+          const entry = await storage.getPayrollEntry(payrollId);
+          if (!entry || entry.status === 'paid') continue;
+
+          // Get employee's payout destination
+          const destinations = await storage.getPayoutDestinations(entry.memberId);
+          const defaultDestination = destinations.find(d => d.isDefault) || destinations[0];
+
+          // Create payout
+          const payout = await storage.createPayout({
+            type: 'payroll',
+            amount: entry.netSalary || entry.salary,
+            currency: 'USD',
+            status: 'pending',
+            recipientType: 'employee',
+            recipientId: entry.memberId,
+            recipientName: entry.name,
+            destinationId: defaultDestination?.id,
+            provider: defaultDestination?.provider || 'stripe',
+            relatedEntityType: 'payroll',
+            relatedEntityId: entry.id,
+            initiatedBy,
+          });
+
+          // Update payroll entry
+          await storage.updatePayrollEntry(entry.id, {
+            status: 'processing',
+            payoutId: payout.id,
+          } as any);
+
+          results.push({ payrollId, payoutId: payout.id, status: 'created' });
+        } catch (err: any) {
+          results.push({ payrollId, error: err.message });
+        }
+      }
+
+      res.json({ results });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to create batch payouts" });
+    }
+  });
+
+  // ==================== VENDOR PAYMENT ====================
+  
+  app.post("/api/vendors/:id/pay", async (req, res) => {
+    try {
+      const { amount, description, initiatedBy, invoiceId } = req.body;
+      
+      const vendor = await storage.getVendor(req.params.id);
+      if (!vendor) {
+        return res.status(404).json({ error: "Vendor not found" });
+      }
+
+      // Get vendor's payout destination
+      const destinations = await storage.getPayoutDestinations(undefined, vendor.id);
+      const defaultDestination = destinations.find(d => d.isDefault) || destinations[0];
+
+      if (!defaultDestination) {
+        return res.status(400).json({ error: "Vendor has no payout destination configured" });
+      }
+
+      // Create payout
+      const payout = await storage.createPayout({
+        type: 'vendor_payment',
+        amount: amount.toString(),
+        currency: 'USD',
+        status: 'pending',
+        recipientType: 'vendor',
+        recipientId: vendor.id,
+        recipientName: vendor.name,
+        destinationId: defaultDestination.id,
+        provider: defaultDestination.provider,
+        relatedEntityType: invoiceId ? 'invoice' : undefined,
+        relatedEntityId: invoiceId,
+        initiatedBy,
+      });
+
+      res.status(201).json(payout);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to create vendor payment" });
+    }
+  });
+
+  // ==================== VIRTUAL ACCOUNT CREATION ON SIGNUP ====================
+  
+  app.post("/api/virtual-accounts/create", async (req, res) => {
+    try {
+      const { userId, email, firstName, lastName, countryCode } = req.body;
+
+      // Check if user already has a virtual account
+      const existingAccounts = await storage.getVirtualAccounts();
+      const userAccount = existingAccounts.find((a: any) => a.userId === userId);
+      if (userAccount) {
+        return res.json(userAccount);
+      }
+
+      // Create virtual account via payment provider
+      const result = await paymentService.createVirtualAccount(
+        email,
+        firstName,
+        lastName,
+        countryCode
+      );
+
+      // Store in database
+      const virtualAccount = await storage.createVirtualAccount({
+        userId,
+        provider: result.provider,
+        accountNumber: result.accountNumber || '',
+        bankName: result.bankName || 'Spendly',
+        accountName: result.accountName || `${firstName} ${lastName}`,
+        currency: getCurrencyForCountry(countryCode).currency,
+        country: countryCode,
+        status: 'active',
+        metadata: result,
+      });
+
+      // Create wallet for this user if not exists
+      const existingWallet = await storage.getWalletByUserId(userId);
+      if (!existingWallet) {
+        await storage.createWallet({
+          userId,
+          currency: getCurrencyForCountry(countryCode).currency,
+          type: 'personal',
+          balance: '0',
+          availableBalance: '0',
+          pendingBalance: '0',
+          status: 'active',
+          virtualAccountId: virtualAccount.id,
+        });
+      }
+
+      res.status(201).json(virtualAccount);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to create virtual account" });
+    }
+  });
+
+  // ==================== ADMIN UTILITIES ====================
+  
+  // Get all users (admin)
+  app.get("/api/admin/users", async (req, res) => {
+    try {
+      const usersList = await storage.getUsers();
+      res.json(usersList);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch users" });
+    }
+  });
+
+  // Update user (admin)
+  app.put("/api/admin/users/:id", async (req, res) => {
+    try {
+      const user = await storage.updateUser(req.params.id, req.body);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json(user);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to update user" });
+    }
+  });
+
+  // Delete user (admin)
+  app.delete("/api/admin/users/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteUser(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to delete user" });
+    }
+  });
+
+  // Purge database (admin)
+  app.post("/api/admin/purge-database", async (req, res) => {
+    try {
+      const { tablesToPreserve, confirmPurge } = req.body;
+      
+      if (confirmPurge !== 'CONFIRM_PURGE') {
+        return res.status(400).json({ error: "Must confirm purge with 'CONFIRM_PURGE'" });
+      }
+
+      const result = await storage.purgeDatabase(tablesToPreserve);
+      
+      // Log the action
+      await storage.createAuditLog({
+        action: 'database_purge',
+        userId: 'system',
+        resourceType: 'database',
+        resourceId: 'all',
+        details: { purgedTables: result.purgedTables },
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'] || '',
+        createdAt: new Date().toISOString(),
+      } as any);
+
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to purge database" });
+    }
+  });
+
+  // Admin settings
+  app.get("/api/admin/admin-settings", async (req, res) => {
+    try {
+      const settings = await storage.getAdminSettings();
+      res.json(settings);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch admin settings" });
+    }
+  });
+
+  app.put("/api/admin/admin-settings/:key", async (req, res) => {
+    try {
+      const { value, description } = req.body;
+      const setting = await storage.setAdminSetting(req.params.key, value, description);
+      res.json(setting);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to update admin setting" });
+    }
+  });
+
+  // Single admin enforcement
+  app.post("/api/admin/set-single-admin", async (req, res) => {
+    try {
+      const { adminUserId } = req.body;
+      
+      // Get all users
+      const allUsers = await storage.getUsers();
+      
+      // Demote all other admins/owners to MANAGER
+      for (const user of allUsers) {
+        if (user.id !== adminUserId && (user.role === 'OWNER' || user.role === 'ADMIN')) {
+          await storage.updateUser(user.id, { role: 'MANAGER' });
+        }
+      }
+
+      // Promote specified user to OWNER
+      const adminUser = await storage.updateUser(adminUserId, { role: 'OWNER' });
+
+      // Set admin setting
+      await storage.setAdminSetting('single_admin_id', adminUserId, 'The single admin user ID');
+      await storage.setAdminSetting('single_admin_enforced', 'true', 'Whether single admin is enforced');
+
+      res.json({ success: true, admin: adminUser });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to set single admin" });
+    }
+  });
+
+  // ==================== INVOICE WITH VIRTUAL ACCOUNT ====================
+  
+  // Get invoice with virtual account details
+  app.get("/api/invoices/:id/payment-details", async (req, res) => {
+    try {
+      const invoice = await storage.getInvoice(req.params.id);
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+
+      // Get company virtual account for receiving payments
+      const virtualAccountsList = await storage.getVirtualAccounts();
+      const companyAccount = virtualAccountsList[0]; // Use first/primary account
+
+      res.json({
+        invoice,
+        paymentDetails: companyAccount ? {
+          bankName: companyAccount.bankName,
+          accountNumber: companyAccount.accountNumber,
+          accountName: companyAccount.accountName,
+          currency: companyAccount.currency,
+          reference: `INV-${invoice.invoiceNumber}`,
+          instructions: `Please include reference INV-${invoice.invoiceNumber} in your payment`,
+        } : null,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch invoice payment details" });
+    }
+  });
+
+  // ==================== FUNDING SOURCE ROUTES ====================
+  
+  app.get("/api/funding-sources", async (req, res) => {
+    try {
+      const { userId } = req.query;
+      if (!userId) {
+        return res.status(400).json({ error: "userId is required" });
+      }
+      const sources = await storage.getFundingSources(userId as string);
+      res.json(sources);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch funding sources" });
+    }
+  });
+
+  app.post("/api/funding-sources", async (req, res) => {
+    try {
+      const source = await storage.createFundingSource(req.body);
+      res.status(201).json(source);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to create funding source" });
+    }
+  });
+
+  app.delete("/api/funding-sources/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteFundingSource(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Funding source not found" });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to delete funding source" });
     }
   });
 

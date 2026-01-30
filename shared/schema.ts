@@ -109,6 +109,9 @@ export const expenses = pgTable("expenses", {
   expenseType: text("expense_type").notNull().default('request'),
   attachments: jsonb("attachments").$type<string[]>().default([]),
   taggedReviewers: jsonb("tagged_reviewers").$type<string[]>().default([]),
+  vendorId: text("vendor_id"),
+  payoutStatus: text("payout_status").default('not_started'),
+  payoutId: text("payout_id"),
 });
 
 // Transactions table
@@ -444,6 +447,133 @@ export const rolePermissions = pgTable("role_permissions", {
   updatedAt: text("updated_at").notNull().default(sql`now()`),
 });
 
+// ==================== WALLET & FINANCIAL TABLES ====================
+
+// Wallets table - for user/company wallets
+export const wallets = pgTable("wallets", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  userId: text("user_id").notNull(),
+  type: text("type").notNull().default('personal'),
+  currency: text("currency").notNull().default('USD'),
+  balance: decimal("balance", { precision: 16, scale: 2 }).notNull().default('0'),
+  availableBalance: decimal("available_balance", { precision: 16, scale: 2 }).notNull().default('0'),
+  pendingBalance: decimal("pending_balance", { precision: 16, scale: 2 }).notNull().default('0'),
+  status: text("status").notNull().default('active'),
+  virtualAccountId: text("virtual_account_id"),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+});
+
+// Wallet Transactions table - ledger for all wallet credits/debits
+export const walletTransactions = pgTable("wallet_transactions", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  walletId: text("wallet_id").notNull(),
+  type: text("type").notNull(),
+  amount: decimal("amount", { precision: 16, scale: 2 }).notNull(),
+  currency: text("currency").notNull().default('USD'),
+  direction: text("direction").notNull(),
+  balanceBefore: decimal("balance_before", { precision: 16, scale: 2 }).notNull(),
+  balanceAfter: decimal("balance_after", { precision: 16, scale: 2 }).notNull(),
+  description: text("description"),
+  reference: text("reference").notNull(),
+  relatedEntityType: text("related_entity_type"),
+  relatedEntityId: text("related_entity_id"),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+  status: text("status").notNull().default('completed'),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+});
+
+// Exchange Rates table - for currency conversion
+export const exchangeRates = pgTable("exchange_rates", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  baseCurrency: text("base_currency").notNull(),
+  targetCurrency: text("target_currency").notNull(),
+  rate: decimal("rate", { precision: 16, scale: 6 }).notNull(),
+  source: text("source").notNull().default('manual'),
+  validFrom: text("valid_from").notNull(),
+  validTo: text("valid_to"),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+});
+
+// Payout Destinations table - bank accounts/virtual accounts for payouts
+export const payoutDestinations = pgTable("payout_destinations", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  userId: text("user_id"),
+  vendorId: text("vendor_id"),
+  type: text("type").notNull().default('bank_account'),
+  provider: text("provider").notNull(),
+  bankName: text("bank_name"),
+  bankCode: text("bank_code"),
+  accountNumber: text("account_number"),
+  accountName: text("account_name"),
+  routingNumber: text("routing_number"),
+  swiftCode: text("swift_code"),
+  currency: text("currency").notNull().default('USD'),
+  country: text("country").notNull().default('US'),
+  isDefault: boolean("is_default").default(false),
+  isVerified: boolean("is_verified").default(false),
+  providerRecipientId: text("provider_recipient_id"),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+});
+
+// Payouts table - track all payouts (expense reimbursements, payroll, vendor payments)
+export const payouts = pgTable("payouts", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  type: text("type").notNull(),
+  amount: decimal("amount", { precision: 16, scale: 2 }).notNull(),
+  currency: text("currency").notNull().default('USD'),
+  status: text("status").notNull().default('pending'),
+  recipientType: text("recipient_type").notNull(),
+  recipientId: text("recipient_id").notNull(),
+  recipientName: text("recipient_name"),
+  destinationId: text("destination_id"),
+  provider: text("provider").notNull(),
+  providerTransferId: text("provider_transfer_id"),
+  providerReference: text("provider_reference"),
+  relatedEntityType: text("related_entity_type"),
+  relatedEntityId: text("related_entity_id"),
+  feeAmount: decimal("fee_amount", { precision: 12, scale: 2 }).default('0'),
+  feeCurrency: text("fee_currency").default('USD'),
+  exchangeRate: decimal("exchange_rate", { precision: 16, scale: 6 }),
+  failureReason: text("failure_reason"),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+  initiatedBy: text("initiated_by"),
+  approvedBy: text("approved_by"),
+  processedAt: text("processed_at"),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+});
+
+// Funding Sources table - methods users can use to fund their wallet
+export const fundingSources = pgTable("funding_sources", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  userId: text("user_id").notNull(),
+  type: text("type").notNull(),
+  provider: text("provider").notNull(),
+  cardLast4: text("card_last4"),
+  cardBrand: text("card_brand"),
+  bankName: text("bank_name"),
+  accountLast4: text("account_last4"),
+  providerSourceId: text("provider_source_id"),
+  isDefault: boolean("is_default").default(false),
+  isVerified: boolean("is_verified").default(false),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+});
+
+// Admin Settings table - for single admin enforcement and other admin configs
+export const adminSettings = pgTable("admin_settings", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  key: text("key").notNull().unique(),
+  value: text("value"),
+  valueType: text("value_type").notNull().default('string'),
+  description: text("description"),
+  updatedBy: text("updated_by"),
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+});
+
 // ==================== INSERT SCHEMAS ====================
 
 export const insertUserSchema = createInsertSchema(users).pick({
@@ -474,6 +604,13 @@ export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: tru
 export const insertOrganizationSettingsSchema = createInsertSchema(organizationSettings).omit({ id: true });
 export const insertSystemSettingsSchema = createInsertSchema(systemSettings).omit({ id: true });
 export const insertRolePermissionsSchema = createInsertSchema(rolePermissions).omit({ id: true });
+export const insertWalletSchema = createInsertSchema(wallets).omit({ id: true });
+export const insertWalletTransactionSchema = createInsertSchema(walletTransactions).omit({ id: true });
+export const insertExchangeRateSchema = createInsertSchema(exchangeRates).omit({ id: true });
+export const insertPayoutDestinationSchema = createInsertSchema(payoutDestinations).omit({ id: true });
+export const insertPayoutSchema = createInsertSchema(payouts).omit({ id: true });
+export const insertFundingSourceSchema = createInsertSchema(fundingSources).omit({ id: true });
+export const insertAdminSettingsSchema = createInsertSchema(adminSettings).omit({ id: true });
 
 // ==================== TYPES ====================
 
@@ -536,6 +673,27 @@ export type SystemSettings = typeof systemSettings.$inferSelect;
 
 export type InsertRolePermissions = z.infer<typeof insertRolePermissionsSchema>;
 export type RolePermissions = typeof rolePermissions.$inferSelect;
+
+export type InsertWallet = z.infer<typeof insertWalletSchema>;
+export type Wallet = typeof wallets.$inferSelect;
+
+export type InsertWalletTransaction = z.infer<typeof insertWalletTransactionSchema>;
+export type WalletTransaction = typeof walletTransactions.$inferSelect;
+
+export type InsertExchangeRate = z.infer<typeof insertExchangeRateSchema>;
+export type ExchangeRate = typeof exchangeRates.$inferSelect;
+
+export type InsertPayoutDestination = z.infer<typeof insertPayoutDestinationSchema>;
+export type PayoutDestination = typeof payoutDestinations.$inferSelect;
+
+export type InsertPayout = z.infer<typeof insertPayoutSchema>;
+export type Payout = typeof payouts.$inferSelect;
+
+export type InsertFundingSource = z.infer<typeof insertFundingSourceSchema>;
+export type FundingSource = typeof fundingSources.$inferSelect;
+
+export type InsertAdminSettings = z.infer<typeof insertAdminSettingsSchema>;
+export type AdminSettings = typeof adminSettings.$inferSelect;
 
 export type CompanyBalances = typeof companyBalances.$inferSelect;
 export type CompanySettings = typeof companySettings.$inferSelect;

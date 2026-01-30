@@ -23,6 +23,12 @@ import {
   Lock,
   UserCog,
   ScrollText,
+  Wallet,
+  RefreshCw,
+  Trash2,
+  ArrowUpDown,
+  Banknote,
+  Database,
 } from "lucide-react";
 import type { TeamMember, Expense, AuditLog } from "@shared/schema";
 
@@ -57,6 +63,30 @@ export default function Admin() {
       bgColor: "bg-blue-100 dark:bg-blue-900/30",
     },
     {
+      title: "Wallet Management",
+      description: "View and manage user wallets",
+      icon: Wallet,
+      href: "/admin/wallets",
+      color: "text-violet-600",
+      bgColor: "bg-violet-100 dark:bg-violet-900/30",
+    },
+    {
+      title: "Payout Management",
+      description: "Process and track all payouts",
+      icon: Banknote,
+      href: "/admin/payouts",
+      color: "text-teal-600",
+      bgColor: "bg-teal-100 dark:bg-teal-900/30",
+    },
+    {
+      title: "Exchange Rates",
+      description: "Manage currency exchange rates",
+      icon: ArrowUpDown,
+      href: "/admin/exchange-rates",
+      color: "text-cyan-600",
+      bgColor: "bg-cyan-100 dark:bg-cyan-900/30",
+    },
+    {
       title: "Audit Logs",
       description: "View all system activities",
       icon: ScrollText,
@@ -79,6 +109,14 @@ export default function Admin() {
       href: "/admin/security",
       color: "text-red-600",
       bgColor: "bg-red-100 dark:bg-red-900/30",
+    },
+    {
+      title: "Database Management",
+      description: "Purge data and manage storage",
+      icon: Database,
+      href: "/admin/database",
+      color: "text-rose-600",
+      bgColor: "bg-rose-100 dark:bg-rose-900/30",
     },
   ];
 

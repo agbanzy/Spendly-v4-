@@ -36,6 +36,10 @@ import AdminUsers from "@/pages/admin-users";
 import AdminAuditLogs from "@/pages/admin-audit-logs";
 import AdminOrganization from "@/pages/admin-organization";
 import AdminSecurity from "@/pages/admin-security";
+import AdminWallets from "@/pages/admin-wallets";
+import AdminPayouts from "@/pages/admin-payouts";
+import AdminExchangeRates from "@/pages/admin-exchange-rates";
+import AdminDatabase from "@/pages/admin-database";
 
 function AuthLoading() {
   return (
@@ -87,6 +91,10 @@ function AppRouter() {
       <Route path="/admin/audit-logs">{() => <ProtectedRoute component={AdminAuditLogs} />}</Route>
       <Route path="/admin/organization">{() => <ProtectedRoute component={AdminOrganization} />}</Route>
       <Route path="/admin/security">{() => <ProtectedRoute component={AdminSecurity} />}</Route>
+      <Route path="/admin/wallets">{() => <ProtectedRoute component={AdminWallets} />}</Route>
+      <Route path="/admin/payouts">{() => <ProtectedRoute component={AdminPayouts} />}</Route>
+      <Route path="/admin/exchange-rates">{() => <ProtectedRoute component={AdminExchangeRates} />}</Route>
+      <Route path="/admin/database">{() => <ProtectedRoute component={AdminDatabase} />}</Route>
       <Route component={NotFound} />
     </Switch>
   );

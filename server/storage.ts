@@ -1,11 +1,12 @@
 import { db } from "./db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, sql } from "drizzle-orm";
 import { 
   users, expenses, transactions, bills, budgets, virtualCards, 
   teamMembers, payrollEntries, invoices, vendors, reports,
   cardTransactions, virtualAccounts, companyBalances, companySettings,
   userProfiles, kycSubmissions, notifications, notificationSettings, pushTokens,
   departments, auditLogs, organizationSettings, systemSettings, rolePermissions,
+  wallets, walletTransactions, exchangeRates, payoutDestinations, payouts, fundingSources, adminSettings,
   type User, type InsertUser, type Expense, type Transaction, type Bill, 
   type Budget, type VirtualCard, type TeamMember, type PayrollEntry, 
   type Invoice, type Vendor, type Report, type CardTransaction, 
@@ -13,7 +14,11 @@ import {
   type UserProfile, type InsertUserProfile, type KycSubmission, type InsertKycSubmission,
   type Notification, type InsertNotification, type NotificationSettings, type InsertNotificationSettings,
   type PushToken, type InsertPushToken, type Department,
-  type AuditLog, type OrganizationSettings, type SystemSettings, type RolePermissions
+  type AuditLog, type OrganizationSettings, type SystemSettings, type RolePermissions,
+  type Wallet, type InsertWallet, type WalletTransaction, type InsertWalletTransaction,
+  type ExchangeRate, type InsertExchangeRate, type PayoutDestination, type InsertPayoutDestination,
+  type Payout, type InsertPayout, type FundingSource, type InsertFundingSource,
+  type AdminSettings, type InsertAdminSettings
 } from "@shared/schema";
 
 export interface IStorage {
@@ -140,6 +145,54 @@ export interface IStorage {
   updateSystemSetting(key: string, data: Partial<SystemSettings>): Promise<SystemSettings>;
   getRolePermissions(): Promise<RolePermissions[]>;
   updateRolePermissions(role: string, data: Partial<RolePermissions>): Promise<RolePermissions>;
+  
+  // Wallet methods
+  getWallets(userId?: string): Promise<Wallet[]>;
+  getWallet(id: string): Promise<Wallet | undefined>;
+  getWalletByUserId(userId: string, currency?: string): Promise<Wallet | undefined>;
+  createWallet(wallet: InsertWallet): Promise<Wallet>;
+  updateWallet(id: string, data: Partial<Wallet>): Promise<Wallet | undefined>;
+  creditWallet(walletId: string, amount: number, type: string, description: string, reference: string, metadata?: Record<string, unknown>): Promise<WalletTransaction>;
+  debitWallet(walletId: string, amount: number, type: string, description: string, reference: string, metadata?: Record<string, unknown>): Promise<WalletTransaction>;
+  
+  // Wallet Transactions
+  getWalletTransactions(walletId: string): Promise<WalletTransaction[]>;
+  getWalletTransaction(id: string): Promise<WalletTransaction | undefined>;
+  
+  // Exchange Rates
+  getExchangeRates(): Promise<ExchangeRate[]>;
+  getExchangeRate(baseCurrency: string, targetCurrency: string): Promise<ExchangeRate | undefined>;
+  createExchangeRate(rate: InsertExchangeRate): Promise<ExchangeRate>;
+  updateExchangeRate(id: string, data: Partial<ExchangeRate>): Promise<ExchangeRate | undefined>;
+  
+  // Payout Destinations
+  getPayoutDestinations(userId?: string, vendorId?: string): Promise<PayoutDestination[]>;
+  getPayoutDestination(id: string): Promise<PayoutDestination | undefined>;
+  createPayoutDestination(destination: InsertPayoutDestination): Promise<PayoutDestination>;
+  updatePayoutDestination(id: string, data: Partial<PayoutDestination>): Promise<PayoutDestination | undefined>;
+  deletePayoutDestination(id: string): Promise<boolean>;
+  
+  // Payouts
+  getPayouts(filters?: { recipientType?: string; recipientId?: string; status?: string }): Promise<Payout[]>;
+  getPayout(id: string): Promise<Payout | undefined>;
+  createPayout(payout: InsertPayout): Promise<Payout>;
+  updatePayout(id: string, data: Partial<Payout>): Promise<Payout | undefined>;
+  
+  // Funding Sources
+  getFundingSources(userId: string): Promise<FundingSource[]>;
+  createFundingSource(source: InsertFundingSource): Promise<FundingSource>;
+  deleteFundingSource(id: string): Promise<boolean>;
+  
+  // Admin Settings
+  getAdminSettings(): Promise<AdminSettings[]>;
+  getAdminSetting(key: string): Promise<AdminSettings | undefined>;
+  setAdminSetting(key: string, value: string, description?: string): Promise<AdminSettings>;
+  
+  // Admin Utilities
+  purgeDatabase(tablesToPreserve?: string[]): Promise<{ purgedTables: string[] }>;
+  getUsers(): Promise<User[]>;
+  updateUser(id: string, data: Partial<User>): Promise<User | undefined>;
+  deleteUser(id: string): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -772,6 +825,368 @@ export class DatabaseStorage implements IStorage {
       const result = await db.insert(rolePermissions).values({ ...data, role } as any).returning();
       return result[0];
     }
+  }
+
+  // ==================== WALLETS ====================
+  async getWallets(userId?: string): Promise<Wallet[]> {
+    if (userId) {
+      return await db.select().from(wallets).where(eq(wallets.userId, userId));
+    }
+    return await db.select().from(wallets);
+  }
+
+  async getWallet(id: string): Promise<Wallet | undefined> {
+    const result = await db.select().from(wallets).where(eq(wallets.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getWalletByUserId(userId: string, currency?: string): Promise<Wallet | undefined> {
+    if (currency) {
+      const result = await db.select().from(wallets)
+        .where(and(eq(wallets.userId, userId), eq(wallets.currency, currency)))
+        .limit(1);
+      return result[0];
+    }
+    const result = await db.select().from(wallets)
+      .where(eq(wallets.userId, userId))
+      .limit(1);
+    return result[0];
+  }
+
+  async createWallet(wallet: InsertWallet): Promise<Wallet> {
+    const now = new Date().toISOString();
+    const result = await db.insert(wallets).values({
+      ...wallet,
+      createdAt: now,
+      updatedAt: now,
+    } as any).returning();
+    return result[0];
+  }
+
+  async updateWallet(id: string, data: Partial<Wallet>): Promise<Wallet | undefined> {
+    const now = new Date().toISOString();
+    const result = await db.update(wallets)
+      .set({ ...data, updatedAt: now } as any)
+      .where(eq(wallets.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async creditWallet(
+    walletId: string, 
+    amount: number, 
+    type: string, 
+    description: string, 
+    reference: string,
+    metadata?: Record<string, unknown>
+  ): Promise<WalletTransaction> {
+    const wallet = await this.getWallet(walletId);
+    if (!wallet) throw new Error('Wallet not found');
+    
+    const balanceBefore = parseFloat(wallet.balance || '0');
+    const balanceAfter = balanceBefore + amount;
+    const now = new Date().toISOString();
+    
+    await db.update(wallets)
+      .set({ 
+        balance: balanceAfter.toFixed(2),
+        availableBalance: (parseFloat(wallet.availableBalance || '0') + amount).toFixed(2),
+        updatedAt: now
+      } as any)
+      .where(eq(wallets.id, walletId));
+    
+    const txResult = await db.insert(walletTransactions).values({
+      walletId,
+      type,
+      amount: amount.toFixed(2),
+      currency: wallet.currency,
+      direction: 'credit',
+      balanceBefore: balanceBefore.toFixed(2),
+      balanceAfter: balanceAfter.toFixed(2),
+      description,
+      reference,
+      metadata,
+      status: 'completed',
+      createdAt: now,
+    } as any).returning();
+    
+    return txResult[0];
+  }
+
+  async debitWallet(
+    walletId: string, 
+    amount: number, 
+    type: string, 
+    description: string, 
+    reference: string,
+    metadata?: Record<string, unknown>
+  ): Promise<WalletTransaction> {
+    const wallet = await this.getWallet(walletId);
+    if (!wallet) throw new Error('Wallet not found');
+    
+    const availableBalance = parseFloat(wallet.availableBalance || '0');
+    if (availableBalance < amount) {
+      throw new Error('Insufficient funds');
+    }
+    
+    const balanceBefore = parseFloat(wallet.balance || '0');
+    const balanceAfter = balanceBefore - amount;
+    const now = new Date().toISOString();
+    
+    await db.update(wallets)
+      .set({ 
+        balance: balanceAfter.toFixed(2),
+        availableBalance: (availableBalance - amount).toFixed(2),
+        updatedAt: now
+      } as any)
+      .where(eq(wallets.id, walletId));
+    
+    const txResult = await db.insert(walletTransactions).values({
+      walletId,
+      type,
+      amount: amount.toFixed(2),
+      currency: wallet.currency,
+      direction: 'debit',
+      balanceBefore: balanceBefore.toFixed(2),
+      balanceAfter: balanceAfter.toFixed(2),
+      description,
+      reference,
+      metadata,
+      status: 'completed',
+      createdAt: now,
+    } as any).returning();
+    
+    return txResult[0];
+  }
+
+  // ==================== WALLET TRANSACTIONS ====================
+  async getWalletTransactions(walletId: string): Promise<WalletTransaction[]> {
+    return await db.select().from(walletTransactions)
+      .where(eq(walletTransactions.walletId, walletId))
+      .orderBy(desc(walletTransactions.createdAt));
+  }
+
+  async getWalletTransaction(id: string): Promise<WalletTransaction | undefined> {
+    const result = await db.select().from(walletTransactions)
+      .where(eq(walletTransactions.id, id))
+      .limit(1);
+    return result[0];
+  }
+
+  // ==================== EXCHANGE RATES ====================
+  async getExchangeRates(): Promise<ExchangeRate[]> {
+    return await db.select().from(exchangeRates).orderBy(desc(exchangeRates.createdAt));
+  }
+
+  async getExchangeRate(baseCurrency: string, targetCurrency: string): Promise<ExchangeRate | undefined> {
+    const result = await db.select().from(exchangeRates)
+      .where(and(
+        eq(exchangeRates.baseCurrency, baseCurrency),
+        eq(exchangeRates.targetCurrency, targetCurrency)
+      ))
+      .orderBy(desc(exchangeRates.createdAt))
+      .limit(1);
+    return result[0];
+  }
+
+  async createExchangeRate(rate: InsertExchangeRate): Promise<ExchangeRate> {
+    const now = new Date().toISOString();
+    const result = await db.insert(exchangeRates).values({
+      ...rate,
+      createdAt: now,
+    } as any).returning();
+    return result[0];
+  }
+
+  async updateExchangeRate(id: string, data: Partial<ExchangeRate>): Promise<ExchangeRate | undefined> {
+    const result = await db.update(exchangeRates)
+      .set(data as any)
+      .where(eq(exchangeRates.id, id))
+      .returning();
+    return result[0];
+  }
+
+  // ==================== PAYOUT DESTINATIONS ====================
+  async getPayoutDestinations(userId?: string, vendorId?: string): Promise<PayoutDestination[]> {
+    if (userId) {
+      return await db.select().from(payoutDestinations).where(eq(payoutDestinations.userId, userId));
+    }
+    if (vendorId) {
+      return await db.select().from(payoutDestinations).where(eq(payoutDestinations.vendorId, vendorId));
+    }
+    return await db.select().from(payoutDestinations);
+  }
+
+  async getPayoutDestination(id: string): Promise<PayoutDestination | undefined> {
+    const result = await db.select().from(payoutDestinations)
+      .where(eq(payoutDestinations.id, id))
+      .limit(1);
+    return result[0];
+  }
+
+  async createPayoutDestination(destination: InsertPayoutDestination): Promise<PayoutDestination> {
+    const now = new Date().toISOString();
+    const result = await db.insert(payoutDestinations).values({
+      ...destination,
+      createdAt: now,
+      updatedAt: now,
+    } as any).returning();
+    return result[0];
+  }
+
+  async updatePayoutDestination(id: string, data: Partial<PayoutDestination>): Promise<PayoutDestination | undefined> {
+    const now = new Date().toISOString();
+    const result = await db.update(payoutDestinations)
+      .set({ ...data, updatedAt: now } as any)
+      .where(eq(payoutDestinations.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deletePayoutDestination(id: string): Promise<boolean> {
+    const result = await db.delete(payoutDestinations).where(eq(payoutDestinations.id, id)).returning();
+    return result.length > 0;
+  }
+
+  // ==================== PAYOUTS ====================
+  async getPayouts(filters?: { recipientType?: string; recipientId?: string; status?: string }): Promise<Payout[]> {
+    let query = db.select().from(payouts);
+    
+    if (filters?.recipientType && filters?.recipientId) {
+      return await db.select().from(payouts)
+        .where(and(
+          eq(payouts.recipientType, filters.recipientType),
+          eq(payouts.recipientId, filters.recipientId)
+        ))
+        .orderBy(desc(payouts.createdAt));
+    }
+    if (filters?.status) {
+      return await db.select().from(payouts)
+        .where(eq(payouts.status, filters.status))
+        .orderBy(desc(payouts.createdAt));
+    }
+    
+    return await db.select().from(payouts).orderBy(desc(payouts.createdAt));
+  }
+
+  async getPayout(id: string): Promise<Payout | undefined> {
+    const result = await db.select().from(payouts).where(eq(payouts.id, id)).limit(1);
+    return result[0];
+  }
+
+  async createPayout(payout: InsertPayout): Promise<Payout> {
+    const now = new Date().toISOString();
+    const result = await db.insert(payouts).values({
+      ...payout,
+      createdAt: now,
+      updatedAt: now,
+    } as any).returning();
+    return result[0];
+  }
+
+  async updatePayout(id: string, data: Partial<Payout>): Promise<Payout | undefined> {
+    const now = new Date().toISOString();
+    const result = await db.update(payouts)
+      .set({ ...data, updatedAt: now } as any)
+      .where(eq(payouts.id, id))
+      .returning();
+    return result[0];
+  }
+
+  // ==================== FUNDING SOURCES ====================
+  async getFundingSources(userId: string): Promise<FundingSource[]> {
+    return await db.select().from(fundingSources).where(eq(fundingSources.userId, userId));
+  }
+
+  async createFundingSource(source: InsertFundingSource): Promise<FundingSource> {
+    const now = new Date().toISOString();
+    const result = await db.insert(fundingSources).values({
+      ...source,
+      createdAt: now,
+    } as any).returning();
+    return result[0];
+  }
+
+  async deleteFundingSource(id: string): Promise<boolean> {
+    const result = await db.delete(fundingSources).where(eq(fundingSources.id, id)).returning();
+    return result.length > 0;
+  }
+
+  // ==================== ADMIN SETTINGS ====================
+  async getAdminSettings(): Promise<AdminSettings[]> {
+    return await db.select().from(adminSettings);
+  }
+
+  async getAdminSetting(key: string): Promise<AdminSettings | undefined> {
+    const result = await db.select().from(adminSettings)
+      .where(eq(adminSettings.key, key))
+      .limit(1);
+    return result[0];
+  }
+
+  async setAdminSetting(key: string, value: string, description?: string): Promise<AdminSettings> {
+    const now = new Date().toISOString();
+    const existing = await this.getAdminSetting(key);
+    
+    if (existing) {
+      const result = await db.update(adminSettings)
+        .set({ value, description, updatedAt: now } as any)
+        .where(eq(adminSettings.key, key))
+        .returning();
+      return result[0];
+    } else {
+      const result = await db.insert(adminSettings).values({
+        key,
+        value,
+        description,
+        valueType: 'string',
+        updatedAt: now,
+      } as any).returning();
+      return result[0];
+    }
+  }
+
+  // ==================== ADMIN UTILITIES ====================
+  async purgeDatabase(tablesToPreserve: string[] = ['admin_settings', 'organization_settings', 'system_settings', 'role_permissions']): Promise<{ purgedTables: string[] }> {
+    const allTables = [
+      'expenses', 'transactions', 'bills', 'budgets', 'virtual_cards',
+      'team_members', 'payroll_entries', 'invoices', 'vendors', 'reports',
+      'card_transactions', 'virtual_accounts', 'notifications', 'notification_settings',
+      'push_tokens', 'user_profiles', 'kyc_submissions', 'audit_logs', 'departments',
+      'wallets', 'wallet_transactions', 'exchange_rates', 'payout_destinations',
+      'payouts', 'funding_sources', 'users'
+    ];
+    
+    const tablesToPurge = allTables.filter(t => !tablesToPreserve.includes(t));
+    const purgedTables: string[] = [];
+    
+    for (const table of tablesToPurge) {
+      try {
+        await db.execute(sql.raw(`TRUNCATE TABLE "${table}" CASCADE`));
+        purgedTables.push(table);
+      } catch (error) {
+        console.log(`Skipping table ${table}: ${error}`);
+      }
+    }
+    
+    return { purgedTables };
+  }
+
+  async getUsers(): Promise<User[]> {
+    return await db.select().from(users);
+  }
+
+  async updateUser(id: string, data: Partial<User>): Promise<User | undefined> {
+    const result = await db.update(users)
+      .set(data as any)
+      .where(eq(users.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteUser(id: string): Promise<boolean> {
+    const result = await db.delete(users).where(eq(users.id, id)).returning();
+    return result.length > 0;
   }
 }
 

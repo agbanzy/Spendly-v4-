@@ -181,10 +181,11 @@ export default function Team() {
   });
 
   const createDeptMutation = useMutation({
-    mutationFn: async (data: typeof deptForm) => {
+    mutationFn: async (data: { name: string; description: string; budget: string; color: string; headId: string | null }) => {
       return apiRequest("POST", "/api/departments", {
         ...data,
         budget: data.budget ? parseFloat(data.budget) : null,
+        headId: data.headId || null,
       });
     },
     onSuccess: () => {
@@ -281,10 +282,15 @@ export default function Team() {
       toast({ title: "Department name is required", variant: "destructive" });
       return;
     }
+    // Convert "none" to null for headId
+    const submitData = {
+      ...deptForm,
+      headId: deptForm.headId === "none" ? null : deptForm.headId
+    };
     if (editingDept) {
-      updateDeptMutation.mutate({ id: editingDept.id, data: deptForm });
+      updateDeptMutation.mutate({ id: editingDept.id, data: submitData });
     } else {
-      createDeptMutation.mutate(deptForm);
+      createDeptMutation.mutate(submitData);
     }
   };
 
@@ -663,7 +669,7 @@ export default function Team() {
               <Select value={deptForm.headId} onValueChange={(value) => setDeptForm({ ...deptForm, headId: value })}>
                 <SelectTrigger data-testid="select-dept-head"><SelectValue placeholder="Select a department head" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">No head assigned</SelectItem>
+                  <SelectItem value="none">No head assigned</SelectItem>
                   {team?.filter(m => m.role === "MANAGER" || m.role === "ADMIN" || m.role === "OWNER").map((member) => (
                     <SelectItem key={member.id} value={member.id}>{member.name}</SelectItem>
                   ))}

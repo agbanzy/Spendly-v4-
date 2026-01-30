@@ -57,7 +57,7 @@ import {
 import { useForm } from "react-hook-form";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Expense, TeamMember } from "@shared/schema";
+import type { Expense, TeamMember, Vendor } from "@shared/schema";
 
 const categories = [
   "Software",
@@ -85,6 +85,7 @@ export default function Expenses() {
   const [selectedReviewers, setSelectedReviewers] = useState<string[]>([]);
   const [expenseType, setExpenseType] = useState<'spent' | 'request'>('request');
   const [isUploading, setIsUploading] = useState(false);
+  const [selectedVendorId, setSelectedVendorId] = useState<string>("");
   const { toast } = useToast();
 
   const { data: expenses, isLoading } = useQuery<Expense[]>({
@@ -93,6 +94,10 @@ export default function Expenses() {
 
   const { data: teamMembers } = useQuery<TeamMember[]>({
     queryKey: ["/api/team"],
+  });
+
+  const { data: vendors } = useQuery<Vendor[]>({
+    queryKey: ["/api/vendors"],
   });
 
   const filteredExpenses = useMemo(() => {
@@ -175,12 +180,19 @@ export default function Expenses() {
   });
 
   const approveExpense = useMutation({
-    mutationFn: async (id: string) => {
-      return apiRequest("PATCH", `/api/expenses/${id}`, { status: "APPROVED" });
+    mutationFn: async ({ id, vendorId }: { id: string; vendorId?: string }) => {
+      return apiRequest("POST", `/api/expenses/${id}/approve-and-pay`, { 
+        approvedBy: "admin",
+        vendorId,
+      });
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/expenses"] });
-      toast({ title: "Expense approved" });
+      queryClient.invalidateQueries({ queryKey: ["/api/payouts"] });
+      toast({ 
+        title: "Expense Approved", 
+        description: data.payout ? "Payout created and queued for processing" : "Expense approved"
+      });
     },
     onError: () => {
       toast({ title: "Failed to approve expense", variant: "destructive" });
@@ -747,7 +759,7 @@ export default function Expenses() {
                   data-testid={`expense-row-${expense.id}`}
                 >
                   <div className="flex items-center gap-4 cursor-pointer flex-1 min-w-0" onClick={() => handleViewDetail(expense)}>
-                    <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-primary shrink-0">
+                    <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-indigo-600 dark:text-indigo-400 shrink-0">
                       {expense.merchant[0]?.toUpperCase()}
                     </div>
                     <div className="min-w-0 flex-1">
@@ -793,7 +805,7 @@ export default function Expenses() {
                     </div>
                     {expense.status === "PENDING" && (
                       <div className="flex gap-1">
-                        <Button size="icon" variant="ghost" onClick={() => approveExpense.mutate(expense.id)} disabled={approveExpense.isPending} data-testid={`button-approve-${expense.id}`}>
+                        <Button size="icon" variant="ghost" onClick={() => approveExpense.mutate({ id: expense.id, vendorId: expense.vendorId || undefined })} disabled={approveExpense.isPending} data-testid={`button-approve-${expense.id}`}>
                           <CheckCircle className="h-4 w-4 text-emerald-600" />
                         </Button>
                         <Button size="icon" variant="ghost" onClick={() => rejectExpense.mutate(expense.id)} disabled={rejectExpense.isPending} data-testid={`button-reject-${expense.id}`}>
@@ -858,7 +870,7 @@ export default function Expenses() {
           {selectedExpense && (
             <div className="space-y-4">
               <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-primary text-2xl">
+                <div className="w-16 h-16 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-indigo-600 dark:text-indigo-400 text-2xl">
                   {selectedExpense.merchant[0]?.toUpperCase()}
                 </div>
                 <div className="space-y-1">
@@ -962,7 +974,7 @@ export default function Expenses() {
               {selectedExpense.receiptUrl && (
                 <div>
                   <p className="text-xs text-muted-foreground uppercase font-bold mb-2">Receipt</p>
-                  <a href={selectedExpense.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-primary underline text-sm">
+                  <a href={selectedExpense.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 underline text-sm">
                     View Receipt
                   </a>
                 </div>
@@ -974,9 +986,9 @@ export default function Expenses() {
                       <XCircle className="h-4 w-4 mr-2" />
                       Reject
                     </Button>
-                    <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={() => { approveExpense.mutate(selectedExpense.id); setDetailOpen(false); }}>
+                    <Button variant="default" onClick={() => { approveExpense.mutate({ id: selectedExpense.id, vendorId: selectedExpense.vendorId || undefined }); setDetailOpen(false); }}>
                       <CheckCircle className="h-4 w-4 mr-2" />
-                      Approve
+                      Approve & Pay
                     </Button>
                   </>
                 )}

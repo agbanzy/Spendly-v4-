@@ -27,18 +27,38 @@ import {
   Calendar,
   Eye,
   MoreHorizontal,
-  Mail
+  Mail,
+  CreditCard,
+  Copy,
+  Banknote
 } from "lucide-react";
 import type { Invoice } from "@shared/schema";
+
+interface VirtualAccount {
+  id: string;
+  accountNumber: string;
+  bankName: string;
+  accountName: string;
+  provider: string;
+  currency: string;
+}
 
 export default function InvoicesPage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [isViewOpen, setIsViewOpen] = useState(false);
 
   const { data: invoices = [], isLoading } = useQuery<Invoice[]>({
     queryKey: ["/api/invoices"]
+  });
+
+  // Fetch company virtual accounts for payment details
+  const { data: virtualAccounts = [] } = useQuery<VirtualAccount[]>({
+    queryKey: ["/api/funding-sources"],
+    select: (data: any[]) => data.filter((f: any) => f.sourceType === "virtual_account")
   });
 
   const createInvoiceMutation = useMutation({
@@ -91,6 +111,19 @@ export default function InvoicesPage() {
     toast({
       title: "Invoice sent",
       description: `Invoice ${invoice.invoiceNumber} has been sent to ${invoice.client}.`
+    });
+  };
+
+  const handleViewInvoice = (invoice: Invoice) => {
+    setSelectedInvoice(invoice);
+    setIsViewOpen(true);
+  };
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    toast({
+      title: "Copied",
+      description: `${label} copied to clipboard.`
     });
   };
 
@@ -328,7 +361,7 @@ export default function InvoicesPage() {
                       </div>
                       {getStatusBadge(invoice.status)}
                       <div className="flex items-center gap-1">
-                        <Button variant="ghost" size="icon">
+                        <Button variant="ghost" size="icon" onClick={() => handleViewInvoice(invoice)} data-testid={`button-view-invoice-${invoice.id}`}>
                           <Eye className="h-4 w-4" />
                         </Button>
                         {invoice.status !== "paid" && (
@@ -388,6 +421,145 @@ export default function InvoicesPage() {
           </TabsContent>
         ))}
       </Tabs>
+
+      {/* View Invoice Dialog with Virtual Account Payment Details */}
+      <Dialog open={isViewOpen} onOpenChange={setIsViewOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Invoice Details
+            </DialogTitle>
+            <DialogDescription>
+              Invoice information and payment details
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedInvoice && (
+            <div className="space-y-6">
+              {/* Invoice Summary */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Invoice Number</p>
+                  <p className="font-medium">{selectedInvoice.invoiceNumber}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Status</p>
+                  {getStatusBadge(selectedInvoice.status)}
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Client</p>
+                  <p className="font-medium">{selectedInvoice.client}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Amount</p>
+                  <p className="text-xl font-bold">${selectedInvoice.amount.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Issued Date</p>
+                  <p className="font-medium">{selectedInvoice.issuedDate}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Due Date</p>
+                  <p className="font-medium">{selectedInvoice.dueDate}</p>
+                </div>
+              </div>
+
+              {/* Payment Details Section */}
+              {selectedInvoice.status !== "paid" && (
+                <div className="border-t pt-4">
+                  <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                    <Banknote className="h-4 w-4" />
+                    Payment Instructions
+                  </h4>
+                  
+                  {virtualAccounts.length > 0 ? (
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        Please transfer the exact amount to one of the following accounts:
+                      </p>
+                      
+                      {virtualAccounts.map((account: VirtualAccount) => (
+                        <Card key={account.id} className="bg-muted/50">
+                          <CardContent className="p-4">
+                            <div className="flex items-start justify-between">
+                              <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <CreditCard className="h-4 w-4 text-muted-foreground" />
+                                  <span className="font-medium">{account.bankName}</span>
+                                  <Badge variant="outline" className="text-xs">
+                                    {account.provider.toUpperCase()}
+                                  </Badge>
+                                </div>
+                                <div className="grid grid-cols-1 gap-1 text-sm">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-muted-foreground">Account Number:</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono font-medium">{account.accountNumber}</span>
+                                      <Button 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        onClick={() => copyToClipboard(account.accountNumber, 'Account number')}
+                                        data-testid={`button-copy-account-${account.id}`}
+                                      >
+                                        <Copy className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-muted-foreground">Account Name:</span>
+                                    <span className="font-medium">{account.accountName}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-muted-foreground">Currency:</span>
+                                    <span className="font-medium">{account.currency}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                      
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Reference: Include "{selectedInvoice.invoiceNumber}" in your payment reference
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="p-4 bg-muted/50 rounded-lg text-center">
+                      <p className="text-sm text-muted-foreground">
+                        Virtual account payment details are not available. 
+                        Contact the sender for alternative payment methods.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {selectedInvoice.status === "paid" && (
+                <div className="border-t pt-4">
+                  <div className="flex items-center gap-2 text-emerald-600">
+                    <CheckCircle2 className="h-5 w-5" />
+                    <span className="font-medium">This invoice has been paid</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsViewOpen(false)}>
+              Close
+            </Button>
+            {selectedInvoice && selectedInvoice.status !== "paid" && (
+              <Button onClick={() => handleSendInvoice(selectedInvoice)}>
+                <Mail className="h-4 w-4 mr-2" />
+                Send Invoice
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
