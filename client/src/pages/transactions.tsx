@@ -33,7 +33,7 @@ import {
   Wallet,
   Send,
 } from "lucide-react";
-import type { Transaction } from "@shared/schema";
+import type { Transaction, CompanySettings } from "@shared/schema";
 
 export default function Transactions() {
   const { toast } = useToast();
@@ -46,6 +46,18 @@ export default function Transactions() {
     amount: "",
     description: "",
   });
+
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ["/api/settings"],
+  });
+
+  const currencySymbols: Record<string, string> = {
+    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
+  };
+  const currencySymbol = currencySymbols[settings?.currency || "USD"] || "$";
+  const formatCurrency = (amount: number) => {
+    return `${currencySymbol}${amount.toLocaleString()}`;
+  };
 
   const { data: transactions, isLoading } = useQuery<Transaction[]>({
     queryKey: ["/api/transactions"],
@@ -82,8 +94,8 @@ export default function Transactions() {
     return matchesSearch && matchesType && matchesStatus;
   });
 
-  const totalInflow = transactions?.filter(tx => tx.type === "Deposit" || tx.type === "Funding").reduce((sum, tx) => sum + tx.amount, 0) || 0;
-  const totalOutflow = transactions?.filter(tx => tx.type !== "Deposit" && tx.type !== "Funding").reduce((sum, tx) => sum + tx.amount, 0) || 0;
+  const totalInflow = transactions?.filter(tx => tx.type === "Deposit" || tx.type === "Funding").reduce((sum, tx) => sum + Number(tx.amount), 0) || 0;
+  const totalOutflow = transactions?.filter(tx => tx.type !== "Deposit" && tx.type !== "Funding").reduce((sum, tx) => sum + Number(tx.amount), 0) || 0;
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
@@ -123,7 +135,7 @@ export default function Transactions() {
                 <ArrowDownRight className="h-4 w-4 text-emerald-600" />
               </div>
             </div>
-            {isLoading ? <Skeleton className="h-8 w-24" /> : <p className="text-2xl font-black text-emerald-600">+${totalInflow.toLocaleString()}</p>}
+            {isLoading ? <Skeleton className="h-8 w-24" /> : <p className="text-2xl font-black text-emerald-600">+{formatCurrency(totalInflow)}</p>}
             <p className="text-xs text-muted-foreground mt-1">Money received</p>
           </CardContent>
         </Card>
@@ -135,7 +147,7 @@ export default function Transactions() {
                 <ArrowUpRight className="h-4 w-4 text-red-600" />
               </div>
             </div>
-            {isLoading ? <Skeleton className="h-8 w-24" /> : <p className="text-2xl font-black text-red-600">-${totalOutflow.toLocaleString()}</p>}
+            {isLoading ? <Skeleton className="h-8 w-24" /> : <p className="text-2xl font-black text-red-600">-{formatCurrency(totalOutflow)}</p>}
             <p className="text-xs text-muted-foreground mt-1">Money spent</p>
           </CardContent>
         </Card>
@@ -222,7 +234,7 @@ export default function Transactions() {
                   </div>
                   <div className="text-right">
                     <p className={`text-base font-bold ${tx.type === 'Deposit' || tx.type === 'Funding' ? 'text-emerald-600 dark:text-emerald-400' : ''}`}>
-                      {tx.type === 'Deposit' || tx.type === 'Funding' ? '+' : '-'}${tx.amount.toLocaleString()}
+                      {tx.type === 'Deposit' || tx.type === 'Funding' ? '+' : '-'}{formatCurrency(Number(tx.amount))}
                     </p>
                     <Badge variant="secondary" className={`text-xs mt-1 ${
                       tx.status === 'Completed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
@@ -267,7 +279,7 @@ export default function Transactions() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="amount">Amount ($)</Label>
+              <Label htmlFor="amount">Amount ({currencySymbol})</Label>
               <Input id="amount" type="number" value={formData.amount} onChange={(e) => setFormData({ ...formData, amount: e.target.value })} placeholder="0.00" data-testid="input-transaction-amount" />
             </div>
             <div className="space-y-2">
