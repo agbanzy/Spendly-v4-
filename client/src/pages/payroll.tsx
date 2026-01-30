@@ -70,6 +70,9 @@ export default function PayrollPage() {
     bonus: "",
     deductions: "",
     payDate: new Date().toISOString().split('T')[0],
+    bankName: "",
+    accountNumber: "",
+    accountName: "",
   });
 
   const { data: settings } = useQuery<Settings>({
@@ -174,6 +177,9 @@ export default function PayrollPage() {
       bonus: "",
       deductions: "",
       payDate: new Date().toISOString().split('T')[0],
+      bankName: "",
+      accountNumber: "",
+      accountName: "",
     });
   };
 
@@ -186,6 +192,9 @@ export default function PayrollPage() {
       bonus: String(entry.bonus),
       deductions: String(entry.deductions),
       payDate: entry.payDate,
+      bankName: entry.bankName || "",
+      accountNumber: entry.accountNumber || "",
+      accountName: entry.accountName || "",
     });
     setIsAddEmployeeOpen(true);
   };
@@ -308,6 +317,8 @@ export default function PayrollPage() {
           <p>Department: ${selectedEntry.department}</p>
           <p>Employee ID: ${selectedEntry.employeeId}</p>
           <p>Pay Date: ${new Date(selectedEntry.payDate).toLocaleDateString()}</p>
+          ${selectedEntry.bankName ? `<p style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee;"><strong>Bank:</strong> ${selectedEntry.bankName}</p>` : ''}
+          ${selectedEntry.accountNumber ? `<p><strong>Account:</strong> ****${selectedEntry.accountNumber.slice(-4)}${selectedEntry.accountName ? ` (${selectedEntry.accountName})` : ''}</p>` : ''}
         </div>
         <div class="details">
           <div class="row">
@@ -520,6 +531,9 @@ export default function PayrollPage() {
                         <div>
                           <p className="font-medium">{entry.employeeName}</p>
                           <p className="text-sm text-muted-foreground">{entry.department}</p>
+                          {entry.bankName && (
+                            <p className="text-xs text-muted-foreground mt-0.5">{entry.bankName} {entry.accountNumber ? `• ****${entry.accountNumber.slice(-4)}` : ''}</p>
+                          )}
                         </div>
                       </div>
                       <div className="hidden md:flex items-center gap-8">
@@ -674,6 +688,15 @@ export default function PayrollPage() {
                   <CalendarDays className="h-4 w-4" />
                   <span>Pay Date: {new Date(selectedEntry.payDate).toLocaleDateString()}</span>
                 </div>
+                {selectedEntry.bankName && (
+                  <div className="mt-3 p-3 rounded-lg bg-muted/50">
+                    <p className="text-xs text-muted-foreground uppercase font-medium mb-1">Payment Details</p>
+                    <p className="text-sm font-medium">{selectedEntry.bankName}</p>
+                    {selectedEntry.accountNumber && (
+                      <p className="text-sm text-muted-foreground">****{selectedEntry.accountNumber.slice(-4)}{selectedEntry.accountName ? ` - ${selectedEntry.accountName}` : ''}</p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="rounded-lg border overflow-hidden">
@@ -755,6 +778,25 @@ export default function PayrollPage() {
               <Label htmlFor="payDate">Pay Date</Label>
               <Input id="payDate" type="date" value={formData.payDate} onChange={(e) => setFormData({ ...formData, payDate: e.target.value })} data-testid="input-pay-date" />
             </div>
+            
+            <div className="border-t pt-4 mt-4">
+              <h4 className="font-medium mb-3">Bank Account Details</h4>
+              <div className="grid gap-4 grid-cols-2">
+                <div className="space-y-2 col-span-2">
+                  <Label htmlFor="bankName">Bank Name (Payment Channel)</Label>
+                  <Input id="bankName" value={formData.bankName} onChange={(e) => setFormData({ ...formData, bankName: e.target.value })} placeholder="e.g., First Bank, GTBank, Chase" data-testid="input-bank-name" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="accountNumber">Account Number</Label>
+                  <Input id="accountNumber" value={formData.accountNumber} onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })} placeholder="0123456789" data-testid="input-account-number" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="accountName">Account Name</Label>
+                  <Input id="accountName" value={formData.accountName} onChange={(e) => setFormData({ ...formData, accountName: e.target.value })} placeholder="John Doe" data-testid="input-account-name" />
+                </div>
+              </div>
+            </div>
+            
             <div className="p-3 bg-muted rounded-lg">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Net Pay</span>

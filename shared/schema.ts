@@ -202,6 +202,9 @@ export const payrollEntries = pgTable("payroll_entries", {
   netPay: decimal("net_pay", { precision: 12, scale: 2 }).notNull(),
   status: text("status").notNull().default('pending'),
   payDate: text("pay_date").notNull(),
+  bankName: text("bank_name"),
+  accountNumber: text("account_number"),
+  accountName: text("account_name"),
 });
 
 // Invoices table
