@@ -3,7 +3,17 @@
 ## Overview
 Spendly is a comprehensive financial operating system for high-growth teams. It provides expense tracking, budget management, virtual cards, team management, payroll, invoicing, vendor management, and transaction monitoring in a unified platform.
 
-## Recent Changes (January 29, 2026)
+## Recent Changes (January 30, 2026)
+- **Stripe Identity KYC**: Integrated Stripe Identity for document and selfie verification (US/Europe users)
+- **Paystack BVN Verification**: Bank Verification Number verification for African users (Nigeria, Ghana, Kenya, South Africa)
+- **Multi-Region KYC**: Auto-selects verification method based on user's country
+- **Admin Dashboard**: System metrics, user distribution, activity monitoring, system health
+- **User Management**: Role-based access (Owner, Admin, Manager, Editor, Employee, Viewer), permissions management
+- **Audit Logs**: Activity tracking with filters, CSV export, IP/user agent logging
+- **Organization Settings**: Company profile, currency, timezone, fiscal year configuration
+- **Security Settings**: MFA, session timeout, password policies, API access controls
+
+## Previous Changes (January 29, 2026)
 - **Team Management**: Complete team member CRUD with roles, status toggling (active/inactive), and department assignment
 - **Department Management**: Full department CRUD with name, description, budget, color picker, and department head assignment
 - **Payroll System**: Complete payroll with add/edit/delete employees, batch processing, individual payments, payslip view/print, CSV/JSON export

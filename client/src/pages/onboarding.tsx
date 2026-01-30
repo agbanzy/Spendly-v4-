@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -14,7 +14,8 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { 
   User, Building2, FileCheck, Upload, CheckCircle2, 
-  ArrowRight, ArrowLeft, Shield, Globe, Loader2 
+  ArrowRight, ArrowLeft, Shield, Globe, Loader2, 
+  CreditCard, Landmark, ExternalLink, ShieldCheck
 } from "lucide-react";
 
 const COUNTRIES = [
@@ -84,6 +85,19 @@ const STEPS = [
   { id: 5, title: "Complete", icon: CheckCircle2, description: "Review and submit" },
 ];
 
+// Countries that support Paystack BVN verification
+const PAYSTACK_COUNTRIES = ["NG", "GH", "KE", "ZA"];
+// Countries that support Stripe Identity verification
+const STRIPE_COUNTRIES = ["US", "GB", "CA", "DE", "FR", "AU"];
+
+interface Bank {
+  id: number;
+  name: string;
+  code: string;
+  slug: string;
+  country: string;
+}
+
 export default function Onboarding() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
@@ -91,6 +105,18 @@ export default function Onboarding() {
   const queryClient = useQueryClient();
   const [currentStep, setCurrentStep] = useState(1);
   const [isUploading, setIsUploading] = useState(false);
+  
+  // KYC verification state
+  const [verificationMethod, setVerificationMethod] = useState<'stripe' | 'paystack' | 'manual'>('manual');
+  const [stripeSessionId, setStripeSessionId] = useState<string | null>(null);
+  const [stripeVerificationUrl, setStripeVerificationUrl] = useState<string | null>(null);
+  const [stripeVerificationStatus, setStripeVerificationStatus] = useState<string | null>(null);
+  const [bvnNumber, setBvnNumber] = useState('');
+  const [selectedBank, setSelectedBank] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [bvnVerified, setBvnVerified] = useState(false);
+  const [bvnVerifying, setBvnVerifying] = useState(false);
+  const [banks, setBanks] = useState<Bank[]>([]);
   
   const [formData, setFormData] = useState<FormData>({
     firstName: "",
@@ -200,6 +226,197 @@ export default function Onboarding() {
       setIsUploading(false);
     }
   }, [toast]);
+
+  // Load banks for Paystack BVN verification
+  useEffect(() => {
+    if (PAYSTACK_COUNTRIES.includes(formData.country)) {
+      fetch('/api/kyc/paystack/banks')
+        .then(res => res.json())
+        .then(data => {
+          if (data.success && data.banks) {
+            setBanks(data.banks);
+          }
+        })
+        .catch(console.error);
+    }
+  }, [formData.country]);
+
+  // Auto-select verification method based on country
+  useEffect(() => {
+    if (STRIPE_COUNTRIES.includes(formData.country)) {
+      setVerificationMethod('stripe');
+    } else if (PAYSTACK_COUNTRIES.includes(formData.country)) {
+      setVerificationMethod('paystack');
+    } else {
+      setVerificationMethod('manual');
+    }
+  }, [formData.country]);
+
+  // Create Stripe Identity verification session
+  const handleStripeVerification = async () => {
+    if (!user?.email) {
+      toast({ title: "Error", description: "User email not found", variant: "destructive" });
+      return;
+    }
+    
+    try {
+      const res = await apiRequest("POST", "/api/kyc/stripe/create-session", {
+        userId: user.id,
+        email: user.email,
+        returnUrl: `${window.location.origin}/onboarding?step=4&verified=true`,
+      });
+      
+      const data = await res.json();
+      
+      if (data.url) {
+        setStripeSessionId(data.sessionId);
+        setStripeVerificationUrl(data.url);
+        setStripeVerificationStatus(data.status);
+        
+        // Open Stripe Identity in new tab
+        window.open(data.url, '_blank');
+        
+        toast({
+          title: "Verification Started",
+          description: "Complete the verification in the new window. Return here when done.",
+        });
+      } else {
+        throw new Error(data.error || "Failed to create verification session");
+      }
+    } catch (error: any) {
+      toast({
+        title: "Verification Failed",
+        description: error.message || "Failed to start identity verification",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Check Stripe verification status
+  const checkStripeStatus = async () => {
+    if (!stripeSessionId) return;
+    
+    try {
+      const res = await fetch(`/api/kyc/stripe/status/${stripeSessionId}`);
+      const data = await res.json();
+      
+      setStripeVerificationStatus(data.status);
+      
+      if (data.status === 'verified') {
+        toast({
+          title: "Verification Complete",
+          description: "Your identity has been verified successfully!",
+        });
+      } else if (data.status === 'requires_input') {
+        toast({
+          title: "Additional Info Required",
+          description: "Please complete all verification steps.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Failed to check verification status:', error);
+    }
+  };
+
+  // Paystack BVN verification
+  const handleBvnVerification = async () => {
+    if (!bvnNumber || bvnNumber.length !== 11) {
+      toast({ 
+        title: "Invalid BVN", 
+        description: "Please enter a valid 11-digit BVN", 
+        variant: "destructive" 
+      });
+      return;
+    }
+    
+    setBvnVerifying(true);
+    
+    try {
+      const res = await apiRequest("POST", "/api/kyc/paystack/resolve-bvn", {
+        bvn: bvnNumber,
+        accountNumber: accountNumber || undefined,
+        bankCode: selectedBank || undefined,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+      });
+      
+      const data = await res.json();
+      
+      if (data.success && data.verified) {
+        setBvnVerified(true);
+        toast({
+          title: "BVN Verified",
+          description: "Your Bank Verification Number has been verified successfully!",
+        });
+        
+        // Auto-fill verified data
+        if (data.data) {
+          setFormData(prev => ({
+            ...prev,
+            firstName: data.data.firstName || prev.firstName,
+            lastName: data.data.lastName || prev.lastName,
+            dateOfBirth: data.data.dateOfBirth || prev.dateOfBirth,
+            phoneNumber: data.data.mobile || prev.phoneNumber,
+          }));
+        }
+      } else {
+        toast({
+          title: "Verification Failed",
+          description: data.error || "BVN verification failed. Please check your details.",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Verification Error",
+        description: error.message || "Failed to verify BVN",
+        variant: "destructive",
+      });
+    } finally {
+      setBvnVerifying(false);
+    }
+  };
+
+  // Validate bank account
+  const handleValidateAccount = async () => {
+    if (!accountNumber || !selectedBank) {
+      toast({ 
+        title: "Missing Info", 
+        description: "Please enter account number and select a bank", 
+        variant: "destructive" 
+      });
+      return;
+    }
+    
+    try {
+      const res = await apiRequest("POST", "/api/kyc/paystack/validate-account", {
+        accountNumber,
+        bankCode: selectedBank,
+      });
+      
+      const data = await res.json();
+      
+      if (data.success) {
+        toast({
+          title: "Account Verified",
+          description: `Account name: ${data.accountName}`,
+        });
+      } else {
+        toast({
+          title: "Validation Failed",
+          description: data.error || "Could not validate account",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to validate account",
+        variant: "destructive",
+      });
+    }
+  };
 
   const updateField = (field: keyof FormData, value: string | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -581,49 +798,253 @@ export default function Onboarding() {
               <div className="space-y-6">
                 <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
                   <p className="text-sm text-amber-800 dark:text-amber-200">
-                    Please provide a valid government-issued ID. Ensure all information is clearly visible.
+                    Verify your identity to unlock all features. Choose a verification method based on your region.
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="idType">ID Type *</Label>
-                    <Select value={formData.idType} onValueChange={(v) => updateField('idType', v)}>
-                      <SelectTrigger data-testid="select-id-type">
-                        <SelectValue placeholder="Select ID type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ID_TYPES.map(type => (
-                          <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="idNumber">ID Number *</Label>
-                    <Input
-                      id="idNumber"
-                      value={formData.idNumber}
-                      onChange={(e) => updateField('idNumber', e.target.value)}
-                      placeholder="Enter ID number"
-                      data-testid="input-id-number"
-                    />
+                {/* Verification Method Selection */}
+                <div className="space-y-4">
+                  <h4 className="font-medium flex items-center gap-2">
+                    <ShieldCheck className="h-5 w-5 text-indigo-600" />
+                    Choose Verification Method
+                  </h4>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Stripe Identity - US/Europe */}
+                    {STRIPE_COUNTRIES.includes(formData.country) && (
+                      <Card 
+                        className={`cursor-pointer hover-elevate ${verificationMethod === 'stripe' ? 'border-indigo-500 ring-2 ring-indigo-200' : ''}`}
+                        onClick={() => setVerificationMethod('stripe')}
+                        data-testid="card-stripe-verification"
+                      >
+                        <CardContent className="p-4 text-center">
+                          <CreditCard className="h-8 w-8 mx-auto mb-2 text-indigo-600" />
+                          <h5 className="font-medium">Stripe Identity</h5>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Secure ID & selfie verification
+                          </p>
+                          {stripeVerificationStatus === 'verified' && (
+                            <Badge className="mt-2 bg-green-600">Verified</Badge>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Paystack BVN - Africa */}
+                    {PAYSTACK_COUNTRIES.includes(formData.country) && (
+                      <Card 
+                        className={`cursor-pointer hover-elevate ${verificationMethod === 'paystack' ? 'border-indigo-500 ring-2 ring-indigo-200' : ''}`}
+                        onClick={() => setVerificationMethod('paystack')}
+                        data-testid="card-paystack-verification"
+                      >
+                        <CardContent className="p-4 text-center">
+                          <Landmark className="h-8 w-8 mx-auto mb-2 text-green-600" />
+                          <h5 className="font-medium">BVN Verification</h5>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Bank Verification Number
+                          </p>
+                          {bvnVerified && (
+                            <Badge className="mt-2 bg-green-600">Verified</Badge>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Manual Upload - All regions */}
+                    <Card 
+                      className={`cursor-pointer hover-elevate ${verificationMethod === 'manual' ? 'border-indigo-500 ring-2 ring-indigo-200' : ''}`}
+                      onClick={() => setVerificationMethod('manual')}
+                      data-testid="card-manual-verification"
+                    >
+                      <CardContent className="p-4 text-center">
+                        <Upload className="h-8 w-8 mx-auto mb-2 text-slate-600" />
+                        <h5 className="font-medium">Manual Upload</h5>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Upload ID documents
+                        </p>
+                      </CardContent>
+                    </Card>
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="idExpiryDate">ID Expiry Date</Label>
-                  <Input
-                    id="idExpiryDate"
-                    type="date"
-                    value={formData.idExpiryDate}
-                    onChange={(e) => updateField('idExpiryDate', e.target.value)}
-                    data-testid="input-id-expiry"
-                  />
-                </div>
+                {/* Stripe Identity Section */}
+                {verificationMethod === 'stripe' && (
+                  <div className="space-y-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-medium">Stripe Identity Verification</h4>
+                        <p className="text-sm text-muted-foreground">
+                          Verify your identity with a government-issued ID and selfie
+                        </p>
+                      </div>
+                      {stripeVerificationStatus && (
+                        <Badge variant={stripeVerificationStatus === 'verified' ? 'default' : 'secondary'}>
+                          {stripeVerificationStatus}
+                        </Badge>
+                      )}
+                    </div>
+                    
+                    <div className="flex gap-2">
+                      <Button 
+                        onClick={handleStripeVerification}
+                        className="flex items-center gap-2"
+                        data-testid="button-start-stripe-verification"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        Start Verification
+                      </Button>
+                      
+                      {stripeSessionId && (
+                        <Button 
+                          variant="outline" 
+                          onClick={checkStripeStatus}
+                          data-testid="button-check-stripe-status"
+                        >
+                          Check Status
+                        </Button>
+                      )}
+                    </div>
+                    
+                    {stripeVerificationUrl && (
+                      <p className="text-xs text-muted-foreground">
+                        A new window has opened for verification. Complete the process and return here.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Paystack BVN Section */}
+                {verificationMethod === 'paystack' && (
+                  <div className="space-y-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                    <div>
+                      <h4 className="font-medium">Bank Verification Number (BVN)</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Enter your 11-digit BVN for instant verification
+                      </p>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="bvn">BVN Number *</Label>
+                        <Input
+                          id="bvn"
+                          value={bvnNumber}
+                          onChange={(e) => setBvnNumber(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                          placeholder="11-digit BVN"
+                          maxLength={11}
+                          data-testid="input-bvn"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          {bvnNumber.length}/11 digits
+                        </p>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <Label htmlFor="bank">Bank (Optional)</Label>
+                        <Select value={selectedBank} onValueChange={setSelectedBank}>
+                          <SelectTrigger data-testid="select-bank">
+                            <SelectValue placeholder="Select bank" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {banks.map(bank => (
+                              <SelectItem key={bank.code} value={bank.code}>{bank.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="accountNumber">Account Number (Optional)</Label>
+                      <Input
+                        id="accountNumber"
+                        value={accountNumber}
+                        onChange={(e) => setAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                        placeholder="10-digit account number"
+                        maxLength={10}
+                        data-testid="input-account-number"
+                      />
+                    </div>
+                    
+                    <div className="flex gap-2">
+                      <Button 
+                        onClick={handleBvnVerification}
+                        disabled={bvnVerifying || bvnNumber.length !== 11}
+                        className="flex items-center gap-2"
+                        data-testid="button-verify-bvn"
+                      >
+                        {bvnVerifying ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="h-4 w-4" />
+                        )}
+                        Verify BVN
+                      </Button>
+                      
+                      {selectedBank && accountNumber && (
+                        <Button 
+                          variant="outline" 
+                          onClick={handleValidateAccount}
+                          data-testid="button-validate-account"
+                        >
+                          Validate Account
+                        </Button>
+                      )}
+                    </div>
+                    
+                    {bvnVerified && (
+                      <div className="flex items-center gap-2 text-green-600">
+                        <CheckCircle2 className="h-5 w-5" />
+                        <span className="font-medium">BVN verified successfully!</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Manual Upload Section */}
+                {verificationMethod === 'manual' && (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="idType">ID Type *</Label>
+                        <Select value={formData.idType} onValueChange={(v) => updateField('idType', v)}>
+                          <SelectTrigger data-testid="select-id-type">
+                            <SelectValue placeholder="Select ID type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ID_TYPES.map(type => (
+                              <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="idNumber">ID Number *</Label>
+                        <Input
+                          id="idNumber"
+                          value={formData.idNumber}
+                          onChange={(e) => updateField('idNumber', e.target.value)}
+                          placeholder="Enter ID number"
+                          data-testid="input-id-number"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="idExpiryDate">ID Expiry Date</Label>
+                      <Input
+                        id="idExpiryDate"
+                        type="date"
+                        value={formData.idExpiryDate}
+                        onChange={(e) => updateField('idExpiryDate', e.target.value)}
+                        data-testid="input-id-expiry"
+                      />
+                    </div>
+                  </>
+                )}
 
                 <div className="space-y-4">
-                  <h4 className="font-medium">Upload Documents (Optional)</h4>
+                  <h4 className="font-medium">Upload Documents {verificationMethod === 'manual' ? '(Required)' : '(Optional)'}</h4>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">

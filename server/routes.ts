@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import express from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { z } from "zod";
@@ -2529,6 +2530,260 @@ export async function registerRoutes(
       res.json({ url: fileUrl, filename: req.file.filename });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to upload document" });
+    }
+  });
+
+  // ==================== STRIPE IDENTITY KYC ====================
+
+  // Create Stripe Identity verification session
+  app.post("/api/kyc/stripe/create-session", async (req, res) => {
+    try {
+      const { userId, email, returnUrl } = req.body;
+      if (!userId || !email) {
+        return res.status(400).json({ error: "userId and email are required" });
+      }
+
+      const Stripe = await import('stripe');
+      const stripe = new Stripe.default(process.env.STRIPE_SECRET_KEY || '', {
+        apiVersion: '2024-12-18.acacia' as any,
+      });
+
+      // Create Identity verification session
+      const verificationSession = await stripe.identity.verificationSessions.create({
+        type: 'document',
+        metadata: {
+          userId,
+          email,
+        },
+        options: {
+          document: {
+            allowed_types: ['passport', 'driving_license', 'id_card'],
+            require_id_number: true,
+            require_matching_selfie: true,
+          },
+        },
+        return_url: returnUrl || `${req.protocol}://${req.get('host')}/onboarding?step=verification`,
+      });
+
+      res.json({
+        sessionId: verificationSession.id,
+        clientSecret: verificationSession.client_secret,
+        url: verificationSession.url,
+        status: verificationSession.status,
+      });
+    } catch (error: any) {
+      console.error('Stripe Identity error:', error);
+      res.status(500).json({ error: error.message || "Failed to create verification session" });
+    }
+  });
+
+  // Check Stripe Identity verification status
+  app.get("/api/kyc/stripe/status/:sessionId", async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      
+      const Stripe = await import('stripe');
+      const stripe = new Stripe.default(process.env.STRIPE_SECRET_KEY || '', {
+        apiVersion: '2024-12-18.acacia' as any,
+      });
+
+      const verificationSession = await stripe.identity.verificationSessions.retrieve(sessionId);
+
+      res.json({
+        id: verificationSession.id,
+        status: verificationSession.status,
+        lastError: verificationSession.last_error,
+        verifiedOutputs: verificationSession.verified_outputs,
+      });
+    } catch (error: any) {
+      console.error('Stripe Identity status error:', error);
+      res.status(500).json({ error: error.message || "Failed to get verification status" });
+    }
+  });
+
+  // Stripe Identity webhook handler
+  app.post("/api/kyc/stripe/webhook", express.raw({ type: 'application/json' }), async (req, res) => {
+    try {
+      const Stripe = await import('stripe');
+      const stripe = new Stripe.default(process.env.STRIPE_SECRET_KEY || '', {
+        apiVersion: '2024-12-18.acacia' as any,
+      });
+
+      const sig = req.headers['stripe-signature'] as string;
+      const webhookSecret = process.env.STRIPE_IDENTITY_WEBHOOK_SECRET || '';
+      
+      let event;
+      try {
+        event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+      } catch (err: any) {
+        console.log('Webhook signature verification failed:', err.message);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
+      }
+
+      // Handle verification events
+      if (event.type === 'identity.verification_session.verified') {
+        const session = event.data.object as any;
+        const userId = session.metadata?.userId;
+        if (userId) {
+          // Update KYC status to approved
+          await storage.updateUserProfile(userId, {
+            kycStatus: 'approved',
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } else if (event.type === 'identity.verification_session.requires_input') {
+        const session = event.data.object as any;
+        const userId = session.metadata?.userId;
+        if (userId) {
+          await storage.updateUserProfile(userId, {
+            kycStatus: 'pending_review',
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+
+      res.json({ received: true });
+    } catch (error: any) {
+      console.error('Stripe Identity webhook error:', error);
+      res.status(500).json({ error: error.message || "Webhook processing failed" });
+    }
+  });
+
+  // ==================== PAYSTACK KYC (BVN VERIFICATION) ====================
+
+  // Resolve BVN (Bank Verification Number) - Nigeria
+  app.post("/api/kyc/paystack/resolve-bvn", async (req, res) => {
+    try {
+      const { bvn, accountNumber, bankCode, firstName, lastName } = req.body;
+      if (!bvn) {
+        return res.status(400).json({ error: "BVN is required" });
+      }
+
+      const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
+      if (!paystackSecretKey) {
+        return res.status(500).json({ error: "Paystack secret key not configured" });
+      }
+
+      // Resolve BVN
+      const response = await fetch(`https://api.paystack.co/bvn/match`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${paystackSecretKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          bvn,
+          account_number: accountNumber,
+          bank_code: bankCode,
+          first_name: firstName,
+          last_name: lastName,
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (data.status) {
+        res.json({
+          success: true,
+          verified: data.data?.is_blacklisted === false,
+          data: {
+            firstName: data.data?.first_name,
+            lastName: data.data?.last_name,
+            dateOfBirth: data.data?.dob,
+            mobile: data.data?.mobile,
+          }
+        });
+      } else {
+        res.status(400).json({ 
+          success: false, 
+          error: data.message || "BVN verification failed" 
+        });
+      }
+    } catch (error: any) {
+      console.error('Paystack BVN error:', error);
+      res.status(500).json({ error: error.message || "Failed to verify BVN" });
+    }
+  });
+
+  // Validate account with Paystack
+  app.post("/api/kyc/paystack/validate-account", async (req, res) => {
+    try {
+      const { accountNumber, bankCode } = req.body;
+      if (!accountNumber || !bankCode) {
+        return res.status(400).json({ error: "Account number and bank code are required" });
+      }
+
+      const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
+      if (!paystackSecretKey) {
+        return res.status(500).json({ error: "Paystack secret key not configured" });
+      }
+
+      const response = await fetch(
+        `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${paystackSecretKey}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+      
+      if (data.status) {
+        res.json({
+          success: true,
+          accountName: data.data?.account_name,
+          accountNumber: data.data?.account_number,
+          bankId: data.data?.bank_id,
+        });
+      } else {
+        res.status(400).json({ 
+          success: false, 
+          error: data.message || "Account validation failed" 
+        });
+      }
+    } catch (error: any) {
+      console.error('Paystack account validation error:', error);
+      res.status(500).json({ error: error.message || "Failed to validate account" });
+    }
+  });
+
+  // Get list of banks (for BVN verification)
+  app.get("/api/kyc/paystack/banks", async (req, res) => {
+    try {
+      const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
+      if (!paystackSecretKey) {
+        return res.status(500).json({ error: "Paystack secret key not configured" });
+      }
+
+      const response = await fetch('https://api.paystack.co/bank', {
+        headers: {
+          'Authorization': `Bearer ${paystackSecretKey}`,
+        },
+      });
+
+      const data = await response.json();
+      
+      if (data.status) {
+        res.json({
+          success: true,
+          banks: data.data?.map((bank: any) => ({
+            id: bank.id,
+            name: bank.name,
+            code: bank.code,
+            slug: bank.slug,
+            country: bank.country,
+          })),
+        });
+      } else {
+        res.status(400).json({ 
+          success: false, 
+          error: data.message || "Failed to fetch banks" 
+        });
+      }
+    } catch (error: any) {
+      console.error('Paystack banks error:', error);
+      res.status(500).json({ error: error.message || "Failed to fetch banks" });
     }
   });
 
