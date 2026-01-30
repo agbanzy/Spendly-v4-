@@ -70,15 +70,17 @@ export default function Cards() {
   const currency = settings?.currency || "USD";
   const currencySymbol = currencySymbols[currency] || "$";
   
-  const formatCurrency = (amount: number | string) => {
+  const formatCurrency = (amount: number | string, cardCurrency?: string) => {
     const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
-    return `${currencySymbol}${num.toLocaleString()}`;
+    const symbol = cardCurrency ? (currencySymbols[cardCurrency] || '$') : currencySymbol;
+    return `${symbol}${num.toLocaleString()}`;
   };
   const [formData, setFormData] = useState({
     name: "",
     limit: "",
     type: "Visa",
     color: "indigo",
+    currency: currency,
   });
   
   const { data: cards, isLoading } = useQuery<VirtualCard[]>({
@@ -143,7 +145,7 @@ export default function Cards() {
   });
 
   const resetForm = () => {
-    setFormData({ name: "", limit: "", type: "Visa", color: "indigo" });
+    setFormData({ name: "", limit: "", type: "Visa", color: "indigo", currency: currency });
   };
 
   const openEditDialog = (card: VirtualCard) => {
@@ -153,13 +155,14 @@ export default function Cards() {
       limit: String(card.limit),
       type: card.type,
       color: card.color,
+      currency: card.currency || currency,
     });
     setIsOpen(true);
   };
 
   const handleSubmit = () => {
     if (editingCard) {
-      updateMutation.mutate({ id: editingCard.id, data: { name: formData.name, limit: parseFloat(formData.limit), type: formData.type as 'Visa' | 'Mastercard', color: formData.color } });
+      updateMutation.mutate({ id: editingCard.id, data: { name: formData.name, limit: parseFloat(formData.limit), type: formData.type as 'Visa' | 'Mastercard', color: formData.color, currency: formData.currency } });
     } else {
       createMutation.mutate(formData);
     }
@@ -278,14 +281,15 @@ export default function Cards() {
                   <div className="flex items-end justify-between">
                     <div>
                       <p className="text-xs opacity-60 uppercase">Balance</p>
-                      <p className="text-xl font-bold">{formatCurrency(card.balance)}</p>
+                      <p className="text-xl font-bold">{formatCurrency(card.balance, card.currency)}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-xs opacity-60 uppercase">Limit</p>
-                      <p className="text-sm font-bold">{formatCurrency(card.limit)}</p>
+                      <p className="text-sm font-bold">{formatCurrency(card.limit, card.currency)}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <p className="text-lg font-bold uppercase">{card.type}</p>
+                      <span className="text-xs opacity-60">{card.currency}</span>
                     </div>
                   </div>
                 </div>
@@ -317,9 +321,26 @@ export default function Cards() {
               <Label htmlFor="name">Card Name</Label>
               <Input id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="e.g., Marketing Team" data-testid="input-card-name" />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="limit">Spending Limit ($)</Label>
-              <Input id="limit" type="number" value={formData.limit} onChange={(e) => setFormData({ ...formData, limit: e.target.value })} placeholder="0.00" data-testid="input-card-limit" />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="currency">Currency</Label>
+                <Select value={formData.currency} onValueChange={(value) => setFormData({ ...formData, currency: value })}>
+                  <SelectTrigger data-testid="select-card-currency"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="USD">USD ($)</SelectItem>
+                    <SelectItem value="EUR">EUR (€)</SelectItem>
+                    <SelectItem value="GBP">GBP (£)</SelectItem>
+                    <SelectItem value="NGN">NGN (₦)</SelectItem>
+                    <SelectItem value="KES">KES (KSh)</SelectItem>
+                    <SelectItem value="GHS">GHS (₵)</SelectItem>
+                    <SelectItem value="ZAR">ZAR (R)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="limit">Spending Limit ({currencySymbols[formData.currency] || '$'})</Label>
+                <Input id="limit" type="number" value={formData.limit} onChange={(e) => setFormData({ ...formData, limit: e.target.value })} placeholder="0.00" data-testid="input-card-limit" />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
