@@ -623,34 +623,6 @@ export default function Settings() {
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
-            <CreditCard className="h-5 w-5 text-primary" />
-            <CardTitle>Billing & Plan</CardTitle>
-          </div>
-          <CardDescription>
-            Manage your subscription and payment methods.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
-            <div>
-              <div className="flex items-center gap-2">
-                <p className="font-bold">Standard Plan</p>
-                <Badge className="bg-primary">Current</Badge>
-              </div>
-              <p className="text-sm text-muted-foreground mt-1">
-                $29/month • Billed monthly
-              </p>
-            </div>
-            <Button variant="outline" data-testid="button-manage-plan">
-              Manage Plan
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
             <HelpCircle className="h-5 w-5 text-primary" />
             <CardTitle>Help & Support</CardTitle>
           </div>

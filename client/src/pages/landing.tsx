@@ -108,7 +108,6 @@ export default function LandingPage() {
             </Link>
             <nav className="hidden md:flex items-center gap-6">
               <a href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Features</a>
-              <a href="#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Pricing</a>
               <a href="#testimonials" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Testimonials</a>
             </nav>
           </div>
@@ -294,70 +293,6 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="pricing" className="py-20 bg-muted/30">
-          <div className="container mx-auto px-4">
-            <div className="text-center mb-12">
-              <h2 className="text-3xl font-bold mb-4">Simple, transparent pricing</h2>
-              <p className="text-lg text-muted-foreground">
-                Start free, scale as you grow. No hidden fees.
-              </p>
-            </div>
-            <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-              <Card className="hover-elevate">
-                <CardContent className="p-6">
-                  <div className="text-lg font-semibold mb-2">Starter</div>
-                  <div className="text-3xl font-bold mb-4">Free</div>
-                  <p className="text-muted-foreground mb-6">For small teams getting started</p>
-                  <ul className="space-y-3 mb-6">
-                    {["Up to 5 team members", "10 virtual cards", "Basic analytics", "Email support"].map((item, i) => (
-                      <li key={i} className="flex items-center gap-2 text-sm">
-                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
-                  <Button variant="outline" className="w-full">Get Started</Button>
-                </CardContent>
-              </Card>
-              <Card className="hover-elevate border-indigo-600 border-2 relative">
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <Badge>Most Popular</Badge>
-                </div>
-                <CardContent className="p-6">
-                  <div className="text-lg font-semibold mb-2">Pro</div>
-                  <div className="text-3xl font-bold mb-4">$49<span className="text-lg font-normal text-muted-foreground">/mo</span></div>
-                  <p className="text-muted-foreground mb-6">For growing teams</p>
-                  <ul className="space-y-3 mb-6">
-                    {["Up to 25 team members", "Unlimited virtual cards", "Advanced analytics", "Priority support", "Custom approval workflows"].map((item, i) => (
-                      <li key={i} className="flex items-center gap-2 text-sm">
-                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
-                  <Button className="w-full">Start Free Trial</Button>
-                </CardContent>
-              </Card>
-              <Card className="hover-elevate">
-                <CardContent className="p-6">
-                  <div className="text-lg font-semibold mb-2">Enterprise</div>
-                  <div className="text-3xl font-bold mb-4">Custom</div>
-                  <p className="text-muted-foreground mb-6">For large organizations</p>
-                  <ul className="space-y-3 mb-6">
-                    {["Unlimited team members", "Unlimited everything", "Custom integrations", "Dedicated support", "SLA guarantees"].map((item, i) => (
-                      <li key={i} className="flex items-center gap-2 text-sm">
-                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
-                  <Button variant="outline" className="w-full">Contact Sales</Button>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        </section>
-
         <section className="py-20 bg-gradient-to-br from-indigo-600 to-indigo-800 text-white">
           <div className="container mx-auto px-4 text-center">
             <h2 className="text-3xl md:text-4xl font-bold mb-4">
@@ -408,7 +343,7 @@ export default function LandingPage() {
               <ul className="space-y-2 text-sm text-muted-foreground">
                 <li><a href="#testimonials" className="hover:text-foreground transition-colors">About</a></li>
                 <li><a href="#testimonials" className="hover:text-foreground transition-colors">Blog</a></li>
-                <li><a href="#pricing" className="hover:text-foreground transition-colors">Pricing</a></li>
+                <li><a href="#features" className="hover:text-foreground transition-colors">Features</a></li>
                 <li><Link href="/signup"><span className="hover:text-foreground transition-colors cursor-pointer">Get Started</span></Link></li>
               </ul>
             </div>
