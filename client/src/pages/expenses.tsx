@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useSearch } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -72,6 +73,7 @@ const categories = [
 ];
 
 export default function Expenses() {
+  const searchParams = useSearch();
   const [open, setOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -87,6 +89,16 @@ export default function Expenses() {
   const [isUploading, setIsUploading] = useState(false);
   const [selectedVendorId, setSelectedVendorId] = useState<string>("");
   const { toast } = useToast();
+
+  // Handle quick action to open new expense dialog
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams);
+    const action = params.get('action');
+    if (action === 'new') {
+      setOpen(true);
+      window.history.replaceState({}, '', '/expenses');
+    }
+  }, [searchParams]);
 
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],

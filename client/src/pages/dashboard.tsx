@@ -81,6 +81,13 @@ export default function Dashboard() {
     const params = new URLSearchParams(searchParams);
     const paymentStatus = params.get('payment');
     const sessionId = params.get('session_id');
+    const action = params.get('action');
+    
+    // Handle quick action to open funding dialog
+    if (action === 'fund') {
+      setIsFundingOpen(true);
+      window.history.replaceState({}, '', '/dashboard');
+    }
     
     const handlePaymentCallback = async () => {
       if (paymentStatus === 'success' && sessionId) {
