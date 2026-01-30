@@ -30,9 +30,25 @@ import {
   Banknote,
   Database,
 } from "lucide-react";
-import type { TeamMember, Expense, AuditLog } from "@shared/schema";
+import type { TeamMember, Expense, AuditLog, CompanySettings } from "@shared/schema";
 
 export default function Admin() {
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ["/api/settings"],
+  });
+
+  // Currency formatting
+  const currencySymbols: Record<string, string> = {
+    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
+  };
+  const currency = settings?.currency || "USD";
+  const currencySymbol = currencySymbols[currency] || "$";
+  
+  const formatCurrency = (amount: number | string) => {
+    const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
+    return `${currencySymbol}${num.toLocaleString()}`;
+  };
+
   const { data: teamMembers, isLoading: loadingTeam } = useQuery<TeamMember[]>({
     queryKey: ["/api/team"],
   });
@@ -210,7 +226,7 @@ export default function Admin() {
                 {loadingExpenses ? (
                   <Skeleton className="h-7 w-16" />
                 ) : (
-                  <p className="text-2xl font-black">${stats.totalExpenseAmount.toLocaleString()}</p>
+                  <p className="text-2xl font-black">{formatCurrency(stats.totalExpenseAmount)}</p>
                 )}
               </div>
             </div>

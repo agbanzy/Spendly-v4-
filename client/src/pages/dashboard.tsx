@@ -88,7 +88,7 @@ export default function Dashboard() {
           const res = await apiRequest("POST", "/api/stripe/confirm-payment", { sessionId });
           const data = await res.json();
           if (data.success) {
-            toast({ title: "Payment successful!", description: `$${data.amount} has been added to your wallet.` });
+            toast({ title: "Payment successful!", description: `${currencySymbol}${data.amount} has been added to your wallet.` });
             queryClient.invalidateQueries({ queryKey: ["/api/balances"] });
             queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
           } else {
@@ -142,6 +142,18 @@ export default function Dashboard() {
 
   const countryCode = settings?.countryCode || "US";
   const isPaystack = isPaystackRegion(countryCode);
+
+  // Currency formatting
+  const currencySymbols: Record<string, string> = {
+    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
+  };
+  const currency = settings?.currency || "USD";
+  const currencySymbol = currencySymbols[currency] || "$";
+  
+  const formatCurrency = (amount: number | string) => {
+    const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
+    return `${currencySymbol}${num.toLocaleString()}`;
+  };
 
   const { data: banks } = useQuery<Bank[]>({
     queryKey: ["/api/payment/banks", countryCode],
@@ -205,7 +217,7 @@ export default function Dashboard() {
       if (fundingMethod !== 'card' || !data?.url) {
         queryClient.invalidateQueries({ queryKey: ["/api/balances"] });
         queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
-        toast({ title: "Wallet funded successfully", description: `$${fundingAmount} has been added to your wallet.` });
+        toast({ title: "Wallet funded successfully", description: `${currencySymbol}${fundingAmount} has been added to your wallet.` });
         setIsFundingOpen(false);
         setFundingAmount("");
       }
@@ -264,7 +276,7 @@ export default function Dashboard() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/balances"] });
       queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
-      toast({ title: "Money sent successfully", description: `$${sendMoneyData.amount} sent to ${accountValidation?.name || sendMoneyData.recipient}` });
+      toast({ title: "Money sent successfully", description: `${currencySymbol}${sendMoneyData.amount} sent to ${accountValidation?.name || sendMoneyData.recipient}` });
       setIsSendMoneyOpen(false);
       setSendMoneyData({ recipient: "", amount: "", note: "", bankCode: "" });
       setAccountValidation(null);
@@ -481,7 +493,7 @@ export default function Dashboard() {
               {balancesLoading ? <Skeleton className="h-14 w-64 bg-slate-800" /> : (
                 <h2 className="text-4xl md:text-6xl font-black tracking-tight" data-testid="text-total-balance">
                   {showBalance 
-                    ? `$${totalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    ? `${currencySymbol}${totalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                     : "••••••••"
                   }
                 </h2>
@@ -516,7 +528,7 @@ export default function Dashboard() {
             </div>
             {balancesLoading ? <Skeleton className="h-8 w-32" /> : (
               <p className="text-2xl font-black" data-testid="text-local-balance">
-                {showBalance ? `$${balances?.local.toLocaleString() || '0'}` : "••••"}
+                {showBalance ? formatCurrency(balances?.local || 0) : "••••"}
               </p>
             )}
             <p className="text-xs text-muted-foreground mt-1">{balances?.localCurrency || 'USD'}</p>
@@ -533,7 +545,7 @@ export default function Dashboard() {
             </div>
             {balancesLoading ? <Skeleton className="h-8 w-32" /> : (
               <p className="text-2xl font-black" data-testid="text-usd-balance">
-                {showBalance ? `$${balances?.usd.toLocaleString() || '0'}` : "••••"}
+                {showBalance ? formatCurrency(balances?.usd || 0) : "••••"}
               </p>
             )}
             <p className="text-xs text-muted-foreground mt-1">Global Treasury</p>
@@ -550,7 +562,7 @@ export default function Dashboard() {
             </div>
             {balancesLoading ? <Skeleton className="h-8 w-32" /> : (
               <p className="text-2xl font-black" data-testid="text-escrow-balance">
-                {showBalance ? `$${balances?.escrow.toLocaleString() || '0'}` : "••••"}
+                {showBalance ? formatCurrency(balances?.escrow || 0) : "••••"}
               </p>
             )}
             <p className="text-xs text-muted-foreground mt-1">Pending settlements</p>
@@ -671,7 +683,7 @@ export default function Dashboard() {
                   </div>
                   <div className="text-right">
                     <p className={`text-sm font-bold ${tx.type === 'Deposit' || tx.type === 'Funding' ? 'text-emerald-600 dark:text-emerald-400' : ''}`}>
-                      {tx.type === 'Deposit' || tx.type === 'Funding' ? '+' : '-'}${tx.amount.toLocaleString()}
+                      {tx.type === 'Deposit' || tx.type === 'Funding' ? '+' : '-'}{currencySymbol}{Number(tx.amount).toLocaleString()}
                     </p>
                     <Badge variant="secondary" className={`text-xs ${
                       tx.status === 'Completed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
@@ -705,7 +717,7 @@ export default function Dashboard() {
           <div className="space-y-4 py-4">
             <div className="p-4 bg-gradient-to-br from-primary/10 to-primary/5 rounded-xl border border-primary/20">
               <p className="text-xs text-muted-foreground mb-1">Current Balance</p>
-              <p className="text-2xl font-bold">${balances?.local.toLocaleString() || '0'}</p>
+              <p className="text-2xl font-bold">{formatCurrency(balances?.local || 0)}</p>
             </div>
             
             <div className="space-y-2">
@@ -734,7 +746,7 @@ export default function Dashboard() {
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="funding-amount">Amount to Add ($)</Label>
+              <Label htmlFor="funding-amount">Amount to Add ({currencySymbol})</Label>
               <Input 
                 id="funding-amount" 
                 type="number" 
@@ -816,7 +828,7 @@ export default function Dashboard() {
           <div className="space-y-4 py-4">
             <div className="p-4 bg-gradient-to-br from-primary/10 to-primary/5 rounded-xl border border-primary/20">
               <p className="text-xs text-muted-foreground mb-1">Available Balance</p>
-              <p className="text-2xl font-bold">${balances?.local.toLocaleString() || '0'}</p>
+              <p className="text-2xl font-bold">{formatCurrency(balances?.local || 0)}</p>
             </div>
             
             <div className="space-y-2">
@@ -890,7 +902,7 @@ export default function Dashboard() {
             <div className="grid grid-cols-4 gap-2">
               {[100, 500, 1000, "All"].map((amount) => (
                 <Button key={amount} variant="outline" size="sm" onClick={() => setWithdrawalAmount(amount === "All" ? String(balances?.local || 0) : String(amount))} className="text-xs font-bold">
-                  {amount === "All" ? "All" : `$${amount}`}
+                  {amount === "All" ? "All" : `${currencySymbol}${amount}`}
                 </Button>
               ))}
             </div>
@@ -925,7 +937,7 @@ export default function Dashboard() {
           <div className="space-y-4 py-4">
             <div className="p-4 bg-gradient-to-br from-primary/10 to-primary/5 rounded-xl border border-primary/20">
               <p className="text-xs text-muted-foreground mb-1">Available Balance</p>
-              <p className="text-2xl font-bold">${balances?.local.toLocaleString() || '0'}</p>
+              <p className="text-2xl font-bold">{formatCurrency(balances?.local || 0)}</p>
             </div>
             
             <div className="space-y-2">
@@ -1020,15 +1032,15 @@ export default function Dashboard() {
               <div className="p-4 bg-muted/50 rounded-xl space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Amount</span>
-                  <span className="font-bold">${parseFloat(sendMoneyData.amount).toFixed(2)}</span>
+                  <span className="font-bold">{currencySymbol}{parseFloat(sendMoneyData.amount || '0').toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Fee</span>
-                  <span className="font-bold text-emerald-600">$0.00</span>
+                  <span className="font-bold text-emerald-600">{currencySymbol}0.00</span>
                 </div>
                 <div className="border-t pt-2 flex justify-between">
                   <span className="font-bold">Total</span>
-                  <span className="font-bold text-primary">${parseFloat(sendMoneyData.amount).toFixed(2)}</span>
+                  <span className="font-bold text-primary">{currencySymbol}{parseFloat(sendMoneyData.amount || '0').toFixed(2)}</span>
                 </div>
               </div>
             )}

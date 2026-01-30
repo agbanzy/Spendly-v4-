@@ -61,7 +61,7 @@ import {
   DollarSign,
   FolderPlus,
 } from "lucide-react";
-import type { TeamMember, Department } from "@shared/schema";
+import type { TeamMember, Department, CompanySettings } from "@shared/schema";
 
 const roleColors: Record<string, string> = {
   OWNER: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
@@ -94,6 +94,22 @@ export default function Team() {
   const [editingDept, setEditingDept] = useState<Department | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("all");
+
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ["/api/settings"],
+  });
+
+  // Currency formatting
+  const currencySymbols: Record<string, string> = {
+    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
+  };
+  const currency = settings?.currency || "USD";
+  const currencySymbol = currencySymbols[currency] || "$";
+  
+  const formatCurrency = (amount: number | string) => {
+    const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
+    return `${currencySymbol}${num.toLocaleString()}`;
+  };
 
   const [memberForm, setMemberForm] = useState({
     name: "",
@@ -534,7 +550,7 @@ export default function Team() {
                       {dept.budget && (
                         <div className="flex items-center gap-1 text-sm">
                           <DollarSign className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium">${Number(dept.budget).toLocaleString()}</span>
+                          <span className="font-medium">{formatCurrency(dept.budget)}</span>
                           <span className="text-muted-foreground">budget</span>
                         </div>
                       )}

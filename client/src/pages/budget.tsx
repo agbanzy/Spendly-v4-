@@ -40,7 +40,7 @@ import {
   Trash2,
   Loader2,
 } from "lucide-react";
-import type { Budget } from "@shared/schema";
+import type { Budget, CompanySettings } from "@shared/schema";
 
 export default function BudgetPage() {
   const { toast } = useToast();
@@ -52,6 +52,22 @@ export default function BudgetPage() {
     limit: "",
     period: "monthly",
   });
+
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ["/api/settings"],
+  });
+
+  // Currency formatting
+  const currencySymbols: Record<string, string> = {
+    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
+  };
+  const currency = settings?.currency || "USD";
+  const currencySymbol = currencySymbols[currency] || "$";
+  
+  const formatCurrency = (amount: number | string) => {
+    const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
+    return `${currencySymbol}${num.toLocaleString()}`;
+  };
 
   const { data: budgets, isLoading } = useQuery<Budget[]>({
     queryKey: ["/api/budgets"],
@@ -149,7 +165,7 @@ export default function BudgetPage() {
             </div>
             {isLoading ? <Skeleton className="h-8 w-32" /> : (
               <>
-                <p className="text-3xl font-black" data-testid="text-total-budget">${totalBudget.toLocaleString()}</p>
+                <p className="text-3xl font-black" data-testid="text-total-budget">{formatCurrency(totalBudget)}</p>
                 <p className="text-sm text-muted-foreground mt-2">Across {budgets?.length || 0} categories</p>
               </>
             )}
@@ -166,7 +182,7 @@ export default function BudgetPage() {
             </div>
             {isLoading ? <Skeleton className="h-8 w-32" /> : (
               <>
-                <p className="text-3xl font-black" data-testid="text-total-spent">${totalSpent.toLocaleString()}</p>
+                <p className="text-3xl font-black" data-testid="text-total-spent">{formatCurrency(totalSpent)}</p>
                 <div className="mt-2">
                   <Progress value={(totalSpent / totalBudget) * 100} className="h-2" />
                   <p className="text-xs text-muted-foreground mt-1">{totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0}% of total budget</p>
@@ -233,8 +249,8 @@ export default function BudgetPage() {
                     
                     <div className="space-y-2">
                       <div className="flex items-baseline justify-between">
-                        <span className="text-2xl font-black">${budget.spent.toLocaleString()}</span>
-                        <span className="text-sm text-muted-foreground">of ${budget.limit.toLocaleString()}</span>
+                        <span className="text-2xl font-black">{formatCurrency(budget.spent)}</span>
+                        <span className="text-sm text-muted-foreground">of {formatCurrency(budget.limit)}</span>
                       </div>
                       <Progress value={Math.min(percentage, 100)} className="h-3" />
                       <div className="flex items-center justify-between text-xs text-muted-foreground">

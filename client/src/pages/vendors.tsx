@@ -29,13 +29,29 @@ import {
   TrendingUp,
   Globe
 } from "lucide-react";
-import type { Vendor } from "@shared/schema";
+import type { Vendor, CompanySettings } from "@shared/schema";
 
 export default function VendorsPage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ["/api/settings"],
+  });
+
+  // Currency formatting
+  const currencySymbols: Record<string, string> = {
+    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
+  };
+  const currency = settings?.currency || "USD";
+  const currencySymbol = currencySymbols[currency] || "$";
+  
+  const formatCurrency = (amount: number | string) => {
+    const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
+    return `${currencySymbol}${num.toLocaleString()}`;
+  };
 
   const { data: vendors = [], isLoading } = useQuery<Vendor[]>({
     queryKey: ["/api/vendors"]
@@ -256,7 +272,7 @@ export default function VendorsPage() {
                 <AlertCircle className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-2xl font-bold">${totalPending.toLocaleString()}</p>
+                <p className="text-2xl font-bold">{formatCurrency(totalPending)}</p>
                 <p className="text-sm text-muted-foreground">Pending Payments</p>
               </div>
             </div>
@@ -269,7 +285,7 @@ export default function VendorsPage() {
                 <TrendingUp className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-2xl font-bold">${(totalPaidThisMonth / 1000).toFixed(1)}K</p>
+                <p className="text-2xl font-bold">{currencySymbol}{(totalPaidThisMonth / 1000).toFixed(1)}K</p>
                 <p className="text-sm text-muted-foreground">Total Paid</p>
               </div>
             </div>
@@ -330,7 +346,7 @@ export default function VendorsPage() {
                   <div className="grid grid-cols-2 gap-4 pt-4 border-t">
                     <div>
                       <p className="text-sm text-muted-foreground">Total Paid</p>
-                      <p className="font-semibold">${vendor.totalPaid.toLocaleString()}</p>
+                      <p className="font-semibold">{formatCurrency(vendor.totalPaid)}</p>
                     </div>
                     <div>
                       <p className="text-sm text-muted-foreground">Pending</p>
@@ -378,11 +394,11 @@ export default function VendorsPage() {
                   <div className="grid grid-cols-2 gap-4 pt-4 border-t">
                     <div>
                       <p className="text-sm text-muted-foreground">Total Paid</p>
-                      <p className="font-semibold">${vendor.totalPaid.toLocaleString()}</p>
+                      <p className="font-semibold">{formatCurrency(vendor.totalPaid)}</p>
                     </div>
                     <div>
                       <p className="text-sm text-muted-foreground">Pending</p>
-                      <p className="font-semibold">${vendor.pendingPayments.toLocaleString()}</p>
+                      <p className="font-semibold">{formatCurrency(vendor.pendingPayments)}</p>
                     </div>
                   </div>
                 </CardContent>

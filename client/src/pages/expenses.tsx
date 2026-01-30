@@ -57,7 +57,7 @@ import {
 import { useForm } from "react-hook-form";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Expense, TeamMember, Vendor } from "@shared/schema";
+import type { Expense, TeamMember, Vendor, CompanySettings } from "@shared/schema";
 
 const categories = [
   "Software",
@@ -87,6 +87,22 @@ export default function Expenses() {
   const [isUploading, setIsUploading] = useState(false);
   const [selectedVendorId, setSelectedVendorId] = useState<string>("");
   const { toast } = useToast();
+
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ["/api/settings"],
+  });
+
+  // Currency formatting
+  const currencySymbols: Record<string, string> = {
+    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
+  };
+  const currency = settings?.currency || "USD";
+  const currencySymbol = currencySymbols[currency] || "$";
+  
+  const formatCurrency = (amount: number | string) => {
+    const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
+    return `${currencySymbol}${num.toLocaleString()}`;
+  };
 
   const { data: expenses, isLoading } = useQuery<Expense[]>({
     queryKey: ["/api/expenses"],
@@ -890,7 +906,7 @@ export default function Expenses() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-xs text-muted-foreground uppercase font-bold">Amount</p>
-                  <p className="font-bold text-lg">${selectedExpense.amount.toLocaleString()}</p>
+                  <p className="font-bold text-lg">{formatCurrency(selectedExpense.amount)}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground uppercase font-bold">Category</p>

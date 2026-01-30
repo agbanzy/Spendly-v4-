@@ -42,12 +42,28 @@ import {
   ResponsiveContainer,
   ComposedChart
 } from "recharts";
-import type { Expense, Budget, Transaction } from "@shared/schema";
+import type { Expense, Budget, Transaction, CompanySettings } from "@shared/schema";
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16'];
 
 export default function AnalyticsPage() {
   const [timePeriod, setTimePeriod] = useState("30d");
+
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ["/api/settings"],
+  });
+
+  // Currency formatting
+  const currencySymbols: Record<string, string> = {
+    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
+  };
+  const currency = settings?.currency || "USD";
+  const currencySymbol = currencySymbols[currency] || "$";
+  
+  const formatCurrency = (amount: number | string) => {
+    const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
+    return `${currencySymbol}${num.toLocaleString()}`;
+  };
 
   const { data: expenses, isLoading: loadingExpenses } = useQuery<Expense[]>({
     queryKey: ["/api/expenses"]
@@ -190,7 +206,7 @@ export default function AnalyticsPage() {
   const statsCards = [
     {
       title: "Total Expenses",
-      value: `$${totalSpent.toLocaleString()}`,
+      value: formatCurrency(totalSpent),
       change: `${expenses?.length || 0} items`,
       trend: "up" as const,
       icon: DollarSign,
@@ -381,7 +397,7 @@ export default function AnalyticsPage() {
                       ))}
                     </Pie>
                     <Tooltip 
-                      formatter={(value: number) => [`$${value.toLocaleString()}`, '']}
+                      formatter={(value: number) => [formatCurrency(value), '']}
                       contentStyle={{ 
                         backgroundColor: 'hsl(var(--card))', 
                         border: '1px solid hsl(var(--border))',
@@ -407,7 +423,7 @@ export default function AnalyticsPage() {
                   <XAxis type="number" className="text-xs" />
                   <YAxis dataKey="name" type="category" width={100} className="text-xs" />
                   <Tooltip 
-                    formatter={(value: number) => [`$${value.toLocaleString()}`, '']}
+                    formatter={(value: number) => [formatCurrency(value), '']}
                     contentStyle={{ 
                       backgroundColor: 'hsl(var(--card))', 
                       border: '1px solid hsl(var(--border))',
@@ -437,7 +453,7 @@ export default function AnalyticsPage() {
                     <XAxis dataKey="day" className="text-xs" />
                     <YAxis className="text-xs" />
                     <Tooltip 
-                      formatter={(value: number) => [`$${value.toLocaleString()}`, 'Amount']}
+                      formatter={(value: number) => [formatCurrency(value), 'Amount']}
                       contentStyle={{ 
                         backgroundColor: 'hsl(var(--card))', 
                         border: '1px solid hsl(var(--border))',
@@ -474,7 +490,7 @@ export default function AnalyticsPage() {
                     <XAxis dataKey="name" className="text-xs" />
                     <YAxis className="text-xs" />
                     <Tooltip 
-                      formatter={(value: number) => [`$${value.toLocaleString()}`, 'Amount']}
+                      formatter={(value: number) => [formatCurrency(value), 'Amount']}
                       contentStyle={{ 
                         backgroundColor: 'hsl(var(--card))', 
                         border: '1px solid hsl(var(--border))',
@@ -517,7 +533,7 @@ export default function AnalyticsPage() {
                       ))}
                     </Pie>
                     <Tooltip 
-                      formatter={(value: number) => [`$${value.toLocaleString()}`, '']}
+                      formatter={(value: number) => [formatCurrency(value), '']}
                       contentStyle={{ 
                         backgroundColor: 'hsl(var(--card))', 
                         border: '1px solid hsl(var(--border))',
@@ -548,7 +564,7 @@ export default function AnalyticsPage() {
                             />
                             <span className="font-medium text-sm">{cat.name}</span>
                           </div>
-                          <span className="text-sm font-semibold">${cat.value.toLocaleString()}</span>
+                          <span className="text-sm font-semibold">{formatCurrency(cat.value)}</span>
                         </div>
                         <div className="h-2 rounded-full bg-muted overflow-hidden">
                           <div 
@@ -583,7 +599,7 @@ export default function AnalyticsPage() {
                     <XAxis dataKey="month" className="text-xs" />
                     <YAxis className="text-xs" />
                     <Tooltip 
-                      formatter={(value: number) => [`$${value.toLocaleString()}`, '']}
+                      formatter={(value: number) => [formatCurrency(value), '']}
                       contentStyle={{ 
                         backgroundColor: 'hsl(var(--card))', 
                         border: '1px solid hsl(var(--border))',
@@ -701,7 +717,7 @@ export default function AnalyticsPage() {
                         <p className="text-sm text-muted-foreground mt-1">
                           {savingsRate > 0 
                             ? `You're saving ${savingsRate}% of your income. Great job maintaining positive cash flow!`
-                            : `Your total expenses are $${totalSpent.toLocaleString()} across ${expenses?.length || 0} transactions.`}
+                            : `Your total expenses are ${formatCurrency(totalSpent)} across ${expenses?.length || 0} transactions.`}
                         </p>
                       </div>
                       <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
@@ -722,7 +738,7 @@ export default function AnalyticsPage() {
                           {pendingCount > 0 
                             ? `You have ${pendingCount} expense${pendingCount > 1 ? 's' : ''} pending approval. Review them soon.`
                             : topCategory 
-                              ? `Highest spending: ${topCategory.name} at $${topCategory.value.toLocaleString()}`
+                              ? `Highest spending: ${topCategory.name} at ${formatCurrency(topCategory.value)}`
                               : "No expense data available yet."}
                         </p>
                       </div>

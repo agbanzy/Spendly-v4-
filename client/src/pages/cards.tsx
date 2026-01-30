@@ -43,7 +43,7 @@ import {
   PlayCircle,
   PauseCircle,
 } from "lucide-react";
-import type { VirtualCard } from "@shared/schema";
+import type { VirtualCard, CompanySettings } from "@shared/schema";
 
 const cardGradients: Record<string, string> = {
   indigo: "bg-gradient-to-br from-indigo-500 to-purple-600",
@@ -58,6 +58,22 @@ export default function Cards() {
   const [showNumbers, setShowNumbers] = useState<Record<string, boolean>>({});
   const [isOpen, setIsOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<VirtualCard | null>(null);
+
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ["/api/settings"],
+  });
+
+  // Currency formatting
+  const currencySymbols: Record<string, string> = {
+    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
+  };
+  const currency = settings?.currency || "USD";
+  const currencySymbol = currencySymbols[currency] || "$";
+  
+  const formatCurrency = (amount: number | string) => {
+    const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
+    return `${currencySymbol}${num.toLocaleString()}`;
+  };
   const [formData, setFormData] = useState({
     name: "",
     limit: "",
@@ -177,7 +193,7 @@ export default function Cards() {
                 <CreditCard className="h-4 w-4 text-primary" />
               </div>
             </div>
-            {isLoading ? <Skeleton className="h-8 w-32" /> : <p className="text-2xl font-black" data-testid="text-total-card-balance">${totalBalance.toLocaleString()}</p>}
+            {isLoading ? <Skeleton className="h-8 w-32" /> : <p className="text-2xl font-black" data-testid="text-total-card-balance">{formatCurrency(totalBalance)}</p>}
             <p className="text-xs text-muted-foreground mt-1">Across all cards</p>
           </CardContent>
         </Card>
@@ -262,11 +278,11 @@ export default function Cards() {
                   <div className="flex items-end justify-between">
                     <div>
                       <p className="text-xs opacity-60 uppercase">Balance</p>
-                      <p className="text-xl font-bold">${card.balance.toLocaleString()}</p>
+                      <p className="text-xl font-bold">{formatCurrency(card.balance)}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-xs opacity-60 uppercase">Limit</p>
-                      <p className="text-sm font-bold">${card.limit.toLocaleString()}</p>
+                      <p className="text-sm font-bold">{formatCurrency(card.limit)}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <p className="text-lg font-bold uppercase">{card.type}</p>

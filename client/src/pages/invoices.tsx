@@ -33,7 +33,7 @@ import {
   Banknote,
   Trash2
 } from "lucide-react";
-import type { Invoice } from "@shared/schema";
+import type { Invoice, CompanySettings } from "@shared/schema";
 
 interface VirtualAccount {
   id: string;
@@ -65,6 +65,22 @@ export default function InvoicesPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isViewOpen, setIsViewOpen] = useState(false);
+
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ["/api/settings"],
+  });
+
+  // Currency formatting
+  const currencySymbols: Record<string, string> = {
+    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
+  };
+  const currency = settings?.currency || "USD";
+  const currencySymbol = currencySymbols[currency] || "$";
+  
+  const formatCurrency = (amount: number | string) => {
+    const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
+    return `${currencySymbol}${num.toLocaleString()}`;
+  };
   
   const [invoiceForm, setInvoiceForm] = useState({
     clientName: "",
@@ -367,7 +383,7 @@ export default function InvoicesPage() {
                           <Label className="text-xs">Total</Label>
                           <Input 
                             type="text" 
-                            value={`$${calculateLineTotal(item).toFixed(2)}`}
+                            value={`${currencySymbol}${calculateLineTotal(item).toFixed(2)}`}
                             disabled 
                             className="bg-muted"
                           />
@@ -380,7 +396,7 @@ export default function InvoicesPage() {
                 <div className="flex justify-end pt-2 border-t">
                   <div className="text-right">
                     <p className="text-sm text-muted-foreground">Subtotal</p>
-                    <p className="text-xl font-bold">${calculateSubtotal().toFixed(2)}</p>
+                    <p className="text-xl font-bold">{currencySymbol}{calculateSubtotal().toFixed(2)}</p>
                   </div>
                 </div>
               </div>
@@ -437,7 +453,7 @@ export default function InvoicesPage() {
                 <Clock className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-2xl font-bold">${totalOutstanding.toLocaleString()}</p>
+                <p className="text-2xl font-bold">{formatCurrency(totalOutstanding)}</p>
                 <p className="text-sm text-muted-foreground">Outstanding</p>
               </div>
             </div>
@@ -450,7 +466,7 @@ export default function InvoicesPage() {
                 <AlertCircle className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-2xl font-bold">${totalOverdue.toLocaleString()}</p>
+                <p className="text-2xl font-bold">{formatCurrency(totalOverdue)}</p>
                 <p className="text-sm text-muted-foreground">Overdue</p>
               </div>
             </div>
@@ -463,7 +479,7 @@ export default function InvoicesPage() {
                 <CheckCircle2 className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-2xl font-bold">${totalPaid.toLocaleString()}</p>
+                <p className="text-2xl font-bold">{formatCurrency(totalPaid)}</p>
                 <p className="text-sm text-muted-foreground">Paid This Month</p>
               </div>
             </div>
@@ -526,7 +542,7 @@ export default function InvoicesPage() {
                     </div>
                     <div className="flex items-center gap-4">
                       <div className="text-right">
-                        <p className="text-lg font-bold">${invoice.amount.toLocaleString()}</p>
+                        <p className="text-lg font-bold">{formatCurrency(invoice.amount)}</p>
                       </div>
                       {getStatusBadge(invoice.status)}
                       <div className="flex items-center gap-1">
@@ -574,7 +590,7 @@ export default function InvoicesPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
-                        <p className="text-lg font-bold">${invoice.amount.toLocaleString()}</p>
+                        <p className="text-lg font-bold">{formatCurrency(invoice.amount)}</p>
                         {getStatusBadge(invoice.status)}
                       </div>
                     </div>
@@ -622,7 +638,7 @@ export default function InvoicesPage() {
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Amount</p>
-                  <p className="text-xl font-bold">${selectedInvoice.amount.toLocaleString()}</p>
+                  <p className="text-xl font-bold">{formatCurrency(selectedInvoice.amount)}</p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Issued Date</p>
@@ -653,15 +669,15 @@ export default function InvoicesPage() {
                           <tr key={idx} className="border-t">
                             <td className="p-2">{item.description}</td>
                             <td className="p-2 text-right">{item.quantity}</td>
-                            <td className="p-2 text-right">${item.rate.toFixed(2)}</td>
-                            <td className="p-2 text-right font-medium">${(item.quantity * item.rate).toFixed(2)}</td>
+                            <td className="p-2 text-right">{currencySymbol}{item.rate.toFixed(2)}</td>
+                            <td className="p-2 text-right font-medium">{currencySymbol}{(item.quantity * item.rate).toFixed(2)}</td>
                           </tr>
                         ))}
                       </tbody>
                       <tfoot className="bg-muted/50 border-t">
                         <tr>
                           <td colSpan={3} className="p-2 text-right font-medium">Total:</td>
-                          <td className="p-2 text-right font-bold">${Number(selectedInvoice.amount).toFixed(2)}</td>
+                          <td className="p-2 text-right font-bold">{currencySymbol}{Number(selectedInvoice.amount).toFixed(2)}</td>
                         </tr>
                       </tfoot>
                     </table>
