@@ -77,17 +77,20 @@ export default function Dashboard() {
   const [showBalance, setShowBalance] = useState(true);
   const [fundingMethod, setFundingMethod] = useState<"card" | "bank" | "crypto">("card");
 
+  // Handle quick action to open funding dialog (runs once on mount)
   useEffect(() => {
-    const params = new URLSearchParams(searchParams);
-    const paymentStatus = params.get('payment');
-    const sessionId = params.get('session_id');
+    const params = new URLSearchParams(window.location.search);
     const action = params.get('action');
-    
-    // Handle quick action to open funding dialog
     if (action === 'fund') {
       setIsFundingOpen(true);
       window.history.replaceState({}, '', '/dashboard');
     }
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams);
+    const paymentStatus = params.get('payment');
+    const sessionId = params.get('session_id');
     
     const handlePaymentCallback = async () => {
       if (paymentStatus === 'success' && sessionId) {
