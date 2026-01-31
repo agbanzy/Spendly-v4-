@@ -1250,7 +1250,11 @@ export default function Onboarding() {
               </Button>
 
               {currentStep < 5 ? (
-                <Button onClick={nextStep} data-testid="button-next-step">
+                <Button 
+                  onClick={nextStep} 
+                  disabled={!validateStep(currentStep)}
+                  data-testid="button-next-step"
+                >
                   Next
                   <ArrowRight className="h-4 w-4 ml-2" />
                 </Button>
