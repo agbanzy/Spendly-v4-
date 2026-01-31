@@ -10,9 +10,7 @@ export default function PrivacyPage() {
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <Link href="/">
             <div className="flex items-center gap-2 cursor-pointer" data-testid="link-privacy-home">
-              <div className="h-10 w-10 rounded-xl bg-indigo-600 flex items-center justify-center">
-                <Wallet className="h-6 w-6 text-white" />
-              </div>
+              <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl" />
               <span className="font-bold text-xl">Spendly</span>
             </div>
           </Link>

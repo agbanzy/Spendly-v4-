@@ -100,9 +100,7 @@ export default function LandingPage() {
           <div className="flex items-center gap-8">
             <Link href="/">
               <span className="flex items-center gap-2 font-bold text-xl" data-testid="link-logo">
-                <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-600 to-indigo-700 flex items-center justify-center">
-                  <Wallet className="h-5 w-5 text-white" />
-                </div>
+                <img src="/spendly-logo.png" alt="Spendly" className="h-8 w-8 rounded-lg" />
                 <span>Spendly</span>
               </span>
             </Link>
@@ -320,9 +318,7 @@ export default function LandingPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
             <div>
               <div className="flex items-center gap-2 font-bold text-lg mb-4">
-                <div className="h-6 w-6 rounded-md bg-gradient-to-br from-indigo-600 to-indigo-700 flex items-center justify-center">
-                  <Wallet className="h-4 w-4 text-white" />
-                </div>
+                <img src="/spendly-logo.png" alt="Spendly" className="h-6 w-6 rounded-md" />
                 Spendly
               </div>
               <p className="text-sm text-muted-foreground">

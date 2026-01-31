@@ -60,9 +60,7 @@ export default function ForgotPasswordPage() {
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-indigo-600 to-indigo-800 p-12 flex-col justify-between">
         <Link href="/">
           <div className="flex items-center gap-2 text-white cursor-pointer" data-testid="link-forgot-home-desktop">
-            <div className="h-10 w-10 rounded-xl bg-white/20 flex items-center justify-center backdrop-blur">
-              <Wallet className="h-6 w-6 text-white" />
-            </div>
+            <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl" />
             <span className="font-bold text-2xl">Spendly</span>
           </div>
         </Link>
@@ -85,9 +83,7 @@ export default function ForgotPasswordPage() {
         <div className="w-full max-w-md">
           <Link href="/">
             <div className="lg:hidden flex items-center gap-2 justify-center mb-8 cursor-pointer" data-testid="link-forgot-home-mobile">
-              <div className="h-10 w-10 rounded-xl bg-indigo-600 flex items-center justify-center">
-                <Wallet className="h-6 w-6 text-white" />
-              </div>
+              <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl" />
               <span className="font-bold text-2xl">Spendly</span>
             </div>
           </Link>

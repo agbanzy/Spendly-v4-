@@ -87,9 +87,7 @@ export function AppSidebar() {
       <SidebarHeader className="border-b border-sidebar-border p-4">
         <Link href="/dashboard">
           <div className="flex items-center gap-3 cursor-pointer">
-            <div className="w-10 h-10 bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-xl flex items-center justify-center shadow-lg">
-              <Wallet className="h-5 w-5 text-white" />
-            </div>
+            <img src="/spendly-logo.png" alt="Spendly" className="w-10 h-10 rounded-xl shadow-lg" />
             <div>
               <span className="text-xl font-black text-foreground">Spendly</span>
               <p className="text-xs text-muted-foreground">Finance Dashboard</p>

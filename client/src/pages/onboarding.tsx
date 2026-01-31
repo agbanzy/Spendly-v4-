@@ -208,18 +208,21 @@ export default function Onboarding() {
         body: formDataUpload,
       });
       
-      if (!res.ok) throw new Error("Upload failed");
+      const data = await res.json();
       
-      const { url } = await res.json();
-      setFormData(prev => ({ ...prev, [fieldName]: url }));
+      if (!res.ok) {
+        throw new Error(data.error || "Upload failed");
+      }
+      
+      setFormData(prev => ({ ...prev, [fieldName]: data.url }));
       toast({
         title: "File Uploaded",
         description: "Document uploaded successfully",
       });
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: "Upload Failed",
-        description: "Failed to upload document. Please try again.",
+        description: error.message || "Failed to upload document. Please try again.",
         variant: "destructive",
       });
     } finally {

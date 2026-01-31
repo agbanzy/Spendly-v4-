@@ -2778,17 +2778,27 @@ export async function registerRoutes(
     }
   });
 
-  // Upload KYC document
-  app.post("/api/kyc/upload", upload.single('document'), async (req, res) => {
-    try {
+  // Upload KYC document with multer error handling
+  app.post("/api/kyc/upload", (req, res) => {
+    upload.single('document')(req, res, (err: any) => {
+      if (err) {
+        const message = err.message || "Failed to upload document";
+        if (message.includes("Invalid file type")) {
+          return res.status(400).json({ error: message });
+        }
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: "File size exceeds 5MB limit" });
+        }
+        return res.status(400).json({ error: message });
+      }
+      
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
+      
       const fileUrl = `/uploads/${req.file.filename}`;
       res.json({ url: fileUrl, filename: req.file.filename });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to upload document" });
-    }
+    });
   });
 
   // ==================== STRIPE IDENTITY KYC ====================
