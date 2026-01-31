@@ -4,6 +4,18 @@
 Spendly is a comprehensive financial operating system for high-growth teams. It provides expense tracking, budget management, virtual cards, team management, payroll, invoicing, vendor management, and transaction monitoring in a unified platform.
 
 ## Recent Changes (January 31, 2026)
+- **Comprehensive Email Notification System**: 8 email templates with consistent Spendly branding:
+  - Welcome email (on signup)
+  - Password reset success confirmation
+  - Email verification
+  - Detailed payout confirmation
+  - Invoice email to clients
+  - Payslip notifications
+  - Login security alerts
+  - Transaction SMS alerts
+- **Notification Triggers**: Automatic emails on user signup (welcome), payout processing (confirmation), invoice creation (client email), payroll batch/individual (payslip), admin login (security alert)
+- **Notification API Endpoints**: `/api/auth/track-login`, `/api/auth/password-reset-success`, `/api/auth/send-verification`, `/api/notifications/transaction-sms`, `/api/invoices/:id/send`
+- **AWS SES/SNS Integration**: Primary email/SMS provider with consistent branding (gradient #4F46E5 to #7C3AED)
 - **TypeScript Type Safety Fixes**: Fixed 47+ type errors across routes.ts - all decimal field schemas now use String() transforms for PostgreSQL compatibility
 - **Virtual Account User Linkage**: Added userId column to virtual_accounts table for proper user-account association
 - **Expense Schema Defaults**: Added default values for userId and user to prevent null constraint violations
