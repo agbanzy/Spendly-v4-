@@ -302,6 +302,20 @@ export const companySettings = pgTable("company_settings", {
   paymentProvider: text("payment_provider").notNull().default('stripe'),
   paystackEnabled: boolean("paystack_enabled").notNull().default(true),
   stripeEnabled: boolean("stripe_enabled").notNull().default(true),
+  companyLogo: text("company_logo"),
+  companyTagline: text("company_tagline"),
+  primaryColor: text("primary_color").default('#4f46e5'),
+  secondaryColor: text("secondary_color").default('#10b981'),
+  industry: text("industry"),
+  companySize: text("company_size"),
+  taxId: text("tax_id"),
+  registrationNumber: text("registration_number"),
+  website: text("website"),
+  invoicePrefix: text("invoice_prefix").default('INV'),
+  invoiceFooter: text("invoice_footer"),
+  invoiceTerms: text("invoice_terms").default('Payment due within 30 days'),
+  showLogoOnInvoice: boolean("show_logo_on_invoice").notNull().default(true),
+  showLogoOnReceipts: boolean("show_logo_on_receipts").notNull().default(true),
 });
 
 // KYC Verification Status enum

@@ -3,7 +3,15 @@
 ## Overview
 Spendly is a comprehensive financial operating system for high-growth teams. It provides expense tracking, budget management, virtual cards, team management, payroll, invoicing, vendor management, and transaction monitoring in a unified platform.
 
-## Recent Changes (January 30, 2026)
+## Recent Changes (January 31, 2026)
+- **Organization Settings**: Industry type, company size, Tax ID/VAT, registration number, website fields
+- **Branding Customization**: Company logo URL, tagline, primary/secondary brand colors with color picker
+- **Invoice Settings**: Invoice prefix, fiscal year, payment terms, custom footer text
+- **Logo Display Options**: Toggle logo on invoices and receipts
+- **Theme Toggle**: Light/dark mode toggle in branding section
+- **User Settings API**: Personal preferences (notifications, PIN, alerts) saved per user
+
+## Previous Changes (January 30, 2026)
 - **Dynamic Currency Formatting**: All major pages (dashboard, cards, budget, expenses, invoices, vendors, analytics, admin, team, bills, payroll) now use settings-based currency formatting with support for USD ($), EUR (€), GBP (£), NGN (₦), KES (KSh), GHS (₵), ZAR (R) - replaces all hardcoded "$" symbols
 - **Transaction PIN System**: Backend endpoints for setting, verifying, and disabling transaction PINs with bcrypt hashing
 - **Virtual Account Display**: Dashboard shows virtual account details (bank name, account number) with copy-to-clipboard

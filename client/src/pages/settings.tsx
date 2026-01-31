@@ -30,6 +30,12 @@ import {
   Wallet,
   CheckCircle2,
   XCircle,
+  Upload,
+  FileText,
+  Briefcase,
+  Users,
+  Link,
+  Hash,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { isPaystackRegion } from "@/lib/constants";
@@ -73,6 +79,20 @@ interface CompanySettings {
   paymentProvider: 'stripe' | 'paystack';
   paystackEnabled: boolean;
   stripeEnabled: boolean;
+  companyLogo: string | null;
+  companyTagline: string | null;
+  primaryColor: string;
+  secondaryColor: string;
+  industry: string | null;
+  companySize: string | null;
+  taxId: string | null;
+  registrationNumber: string | null;
+  website: string | null;
+  invoicePrefix: string;
+  invoiceFooter: string | null;
+  invoiceTerms: string;
+  showLogoOnInvoice: boolean;
+  showLogoOnReceipts: boolean;
 }
 
 interface RegionConfig {
@@ -116,14 +136,14 @@ export default function Settings() {
 
   // Fetch user-specific settings
   const { data: userSettings } = useQuery<UserSettings>({
-    queryKey: ["/api/user-settings", user?.uid],
+    queryKey: ["/api/user-settings", user?.id],
     queryFn: async () => {
-      if (!user?.uid) return null;
-      const res = await fetch(`/api/user-settings/${user.uid}`);
+      if (!user?.id) return null;
+      const res = await fetch(`/api/user-settings/${user.id}`);
       if (!res.ok) return null;
       return res.json();
     },
-    enabled: !!user?.uid,
+    enabled: !!user?.id,
   });
 
   const [formData, setFormData] = useState<Partial<CompanySettings>>({});
@@ -171,11 +191,11 @@ export default function Settings() {
   // Mutation for user-specific settings
   const updateUserSettingsMutation = useMutation({
     mutationFn: async (data: Partial<UserSettings>) => {
-      if (!user?.uid) throw new Error("Not authenticated");
-      return apiRequest("PATCH", `/api/user-settings/${user.uid}`, data);
+      if (!user?.id) throw new Error("Not authenticated");
+      return apiRequest("PATCH", `/api/user-settings/${user.id}`, data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/user-settings", user?.uid] });
+      queryClient.invalidateQueries({ queryKey: ["/api/user-settings", user?.id] });
       toast({
         title: "Preferences saved",
         description: "Your preferences have been updated.",
@@ -321,6 +341,394 @@ export default function Settings() {
                 <Save className="h-4 w-4 mr-2" />
               )}
               Save Changes
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Briefcase className="h-5 w-5 text-primary" />
+            <CardTitle>Organization Details</CardTitle>
+          </div>
+          <CardDescription>
+            Additional information about your organization for legal and compliance purposes.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="industry">Industry</Label>
+              <Select 
+                value={formData.industry || ""} 
+                onValueChange={(value) => setFormData({ ...formData, industry: value })}
+              >
+                <SelectTrigger data-testid="select-industry">
+                  <SelectValue placeholder="Select industry" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="technology">Technology</SelectItem>
+                  <SelectItem value="finance">Finance & Banking</SelectItem>
+                  <SelectItem value="healthcare">Healthcare</SelectItem>
+                  <SelectItem value="retail">Retail & E-commerce</SelectItem>
+                  <SelectItem value="manufacturing">Manufacturing</SelectItem>
+                  <SelectItem value="education">Education</SelectItem>
+                  <SelectItem value="consulting">Consulting</SelectItem>
+                  <SelectItem value="real_estate">Real Estate</SelectItem>
+                  <SelectItem value="logistics">Logistics & Transportation</SelectItem>
+                  <SelectItem value="media">Media & Entertainment</SelectItem>
+                  <SelectItem value="hospitality">Hospitality</SelectItem>
+                  <SelectItem value="agriculture">Agriculture</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="companySize">Company Size</Label>
+              <Select 
+                value={formData.companySize || ""} 
+                onValueChange={(value) => setFormData({ ...formData, companySize: value })}
+              >
+                <SelectTrigger data-testid="select-company-size">
+                  <SelectValue placeholder="Select size" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1-10">1-10 employees</SelectItem>
+                  <SelectItem value="11-50">11-50 employees</SelectItem>
+                  <SelectItem value="51-200">51-200 employees</SelectItem>
+                  <SelectItem value="201-500">201-500 employees</SelectItem>
+                  <SelectItem value="501-1000">501-1,000 employees</SelectItem>
+                  <SelectItem value="1001+">1,000+ employees</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="taxId">Tax ID / VAT Number</Label>
+              <Input
+                id="taxId"
+                placeholder="e.g., 12-3456789"
+                value={formData.taxId || ""}
+                onChange={(e) => setFormData({ ...formData, taxId: e.target.value })}
+                data-testid="input-tax-id"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="registrationNumber">Registration Number</Label>
+              <Input
+                id="registrationNumber"
+                placeholder="e.g., RC123456"
+                value={formData.registrationNumber || ""}
+                onChange={(e) => setFormData({ ...formData, registrationNumber: e.target.value })}
+                data-testid="input-registration-number"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="website">Company Website</Label>
+            <Input
+              id="website"
+              type="url"
+              placeholder="https://example.com"
+              value={formData.website || ""}
+              onChange={(e) => setFormData({ ...formData, website: e.target.value })}
+              data-testid="input-website"
+            />
+          </div>
+          <div className="flex justify-end">
+            <Button 
+              onClick={() => updateSettingsMutation.mutate({
+                industry: formData.industry,
+                companySize: formData.companySize,
+                taxId: formData.taxId,
+                registrationNumber: formData.registrationNumber,
+                website: formData.website,
+              })}
+              disabled={updateSettingsMutation.isPending}
+              data-testid="button-save-organization"
+            >
+              {updateSettingsMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Save className="h-4 w-4 mr-2" />
+              )}
+              Save Organization Details
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Palette className="h-5 w-5 text-primary" />
+            <CardTitle>Branding</CardTitle>
+          </div>
+          <CardDescription>
+            Customize your company branding for invoices, receipts, and emails.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Company Logo</Label>
+              <div className="flex items-center gap-4">
+                <div className="w-20 h-20 rounded-lg border-2 border-dashed border-muted-foreground/30 flex items-center justify-center bg-muted/30">
+                  {formData.companyLogo ? (
+                    <img 
+                      src={formData.companyLogo} 
+                      alt="Company logo" 
+                      className="w-full h-full object-contain rounded-lg"
+                    />
+                  ) : (
+                    <Upload className="h-8 w-8 text-muted-foreground/50" />
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Input
+                    type="url"
+                    placeholder="Enter logo URL"
+                    value={formData.companyLogo || ""}
+                    onChange={(e) => setFormData({ ...formData, companyLogo: e.target.value })}
+                    className="w-64"
+                    data-testid="input-logo-url"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Recommended: 200x200 pixels, PNG or SVG format
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-2">
+              <Label htmlFor="tagline">Company Tagline</Label>
+              <Input
+                id="tagline"
+                placeholder="e.g., Simplifying expense management"
+                value={formData.companyTagline || ""}
+                onChange={(e) => setFormData({ ...formData, companyTagline: e.target.value })}
+                data-testid="input-tagline"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="primaryColor">Primary Brand Color</Label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    id="primaryColor"
+                    value={formData.primaryColor || "#4f46e5"}
+                    onChange={(e) => setFormData({ ...formData, primaryColor: e.target.value })}
+                    className="w-10 h-10 rounded cursor-pointer border-0"
+                    data-testid="input-primary-color"
+                  />
+                  <Input
+                    value={formData.primaryColor || "#4f46e5"}
+                    onChange={(e) => setFormData({ ...formData, primaryColor: e.target.value })}
+                    className="w-28 font-mono text-sm"
+                    placeholder="#4f46e5"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="secondaryColor">Secondary Brand Color</Label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    id="secondaryColor"
+                    value={formData.secondaryColor || "#10b981"}
+                    onChange={(e) => setFormData({ ...formData, secondaryColor: e.target.value })}
+                    className="w-10 h-10 rounded cursor-pointer border-0"
+                    data-testid="input-secondary-color"
+                  />
+                  <Input
+                    value={formData.secondaryColor || "#10b981"}
+                    onChange={(e) => setFormData({ ...formData, secondaryColor: e.target.value })}
+                    className="w-28 font-mono text-sm"
+                    placeholder="#10b981"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-lg bg-muted/50">
+              <p className="text-sm font-medium mb-2">Preview</p>
+              <div className="flex items-center gap-3">
+                <div 
+                  className="w-8 h-8 rounded"
+                  style={{ backgroundColor: formData.primaryColor || "#4f46e5" }}
+                />
+                <div 
+                  className="w-8 h-8 rounded"
+                  style={{ backgroundColor: formData.secondaryColor || "#10b981" }}
+                />
+                <span className="text-sm text-muted-foreground">Your brand colors</span>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>App Theme</Label>
+                <p className="text-sm text-muted-foreground">
+                  Switch between light and dark mode.
+                </p>
+              </div>
+              <ThemeToggle />
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button 
+              onClick={() => updateSettingsMutation.mutate({
+                companyLogo: formData.companyLogo,
+                companyTagline: formData.companyTagline,
+                primaryColor: formData.primaryColor,
+                secondaryColor: formData.secondaryColor,
+              })}
+              disabled={updateSettingsMutation.isPending}
+              data-testid="button-save-branding"
+            >
+              {updateSettingsMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Save className="h-4 w-4 mr-2" />
+              )}
+              Save Branding
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-primary" />
+            <CardTitle>Invoice Settings</CardTitle>
+          </div>
+          <CardDescription>
+            Customize how your invoices and receipts appear to clients.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="invoicePrefix">Invoice Number Prefix</Label>
+              <Input
+                id="invoicePrefix"
+                placeholder="INV"
+                value={formData.invoicePrefix || "INV"}
+                onChange={(e) => setFormData({ ...formData, invoicePrefix: e.target.value })}
+                data-testid="input-invoice-prefix"
+              />
+              <p className="text-xs text-muted-foreground">
+                Example: {formData.invoicePrefix || "INV"}-2024-0001
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="fiscalYear">Fiscal Year Start</Label>
+              <Select 
+                value={formData.fiscalYearStart || "January"} 
+                onValueChange={(value) => setFormData({ ...formData, fiscalYearStart: value })}
+              >
+                <SelectTrigger data-testid="select-fiscal-year">
+                  <SelectValue placeholder="Select month" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="January">January</SelectItem>
+                  <SelectItem value="February">February</SelectItem>
+                  <SelectItem value="March">March</SelectItem>
+                  <SelectItem value="April">April</SelectItem>
+                  <SelectItem value="July">July</SelectItem>
+                  <SelectItem value="October">October</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="invoiceTerms">Default Payment Terms</Label>
+            <Input
+              id="invoiceTerms"
+              placeholder="Payment due within 30 days"
+              value={formData.invoiceTerms || ""}
+              onChange={(e) => setFormData({ ...formData, invoiceTerms: e.target.value })}
+              data-testid="input-invoice-terms"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="invoiceFooter">Invoice Footer Text</Label>
+            <textarea
+              id="invoiceFooter"
+              className="w-full min-h-[80px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              placeholder="Thank you for your business! Questions? Contact us at finance@company.com"
+              value={formData.invoiceFooter || ""}
+              onChange={(e) => setFormData({ ...formData, invoiceFooter: e.target.value })}
+              data-testid="input-invoice-footer"
+            />
+          </div>
+
+          <Separator />
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>Show Logo on Invoices</Label>
+                <p className="text-sm text-muted-foreground">
+                  Display your company logo on generated invoices.
+                </p>
+              </div>
+              <Switch 
+                checked={formData.showLogoOnInvoice ?? true}
+                onCheckedChange={(checked) => {
+                  setFormData({ ...formData, showLogoOnInvoice: checked });
+                  updateSettingsMutation.mutate({ showLogoOnInvoice: checked });
+                }}
+                data-testid="switch-logo-invoice" 
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>Show Logo on Receipts</Label>
+                <p className="text-sm text-muted-foreground">
+                  Display your company logo on expense receipts.
+                </p>
+              </div>
+              <Switch 
+                checked={formData.showLogoOnReceipts ?? true}
+                onCheckedChange={(checked) => {
+                  setFormData({ ...formData, showLogoOnReceipts: checked });
+                  updateSettingsMutation.mutate({ showLogoOnReceipts: checked });
+                }}
+                data-testid="switch-logo-receipts" 
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button 
+              onClick={() => updateSettingsMutation.mutate({
+                invoicePrefix: formData.invoicePrefix,
+                fiscalYearStart: formData.fiscalYearStart,
+                invoiceTerms: formData.invoiceTerms,
+                invoiceFooter: formData.invoiceFooter,
+              })}
+              disabled={updateSettingsMutation.isPending}
+              data-testid="button-save-invoice"
+            >
+              {updateSettingsMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Save className="h-4 w-4 mr-2" />
+              )}
+              Save Invoice Settings
             </Button>
           </div>
         </CardContent>
@@ -521,29 +929,6 @@ export default function Settings() {
               <p>Receive instant notifications for deposits</p>
             </div>
           )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Palette className="h-5 w-5 text-primary" />
-            <CardTitle>Appearance</CardTitle>
-          </div>
-          <CardDescription>
-            Customize how Spendly looks for you.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Theme</Label>
-              <p className="text-sm text-muted-foreground">
-                Switch between light and dark mode.
-              </p>
-            </div>
-            <ThemeToggle />
-          </div>
         </CardContent>
       </Card>
 
