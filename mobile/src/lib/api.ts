@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://your-replit-app.replit.app';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://spendlymanager.com';
 
 export async function apiRequest<T>(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',

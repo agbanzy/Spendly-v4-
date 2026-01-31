@@ -19,8 +19,11 @@ import {
   Lock,
   Clock,
   Star,
-  ChevronRight
+  ChevronRight,
+  Smartphone,
+  Download
 } from "lucide-react";
+import { SiApple, SiGoogleplay } from "react-icons/si";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function LandingPage() {
@@ -315,15 +318,18 @@ export default function LandingPage() {
 
       <footer className="border-t py-12">
         <div className="container mx-auto px-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            <div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-8">
+            <div className="col-span-2 md:col-span-1">
               <div className="flex items-center gap-2 font-bold text-lg mb-4">
                 <img src="/spendly-logo.png" alt="Spendly" className="h-6 w-6 rounded-md" />
                 Spendly
               </div>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground mb-4">
                 The financial operating system for high-growth teams.
               </p>
+              <a href="https://spendlymanager.com" target="_blank" rel="noopener noreferrer" className="text-sm text-indigo-600 hover:underline" data-testid="link-website">
+                spendlymanager.com
+              </a>
             </div>
             <div>
               <div className="font-semibold mb-4">Product</div>
@@ -351,10 +357,41 @@ export default function LandingPage() {
                 <li><Link href="/privacy"><span className="hover:text-foreground transition-colors cursor-pointer">Cookie Policy</span></Link></li>
               </ul>
             </div>
+            <div>
+              <div className="font-semibold mb-4">Mobile Apps</div>
+              <div className="space-y-3">
+                <a 
+                  href="https://apps.apple.com/app/spendly-expense-manager" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-3 py-2 bg-slate-900 dark:bg-slate-800 text-white rounded-lg hover:bg-slate-800 dark:hover:bg-slate-700 transition-colors"
+                  data-testid="link-app-store"
+                >
+                  <SiApple className="h-5 w-5" />
+                  <div className="text-xs">
+                    <div className="opacity-75">Download on the</div>
+                    <div className="font-semibold">App Store</div>
+                  </div>
+                </a>
+                <a 
+                  href="https://play.google.com/store/apps/details?id=com.spendly.app" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-3 py-2 bg-slate-900 dark:bg-slate-800 text-white rounded-lg hover:bg-slate-800 dark:hover:bg-slate-700 transition-colors"
+                  data-testid="link-play-store"
+                >
+                  <SiGoogleplay className="h-5 w-5" />
+                  <div className="text-xs">
+                    <div className="opacity-75">Get it on</div>
+                    <div className="font-semibold">Google Play</div>
+                  </div>
+                </a>
+              </div>
+            </div>
           </div>
           <div className="border-t mt-8 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
             <p className="text-sm text-muted-foreground">
-              © 2026 Spendly. All rights reserved.
+              © 2026 Spendly Manager. All rights reserved. | <a href="https://spendlymanager.com" className="text-indigo-600 hover:underline">spendlymanager.com</a>
             </p>
             <div className="flex items-center gap-4 text-sm text-muted-foreground">
               <Lock className="h-4 w-4" />

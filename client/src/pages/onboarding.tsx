@@ -434,6 +434,23 @@ export default function Onboarding() {
       case 3:
         return !!(formData.addressLine1 && formData.city && formData.state && formData.country && formData.postalCode);
       case 4:
+        // BVN verified = can proceed (African users)
+        if (bvnVerified) {
+          console.log('Step 4 validation: BVN verified, allowing proceed');
+          return true;
+        }
+        // Stripe Identity verified = can proceed (US/Europe users)
+        if (stripeVerificationStatus === 'verified') {
+          console.log('Step 4 validation: Stripe verified, allowing proceed');
+          return true;
+        }
+        // Manual upload with documents = can proceed
+        if (formData.idFrontUrl || formData.idBackUrl || formData.selfieUrl) {
+          console.log('Step 4 validation: Documents uploaded, allowing proceed');
+          return true;
+        }
+        // Fallback: require ID type and number
+        console.log('Step 4 validation: Checking ID type/number', { idType: formData.idType, idNumber: formData.idNumber });
         return !!(formData.idType && formData.idNumber);
       case 5:
         return formData.acceptTerms;
@@ -443,12 +460,25 @@ export default function Onboarding() {
   };
 
   const nextStep = () => {
-    if (validateStep(currentStep)) {
+    console.log('Next step clicked. Current step:', currentStep);
+    console.log('BVN verified:', bvnVerified);
+    console.log('Stripe status:', stripeVerificationStatus);
+    console.log('Verification method:', verificationMethod);
+    console.log('Form data URLs:', { 
+      idFrontUrl: formData.idFrontUrl, 
+      idBackUrl: formData.idBackUrl, 
+      selfieUrl: formData.selfieUrl 
+    });
+    
+    const isValid = validateStep(currentStep);
+    console.log('Validation result:', isValid);
+    
+    if (isValid) {
       setCurrentStep(prev => Math.min(prev + 1, 5));
     } else {
       toast({
         title: "Missing Information",
-        description: "Please fill in all required fields before continuing.",
+        description: `Please fill in all required fields before continuing. (Step ${currentStep})`,
         variant: "destructive",
       });
     }

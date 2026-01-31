@@ -12,6 +12,8 @@ import DashboardScreen from '../screens/DashboardScreen';
 import ExpensesScreen from '../screens/ExpensesScreen';
 import CardsScreen from '../screens/CardsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import TransactionsScreen from '../screens/TransactionsScreen';
+import BudgetScreen from '../screens/BudgetScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -31,16 +33,25 @@ function MainTabs() {
         tabBarActiveTintColor: '#818CF8',
         tabBarInactiveTintColor: '#64748B',
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: 11,
         },
       }}
     >
       <Tab.Screen
-        name="Dashboard"
+        name="Home"
         component={DashboardScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Transactions"
+        component={TransactionsScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="swap-horizontal" size={size} color={color} />
           ),
         }}
       />
@@ -54,20 +65,20 @@ function MainTabs() {
         }}
       />
       <Tab.Screen
-        name="Cards"
-        component={CardsScreen}
+        name="Budget"
+        component={BudgetScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="card" size={size} color={color} />
+            <Ionicons name="pie-chart" size={size} color={color} />
           ),
         }}
       />
       <Tab.Screen
-        name="Settings"
+        name="More"
         component={SettingsScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="settings" size={size} color={color} />
+            <Ionicons name="menu" size={size} color={color} />
           ),
         }}
       />
