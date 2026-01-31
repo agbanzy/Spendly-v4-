@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { 
   User, Building2, FileCheck, Upload, CheckCircle2, 
   ArrowRight, ArrowLeft, Shield, Globe, Loader2, 
-  CreditCard, Landmark, ExternalLink, ShieldCheck
+  CreditCard, Landmark, ExternalLink, ShieldCheck, FileText
 } from "lucide-react";
 
 const COUNTRIES = [
@@ -434,14 +434,26 @@ export default function Onboarding() {
       case 3:
         return !!(formData.addressLine1 && formData.city && formData.state && formData.country && formData.postalCode);
       case 4:
-        // BVN verified = can proceed (African users)
-        if (bvnVerified) return true;
-        // Stripe Identity verified = can proceed (US/Europe users)
-        if (stripeVerificationStatus === 'verified') return true;
-        // Manual upload with any documents = can proceed
-        if (formData.idFrontUrl || formData.idBackUrl || formData.selfieUrl) return true;
-        // Fallback: require ID type and number
-        return !!(formData.idType && formData.idNumber);
+        // ID type and number are required for all users
+        const hasIdDetails = !!(formData.idType && formData.idNumber);
+        if (!hasIdDetails) return false;
+        
+        // Check if user's country supports Paystack or Stripe
+        const isPaystackCountry = PAYSTACK_COUNTRIES.includes(formData.country);
+        const isStripeCountry = STRIPE_COUNTRIES.includes(formData.country);
+        
+        // For Paystack countries (Africa), require BVN verification OR documents
+        if (isPaystackCountry) {
+          return bvnVerified || !!(formData.idFrontUrl && formData.selfieUrl);
+        }
+        
+        // For Stripe countries (US/Europe), require Stripe verification OR documents
+        if (isStripeCountry) {
+          return stripeVerificationStatus === 'verified' || !!(formData.idFrontUrl && formData.selfieUrl);
+        }
+        
+        // For other countries, require document uploads
+        return !!(formData.idFrontUrl && formData.selfieUrl);
       case 5:
         return formData.acceptTerms;
       default:
@@ -1011,47 +1023,53 @@ export default function Onboarding() {
                   </div>
                 )}
 
-                {/* Manual Upload Section */}
-                {verificationMethod === 'manual' && (
-                  <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="idType">ID Type *</Label>
-                        <Select value={formData.idType} onValueChange={(v) => updateField('idType', v)}>
-                          <SelectTrigger data-testid="select-id-type">
-                            <SelectValue placeholder="Select ID type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {ID_TYPES.map(type => (
-                              <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="idNumber">ID Number *</Label>
-                        <Input
-                          id="idNumber"
-                          value={formData.idNumber}
-                          onChange={(e) => updateField('idNumber', e.target.value)}
-                          placeholder="Enter ID number"
-                          data-testid="input-id-number"
-                        />
-                      </div>
-                    </div>
-
+                {/* ID Type and Number - Required for all verification methods */}
+                <div className="space-y-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-blue-600" />
+                    <h4 className="font-medium">Government-Issued ID Details</h4>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Please provide your official ID information. This is required for verification regardless of the method chosen above.
+                  </p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="idExpiryDate">ID Expiry Date</Label>
+                      <Label htmlFor="idType">ID Type *</Label>
+                      <Select value={formData.idType} onValueChange={(v) => updateField('idType', v)}>
+                        <SelectTrigger data-testid="select-id-type">
+                          <SelectValue placeholder="Select ID type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ID_TYPES.map(type => (
+                            <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="idNumber">ID Number *</Label>
                       <Input
-                        id="idExpiryDate"
-                        type="date"
-                        value={formData.idExpiryDate}
-                        onChange={(e) => updateField('idExpiryDate', e.target.value)}
-                        data-testid="input-id-expiry"
+                        id="idNumber"
+                        value={formData.idNumber}
+                        onChange={(e) => updateField('idNumber', e.target.value)}
+                        placeholder="Enter ID number"
+                        data-testid="input-id-number"
                       />
                     </div>
-                  </>
-                )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="idExpiryDate">ID Expiry Date (Optional)</Label>
+                    <Input
+                      id="idExpiryDate"
+                      type="date"
+                      value={formData.idExpiryDate}
+                      onChange={(e) => updateField('idExpiryDate', e.target.value)}
+                      data-testid="input-id-expiry"
+                    />
+                  </div>
+                </div>
 
                 <div className="space-y-4">
                   <h4 className="font-medium">Upload Documents {verificationMethod === 'manual' ? '(Required)' : '(Optional)'}</h4>
@@ -1176,6 +1194,17 @@ export default function Onboarding() {
                     <div>
                       <p className="text-muted-foreground">ID Number</p>
                       <p className="font-medium">{formData.idNumber || "Not provided"}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-muted-foreground">Verification Status</p>
+                      <div className="flex items-center gap-2">
+                        {bvnVerified && <Badge className="bg-green-600">BVN Verified</Badge>}
+                        {stripeVerificationStatus === 'verified' && <Badge className="bg-green-600">Stripe Verified</Badge>}
+                        {(formData.idFrontUrl || formData.idBackUrl) && <Badge variant="secondary">Documents Uploaded</Badge>}
+                        {!bvnVerified && stripeVerificationStatus !== 'verified' && !formData.idFrontUrl && !formData.idBackUrl && (
+                          <Badge variant="outline">ID Details Only</Badge>
+                        )}
+                      </div>
                     </div>
                     {formData.isBusinessAccount && (
                       <>
