@@ -4,6 +4,14 @@
 Spendly is a comprehensive financial operating system for high-growth teams. It provides expense tracking, budget management, virtual cards, team management, payroll, invoicing, vendor management, and transaction monitoring in a unified platform.
 
 ## Recent Changes (January 31, 2026)
+- **User-Generated Virtual Accounts**: Users can now generate their own virtual account numbers directly from the dashboard
+  - "Generate Virtual Account" button appears when no account exists
+  - Virtual accounts are linked to user's wallet for automatic crediting
+  - SMS notifications sent when funds arrive via bank transfer
+  - Enhanced Paystack webhook to find wallets via virtual account number lookup
+- **Admin Authentication Separation**: Dedicated admin login portal (/admin-login) with backend session authentication
+  - AdminRoute wrapper accepts both Firebase auth and admin session
+  - Admin credentials managed separately from user Firebase authentication
 - **Comprehensive Email Notification System**: 8 email templates with consistent Spendly branding:
   - Welcome email (on signup)
   - Password reset success confirmation

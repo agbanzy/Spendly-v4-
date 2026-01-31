@@ -2373,7 +2373,8 @@ export async function registerRoutes(
 
       // Handle virtual account funding (incoming bank transfer via DVA)
       if (eventType === 'charge.success' && event.data.channel === 'dedicated_nuban') {
-        const { reference, amount, customer } = event.data;
+        const { reference, amount, customer, authorization } = event.data;
+        const dedicatedAccount = event.data.dedicated_account || {};
         
         // In-memory idempotency check
         if (processedPaystackReferences.has(reference)) {
@@ -2393,12 +2394,36 @@ export async function registerRoutes(
         processedPaystackReferences.add(reference);
         const amountValue = amount / 100;
         
-        // Find user wallet by customer code, email, or userId
-        // Priority: 1) Paystack customer code in metadata, 2) userId matches email
+        // Priority lookup for wallet:
+        // 1) Find virtual account by account number, get userId, find wallet
+        // 2) Match by Paystack customer code in wallet metadata
+        // 3) Match by email as userId
+        
+        let userWallet = null;
+        let virtualAccount = null;
+        
+        // First try to find by virtual account number
+        const virtualAccounts = await storage.getVirtualAccounts();
+        if (dedicatedAccount?.account_number) {
+          virtualAccount = virtualAccounts.find((va: any) => 
+            va.accountNumber === dedicatedAccount.account_number
+          );
+        }
+        
         const wallets = await storage.getWallets();
-        let userWallet = wallets.find((w: any) => 
-          w.metadata?.paystackCustomerCode === customer?.customer_code
-        );
+        
+        if (virtualAccount && virtualAccount.userId) {
+          // Found the virtual account, now find the user's wallet
+          userWallet = wallets.find((w: any) => w.userId === virtualAccount.userId);
+          console.log(`Found wallet via virtual account ${virtualAccount.accountNumber} for user ${virtualAccount.userId}`);
+        }
+        
+        // Fallback: match by Paystack customer code
+        if (!userWallet) {
+          userWallet = wallets.find((w: any) => 
+            w.metadata?.paystackCustomerCode === customer?.customer_code
+          );
+        }
         
         // Fallback: match by email if no customer code match
         if (!userWallet) {
@@ -2413,9 +2438,38 @@ export async function registerRoutes(
             'virtual_account_funding',
             `Bank transfer via DVA - Ref: ${reference}`,
             reference,
-            { provider: 'paystack', channel: 'dedicated_nuban', customerCode: customer?.customer_code }
+            { 
+              provider: 'paystack', 
+              channel: 'dedicated_nuban', 
+              customerCode: customer?.customer_code,
+              accountNumber: dedicatedAccount?.account_number,
+              senderName: authorization?.sender_name || 'Unknown'
+            }
           );
           console.log(`Wallet ${userWallet.id} credited with ${amountValue} via DVA (${reference})`);
+          
+          // Send SMS notification if user has phone number
+          try {
+            if (userWallet.userId) {
+              const userProfile = await storage.getUserProfile(userWallet.userId);
+              if (userProfile?.phone) {
+                const wallet = await storage.getWallet(userWallet.id);
+                const settings = await storage.getCompanySettings();
+                const currency = settings?.currency || 'NGN';
+                const newBalance = wallet?.balance || userWallet.balance;
+                await notificationService.sendTransactionSms(
+                  userProfile.phone,
+                  'credit',
+                  amountValue,
+                  currency,
+                  `Bank transfer - ${reference.substring(0, 8)}`,
+                  parseFloat(String(newBalance))
+                );
+              }
+            }
+          } catch (smsError) {
+            console.error('Failed to send DVA funding SMS notification:', smsError);
+          }
         } else {
           console.warn(`No wallet found for customer ${customer?.customer_code || customer?.email}. DVA funding not credited. Consider manual reconciliation.`);
         }

@@ -144,11 +144,20 @@ export default function Dashboard() {
   });
 
   const { data: virtualAccounts } = useQuery<VirtualAccount[]>({
-    queryKey: ["/api/virtual-accounts"],
+    queryKey: ["/api/virtual-accounts", user?.id],
+    queryFn: async () => {
+      const res = await fetch("/api/virtual-accounts");
+      if (!res.ok) return [];
+      const accounts = await res.json();
+      // Filter to only show the current user's accounts
+      return accounts.filter((a: VirtualAccount) => a.userId === user?.id);
+    },
+    enabled: !!user?.id,
   });
 
   // Get primary virtual account for deposits
   const primaryVirtualAccount = virtualAccounts?.find(a => a.status === 'active') || virtualAccounts?.[0];
+  const hasVirtualAccount = !!primaryVirtualAccount;
 
   const countryCode = settings?.countryCode || "US";
   const isPaystack = isPaystackRegion(countryCode);
@@ -295,6 +304,53 @@ export default function Dashboard() {
       toast({ title: "Failed to send money", variant: "destructive" });
     },
   });
+
+  const [isGeneratingVirtualAccount, setIsGeneratingVirtualAccount] = useState(false);
+  
+  const generateVirtualAccountMutation = useMutation({
+    mutationFn: async () => {
+      if (!user?.id || !userProfile) {
+        throw new Error("User profile not found. Please complete onboarding first.");
+      }
+      
+      // Parse name from displayName
+      const displayName = userProfile.displayName || user.email?.split('@')[0] || "User";
+      const nameParts = displayName.split(' ');
+      const firstName = nameParts[0] || "User";
+      const lastName = nameParts.slice(1).join(' ') || "";
+      
+      const res = await apiRequest("POST", "/api/virtual-accounts/create", {
+        userId: user.id,
+        email: user.email || userProfile.email || "",
+        firstName,
+        lastName,
+        countryCode: userProfile.country || countryCode,
+      });
+      
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/virtual-accounts"] });
+      toast({ 
+        title: "Virtual Account Created!", 
+        description: `Your account number: ${data.accountNumber} at ${data.bankName}` 
+      });
+      setIsGeneratingVirtualAccount(false);
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: "Failed to create virtual account", 
+        description: error.message || "Please try again later",
+        variant: "destructive" 
+      });
+      setIsGeneratingVirtualAccount(false);
+    },
+  });
+
+  const handleGenerateVirtualAccount = () => {
+    setIsGeneratingVirtualAccount(true);
+    generateVirtualAccountMutation.mutate();
+  };
 
   const validateAccount = async () => {
     if (!sendMoneyData.recipient || !sendMoneyData.bankCode) {
@@ -580,7 +636,7 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      {primaryVirtualAccount && (
+      {hasVirtualAccount ? (
         <Card className="glass overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
@@ -590,31 +646,73 @@ export default function Dashboard() {
                 </div>
                 <div>
                   <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Your Virtual Account</p>
-                  <p className="text-sm font-medium">{primaryVirtualAccount.name || 'Spendly Account'}</p>
+                  <p className="text-sm font-medium">{primaryVirtualAccount!.name || 'Spendly Account'}</p>
                 </div>
               </div>
-              <Badge variant="outline" className="text-xs">{primaryVirtualAccount.status === 'active' ? 'Active' : 'Inactive'}</Badge>
+              <Badge variant="outline" className="text-xs">{primaryVirtualAccount!.status === 'active' ? 'Active' : 'Inactive'}</Badge>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="p-3 bg-muted/50 rounded-xl">
                 <p className="text-xs text-muted-foreground mb-1">Bank Name</p>
-                <p className="text-sm font-bold">{primaryVirtualAccount.bankName || 'Wema Bank'}</p>
+                <p className="text-sm font-bold">{primaryVirtualAccount!.bankName || 'Wema Bank'}</p>
               </div>
               <div className="p-3 bg-muted/50 rounded-xl">
                 <p className="text-xs text-muted-foreground mb-1">Account Number</p>
                 <div className="flex items-center gap-2">
-                  <p className="text-sm font-bold font-mono">{primaryVirtualAccount.accountNumber}</p>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(primaryVirtualAccount.accountNumber)}>
+                  <p className="text-sm font-bold font-mono">{primaryVirtualAccount!.accountNumber}</p>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(primaryVirtualAccount!.accountNumber)} data-testid="button-copy-account">
                     <Copy className="h-3 w-3" />
                   </Button>
                 </div>
               </div>
               <div className="p-3 bg-muted/50 rounded-xl">
                 <p className="text-xs text-muted-foreground mb-1">Currency</p>
-                <p className="text-sm font-bold">{primaryVirtualAccount.currency || 'NGN'}</p>
+                <p className="text-sm font-bold">{primaryVirtualAccount!.currency || 'NGN'}</p>
               </div>
             </div>
             <p className="text-xs text-muted-foreground mt-3">Transfer funds to this account to add money to your wallet instantly.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="glass overflow-hidden bg-gradient-to-br from-emerald-500/10 via-background to-teal-500/10 border-dashed border-2 border-primary/30">
+          <CardContent className="p-6">
+            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="p-4 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl shadow-lg">
+                  <Building className="h-6 w-6 text-white" />
+                </div>
+                <div className="text-center md:text-left">
+                  <h3 className="text-lg font-bold">Generate Your Virtual Account</h3>
+                  <p className="text-sm text-muted-foreground max-w-md">
+                    Get a dedicated account number to receive payments. Any funds sent to this account will automatically credit your wallet.
+                  </p>
+                </div>
+              </div>
+              <Button 
+                onClick={handleGenerateVirtualAccount}
+                disabled={isGeneratingVirtualAccount || !userProfile}
+                className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white px-6"
+                data-testid="button-generate-virtual-account"
+              >
+                {isGeneratingVirtualAccount ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Generate Account
+                  </>
+                )}
+              </Button>
+            </div>
+            {!userProfile && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-3 flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                Complete your profile in onboarding to generate a virtual account.
+              </p>
+            )}
           </CardContent>
         </Card>
       )}
@@ -801,11 +899,25 @@ export default function Dashboard() {
                 ) : (
                   <div className="text-center py-4">
                     <p className="text-sm text-muted-foreground mb-2">No virtual account found</p>
-                    <Button variant="outline" size="sm" onClick={() => {
-                      toast({ title: "Creating virtual account...", description: "Please complete onboarding to get your virtual account." });
-                    }}>
-                      Create Virtual Account
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={handleGenerateVirtualAccount}
+                      disabled={isGeneratingVirtualAccount || !userProfile}
+                      data-testid="button-generate-virtual-account-dialog"
+                    >
+                      {isGeneratingVirtualAccount ? (
+                        <>
+                          <Loader2 className="h-3 w-3 animate-spin mr-2" />
+                          Creating...
+                        </>
+                      ) : (
+                        "Generate Virtual Account"
+                      )}
                     </Button>
+                    {!userProfile && (
+                      <p className="text-xs text-amber-600 mt-2">Complete onboarding first</p>
+                    )}
                   </div>
                 )}
               </div>
