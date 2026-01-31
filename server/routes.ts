@@ -2789,7 +2789,64 @@ export async function registerRoutes(
         onboardingStep: 5,
       });
 
-      res.status(201).json(submission);
+      // Auto-create virtual account if approved
+      let virtualAccount = null;
+      if (isAutoApproved) {
+        try {
+          // Check if user already has a virtual account
+          const existingAccounts = await storage.getVirtualAccounts();
+          const userAccount = existingAccounts.find((a: any) => a.userId === data.firebaseUid);
+          
+          if (!userAccount) {
+            // Create virtual account via payment provider
+            const result = await paymentService.createVirtualAccount(
+              userProfile.email,
+              data.firstName,
+              data.lastName,
+              data.country
+            );
+
+            // Store in database
+            virtualAccount = await storage.createVirtualAccount({
+              userId: data.firebaseUid,
+              provider: result.provider,
+              accountNumber: result.accountNumber || '',
+              bankName: result.bankName || 'Spendly',
+              accountName: result.accountName || `${data.firstName} ${data.lastName}`,
+              currency: getCurrencyForCountry(data.country).currency,
+              country: data.country,
+              status: 'active',
+              metadata: result,
+            });
+
+            // Create wallet for this user if not exists
+            const existingWallet = await storage.getWalletByUserId(data.firebaseUid);
+            if (!existingWallet) {
+              await storage.createWallet({
+                userId: data.firebaseUid,
+                currency: getCurrencyForCountry(data.country).currency,
+                type: 'personal',
+                balance: '0',
+                availableBalance: '0',
+                pendingBalance: '0',
+                status: 'active',
+                virtualAccountId: virtualAccount.id,
+              });
+            }
+          } else {
+            virtualAccount = userAccount;
+          }
+        } catch (vaError: any) {
+          console.error('Failed to create virtual account:', vaError.message);
+          // Don't fail the KYC submission if virtual account creation fails
+        }
+      }
+
+      res.status(201).json({ 
+        ...submission, 
+        virtualAccount,
+        autoApproved: isAutoApproved 
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to submit KYC" });
     }
@@ -4234,6 +4291,96 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to delete funding source" });
+    }
+  });
+
+  // ==================== ADMIN USER MANAGEMENT ====================
+  
+  // Seed admin user (one-time setup)
+  app.post("/api/admin/seed", async (req, res) => {
+    try {
+      const bcrypt = await import('bcryptjs');
+      
+      // Check if admin already exists
+      const existingUsers = await storage.getUsers();
+      const adminExists = existingUsers.some(u => u.role === 'OWNER' || u.username === 'admin');
+      
+      if (adminExists) {
+        return res.status(400).json({ error: "Admin user already exists" });
+      }
+      
+      // Create default admin user
+      const hashedPassword = await bcrypt.hash('Admin@123', 10);
+      const adminUser = await storage.createUser({
+        username: 'admin',
+        password: hashedPassword,
+        name: 'System Administrator',
+        email: 'admin@spendly.com',
+        role: 'OWNER',
+        department: 'Administration',
+        avatar: null,
+        permissions: ['all'],
+      });
+      
+      res.status(201).json({ 
+        message: "Admin user created successfully",
+        username: 'admin',
+        defaultPassword: 'Admin@123',
+        note: 'Please change the password after first login'
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to create admin user" });
+    }
+  });
+
+  // Admin login
+  app.post("/api/admin/login", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      
+      if (!username || !password) {
+        return res.status(400).json({ error: "Username and password are required" });
+      }
+      
+      const bcrypt = await import('bcryptjs');
+      const users = await storage.getUsers();
+      const user = users.find(u => u.username === username);
+      
+      if (!user) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+      
+      const isValidPassword = await bcrypt.compare(password, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+      
+      // Check if user has admin privileges
+      if (!['OWNER', 'ADMIN'].includes(user.role)) {
+        return res.status(403).json({ error: "Access denied. Admin privileges required." });
+      }
+      
+      // Return user info (without password)
+      const { password: _, ...userWithoutPassword } = user;
+      res.json({
+        success: true,
+        user: userWithoutPassword,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Login failed" });
+    }
+  });
+
+  // Get all admin users
+  app.get("/api/admin/users", async (req, res) => {
+    try {
+      const users = await storage.getUsers();
+      const adminUsers = users
+        .filter(u => ['OWNER', 'ADMIN'].includes(u.role))
+        .map(({ password, ...user }) => user);
+      res.json(adminUsers);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch admin users" });
     }
   });
 
