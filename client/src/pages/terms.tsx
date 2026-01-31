@@ -103,7 +103,7 @@ export default function TermsPage() {
             <section className="mb-8">
               <h2 className="text-xl font-semibold mb-4">11. Contact Us</h2>
               <p className="text-muted-foreground mb-4">
-                If you have any questions about these Terms of Service, please contact us at legal@spendly.com.
+                If you have any questions about these Terms of Service, please contact us at legal@spendlymanager.com.
               </p>
             </section>
           </CardContent>

@@ -1315,7 +1315,7 @@ export default function Onboarding() {
         </Card>
 
         <p className="text-center text-sm text-muted-foreground mt-6">
-          Need help? <a href="mailto:support@spendly.com" className="text-indigo-600 hover:underline">Contact Support</a>
+          Need help? <a href="mailto:support@spendlymanager.com" className="text-indigo-600 hover:underline">Contact Support</a>
         </p>
       </div>
     </div>

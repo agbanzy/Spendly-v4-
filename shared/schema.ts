@@ -284,7 +284,7 @@ export const companyBalances = pgTable("company_balances", {
 export const companySettings = pgTable("company_settings", {
   id: integer("id").primaryKey().default(1),
   companyName: text("company_name").notNull().default('Spendly'),
-  companyEmail: text("company_email").notNull().default('finance@spendly.com'),
+  companyEmail: text("company_email").notNull().default('finance@spendlymanager.com'),
   companyPhone: text("company_phone").notNull().default('+1 (555) 123-4567'),
   companyAddress: text("company_address").notNull().default('123 Business Ave, San Francisco, CA 94105'),
   currency: text("currency").notNull().default('USD'),

@@ -4315,7 +4315,7 @@ export async function registerRoutes(
         username: 'admin',
         password: hashedPassword,
         name: 'System Administrator',
-        email: 'admin@spendly.com',
+        email: 'info@spendlymanager.com',
         role: 'OWNER',
         department: 'Administration',
         avatar: null,

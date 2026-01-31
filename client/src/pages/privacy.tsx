@@ -134,7 +134,7 @@ export default function PrivacyPage() {
             <section className="mb-8">
               <h2 className="text-xl font-semibold mb-4">11. Contact Us</h2>
               <p className="text-muted-foreground mb-4">
-                If you have questions about this Privacy Policy or our data practices, please contact us at privacy@spendly.com.
+                If you have questions about this Privacy Policy or our data practices, please contact us at privacy@spendlymanager.com.
               </p>
             </section>
           </CardContent>
