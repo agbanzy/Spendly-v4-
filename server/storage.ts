@@ -102,6 +102,7 @@ export interface IStorage {
   getReports(): Promise<Report[]>;
   getReport(id: string): Promise<Report | undefined>;
   createReport(report: Omit<Report, 'id'>): Promise<Report>;
+  updateReportStatus(id: string, update: { status: string; fileSize?: string }): Promise<Report | undefined>;
   deleteReport(id: string): Promise<boolean>;
   
   getSettings(): Promise<CompanySettings>;
@@ -612,6 +613,11 @@ export class DatabaseStorage implements IStorage {
 
   async createReport(report: Omit<Report, 'id'>): Promise<Report> {
     const result = await db.insert(reports).values(report as any).returning();
+    return result[0];
+  }
+
+  async updateReportStatus(id: string, update: { status: string; fileSize?: string }): Promise<Report | undefined> {
+    const result = await db.update(reports).set(update).where(eq(reports.id, id)).returning();
     return result[0];
   }
 
