@@ -4,6 +4,11 @@
 Spendly is a comprehensive financial operating system for high-growth teams. It provides expense tracking, budget management, virtual cards, team management, payroll, invoicing, vendor management, and transaction monitoring in a unified platform.
 
 ## Recent Changes (January 31, 2026)
+- **TypeScript Type Safety Fixes**: Fixed 47+ type errors across routes.ts - all decimal field schemas now use String() transforms for PostgreSQL compatibility
+- **Virtual Account User Linkage**: Added userId column to virtual_accounts table for proper user-account association
+- **Expense Schema Defaults**: Added default values for userId and user to prevent null constraint violations
+- **Vendor Update Schema**: Updated totalPaid and pendingPayments fields to use proper String() transforms
+- **Report Status Updates**: Added updateReportStatus storage method for report lifecycle management
 - **Organization Settings**: Industry type, company size, Tax ID/VAT, registration number, website fields
 - **Branding Customization**: Company logo URL, tagline, primary/secondary brand colors with color picker
 - **Invoice Settings**: Invoice prefix, fiscal year, payment terms, custom footer text
