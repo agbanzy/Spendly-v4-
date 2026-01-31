@@ -554,6 +554,551 @@ If you have any questions, please contact your team administrator.
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
+
+  async sendWelcomeEmail(config: { email: string; name: string }): Promise<{ success: boolean; error?: string }> {
+    const appUrl = process.env.REPLIT_DEV_DOMAIN 
+      ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
+      : 'https://spendlymanager.com';
+    
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Welcome to Spendly</title>
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+          <div style="background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); padding: 40px; text-align: center;">
+            <h1 style="color: #ffffff; margin: 0; font-size: 32px;">Welcome to Spendly!</h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 16px;">Your financial operating system</p>
+          </div>
+          <div style="padding: 32px;">
+            <p style="font-size: 18px; color: #1f2937;">Hi <strong>${config.name}</strong>,</p>
+            <p style="color: #4b5563; line-height: 1.6; font-size: 16px;">Thank you for signing up for Spendly! We're excited to have you on board.</p>
+            <p style="color: #4b5563; line-height: 1.6; font-size: 16px;">Here's what you can do with Spendly:</p>
+            <ul style="color: #4b5563; line-height: 1.8; font-size: 15px;">
+              <li>Track and manage expenses effortlessly</li>
+              <li>Set budgets and monitor spending</li>
+              <li>Create and send professional invoices</li>
+              <li>Manage vendor payments and payroll</li>
+              <li>Get real-time financial insights</li>
+            </ul>
+            <div style="text-align: center; margin: 32px 0;">
+              <a href="${appUrl}/dashboard" style="display: inline-block; background-color: #4F46E5; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">Go to Dashboard</a>
+            </div>
+            <p style="color: #6b7280; font-size: 14px;">Need help getting started? Check out our onboarding guide or contact our support team.</p>
+          </div>
+          <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb;">
+            <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+              &copy; ${new Date().getFullYear()} Spendly. All rights reserved.
+            </p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      await this.sendEmail({
+        to: config.email,
+        subject: 'Welcome to Spendly - Your Account is Ready!',
+        html,
+        text: `Hi ${config.name}, Welcome to Spendly! Your account has been created successfully. Visit ${appUrl}/dashboard to get started.`,
+      });
+      console.log('Welcome email sent to:', config.email);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send welcome email:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  async sendPasswordResetSuccess(config: { email: string; name: string }): Promise<{ success: boolean; error?: string }> {
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Password Reset Successful</title>
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+          <div style="background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); padding: 32px; text-align: center;">
+            <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Password Reset Successful</h1>
+          </div>
+          <div style="padding: 32px;">
+            <p style="font-size: 16px; color: #1f2937;">Hi <strong>${config.name}</strong>,</p>
+            <p style="color: #4b5563; line-height: 1.6;">Your password has been successfully reset. You can now log in with your new password.</p>
+            <div style="background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 16px; margin: 24px 0; border-radius: 4px;">
+              <p style="color: #92400e; margin: 0; font-size: 14px;"><strong>Security Notice:</strong> If you didn't make this change, please contact our support team immediately.</p>
+            </div>
+            <p style="color: #6b7280; font-size: 14px;">For your security, we recommend using a strong, unique password.</p>
+          </div>
+          <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb;">
+            <p style="color: #9ca3af; font-size: 12px; margin: 0;">&copy; ${new Date().getFullYear()} Spendly. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      await this.sendEmail({
+        to: config.email,
+        subject: 'Your Spendly Password Has Been Reset',
+        html,
+        text: `Hi ${config.name}, Your password has been successfully reset. If you didn't make this change, please contact support immediately.`,
+      });
+      console.log('Password reset confirmation email sent to:', config.email);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send password reset confirmation:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  async sendEmailVerification(config: { email: string; name: string; verificationLink: string }): Promise<{ success: boolean; error?: string }> {
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Verify Your Email</title>
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+          <div style="background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); padding: 32px; text-align: center;">
+            <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Verify Your Email</h1>
+          </div>
+          <div style="padding: 32px;">
+            <p style="font-size: 16px; color: #1f2937;">Hi <strong>${config.name}</strong>,</p>
+            <p style="color: #4b5563; line-height: 1.6;">Please verify your email address to complete your Spendly account setup.</p>
+            <div style="text-align: center; margin: 32px 0;">
+              <a href="${config.verificationLink}" style="display: inline-block; background-color: #4F46E5; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">Verify Email Address</a>
+            </div>
+            <p style="color: #6b7280; font-size: 14px;">This link will expire in 24 hours. If you didn't create a Spendly account, you can safely ignore this email.</p>
+          </div>
+          <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb;">
+            <p style="color: #9ca3af; font-size: 12px; margin: 0;">&copy; ${new Date().getFullYear()} Spendly. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      await this.sendEmail({
+        to: config.email,
+        subject: 'Verify Your Spendly Email Address',
+        html,
+        text: `Hi ${config.name}, Please verify your email by visiting: ${config.verificationLink}. This link expires in 24 hours.`,
+      });
+      console.log('Email verification sent to:', config.email);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send email verification:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  async notifyPayoutProcessed(userId: string, payout: { 
+    amount: number; 
+    currency: string; 
+    recipientName: string; 
+    bankName?: string;
+    reference?: string;
+  }): Promise<void> {
+    await this.send({
+      userId,
+      type: 'payout_processed',
+      title: 'Payout Sent',
+      message: `${payout.currency} ${payout.amount.toLocaleString()} has been sent to ${payout.recipientName}${payout.bankName ? ` via ${payout.bankName}` : ''}.`,
+      data: { 
+        amount: payout.amount,
+        currency: payout.currency,
+        recipient: payout.recipientName,
+        reference: payout.reference,
+        actionUrl: '/transactions' 
+      },
+      channels: ['in_app', 'email', 'sms', 'push'],
+    });
+  }
+
+  async sendPayoutConfirmationEmail(config: {
+    email: string;
+    name: string;
+    amount: number;
+    currency: string;
+    recipientName: string;
+    recipientBank?: string;
+    recipientAccount?: string;
+    reference: string;
+    date: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Payout Confirmation</title>
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+          <div style="background: linear-gradient(135deg, #10B981 0%, #059669 100%); padding: 32px; text-align: center;">
+            <div style="font-size: 48px; margin-bottom: 10px;">✓</div>
+            <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Payout Successful</h1>
+          </div>
+          <div style="padding: 32px;">
+            <p style="font-size: 16px; color: #1f2937;">Hi <strong>${config.name}</strong>,</p>
+            <p style="color: #4b5563; line-height: 1.6;">Your payout has been successfully processed. Here are the details:</p>
+            <div style="background-color: #f9fafb; border-radius: 8px; padding: 20px; margin: 24px 0;">
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Amount</td>
+                  <td style="padding: 8px 0; color: #1f2937; font-weight: 600; text-align: right; font-size: 18px;">${config.currency} ${config.amount.toLocaleString()}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Recipient</td>
+                  <td style="padding: 8px 0; color: #1f2937; text-align: right;">${config.recipientName}</td>
+                </tr>
+                ${config.recipientBank ? `
+                <tr>
+                  <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Bank</td>
+                  <td style="padding: 8px 0; color: #1f2937; text-align: right;">${config.recipientBank}</td>
+                </tr>
+                ` : ''}
+                ${config.recipientAccount ? `
+                <tr>
+                  <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Account</td>
+                  <td style="padding: 8px 0; color: #1f2937; text-align: right;">****${config.recipientAccount.slice(-4)}</td>
+                </tr>
+                ` : ''}
+                <tr>
+                  <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Reference</td>
+                  <td style="padding: 8px 0; color: #1f2937; text-align: right; font-family: monospace;">${config.reference}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Date</td>
+                  <td style="padding: 8px 0; color: #1f2937; text-align: right;">${config.date}</td>
+                </tr>
+              </table>
+            </div>
+            <p style="color: #6b7280; font-size: 14px;">The funds should arrive in the recipient's account within 1-3 business days depending on the bank.</p>
+          </div>
+          <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb;">
+            <p style="color: #9ca3af; font-size: 12px; margin: 0;">&copy; ${new Date().getFullYear()} Spendly. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      await this.sendEmail({
+        to: config.email,
+        subject: `Payout Confirmation - ${config.currency} ${config.amount.toLocaleString()} sent`,
+        html,
+        text: `Hi ${config.name}, Your payout of ${config.currency} ${config.amount} to ${config.recipientName} has been processed. Reference: ${config.reference}`,
+      });
+      console.log('Payout confirmation email sent to:', config.email);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send payout confirmation:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  async notifyInvoiceSent(userId: string, invoice: { 
+    id: string;
+    invoiceNumber: string;
+    clientName: string; 
+    amount: number;
+    currency: string;
+    dueDate: string;
+  }): Promise<void> {
+    await this.send({
+      userId,
+      type: 'invoice_sent',
+      title: 'Invoice Sent',
+      message: `Invoice ${invoice.invoiceNumber} for ${invoice.currency} ${invoice.amount.toLocaleString()} has been sent to ${invoice.clientName}.`,
+      data: { 
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        actionUrl: '/invoices' 
+      },
+      channels: ['in_app', 'email', 'push'],
+    });
+  }
+
+  async sendInvoiceEmail(config: {
+    email: string;
+    clientName: string;
+    senderName: string;
+    invoiceNumber: string;
+    amount: number;
+    currency: string;
+    dueDate: string;
+    items: Array<{ description: string; quantity: number; price: number }>;
+    paymentLink?: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    const itemsHtml = config.items.map(item => `
+      <tr>
+        <td style="padding: 12px 0; border-bottom: 1px solid #e5e7eb; color: #374151;">${item.description}</td>
+        <td style="padding: 12px 0; border-bottom: 1px solid #e5e7eb; color: #374151; text-align: center;">${item.quantity}</td>
+        <td style="padding: 12px 0; border-bottom: 1px solid #e5e7eb; color: #374151; text-align: right;">${config.currency} ${item.price.toLocaleString()}</td>
+        <td style="padding: 12px 0; border-bottom: 1px solid #e5e7eb; color: #374151; text-align: right;">${config.currency} ${(item.quantity * item.price).toLocaleString()}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Invoice ${config.invoiceNumber}</title>
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+          <div style="background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); padding: 32px; text-align: center;">
+            <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Invoice</h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0;">${config.invoiceNumber}</p>
+          </div>
+          <div style="padding: 32px;">
+            <p style="font-size: 16px; color: #1f2937;">Dear <strong>${config.clientName}</strong>,</p>
+            <p style="color: #4b5563; line-height: 1.6;">Please find attached your invoice from <strong>${config.senderName}</strong>.</p>
+            
+            <table style="width: 100%; border-collapse: collapse; margin: 24px 0;">
+              <thead>
+                <tr style="background-color: #f9fafb;">
+                  <th style="padding: 12px 0; text-align: left; color: #6b7280; font-weight: 600; font-size: 14px;">Description</th>
+                  <th style="padding: 12px 0; text-align: center; color: #6b7280; font-weight: 600; font-size: 14px;">Qty</th>
+                  <th style="padding: 12px 0; text-align: right; color: #6b7280; font-weight: 600; font-size: 14px;">Price</th>
+                  <th style="padding: 12px 0; text-align: right; color: #6b7280; font-weight: 600; font-size: 14px;">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itemsHtml}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colspan="3" style="padding: 16px 0; text-align: right; font-weight: 600; color: #1f2937; font-size: 16px;">Total Due:</td>
+                  <td style="padding: 16px 0; text-align: right; font-weight: 700; color: #4F46E5; font-size: 18px;">${config.currency} ${config.amount.toLocaleString()}</td>
+                </tr>
+              </tfoot>
+            </table>
+
+            <div style="background-color: #fef3c7; border-radius: 8px; padding: 16px; margin: 24px 0;">
+              <p style="color: #92400e; margin: 0; font-size: 14px;"><strong>Due Date:</strong> ${config.dueDate}</p>
+            </div>
+
+            ${config.paymentLink ? `
+            <div style="text-align: center; margin: 32px 0;">
+              <a href="${config.paymentLink}" style="display: inline-block; background-color: #4F46E5; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">Pay Now</a>
+            </div>
+            ` : ''}
+
+            <p style="color: #6b7280; font-size: 14px;">If you have any questions about this invoice, please contact us.</p>
+          </div>
+          <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb;">
+            <p style="color: #9ca3af; font-size: 12px; margin: 0;">This invoice was sent via Spendly</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      await this.sendEmail({
+        to: config.email,
+        subject: `Invoice ${config.invoiceNumber} from ${config.senderName} - ${config.currency} ${config.amount.toLocaleString()}`,
+        html,
+        text: `Invoice ${config.invoiceNumber} from ${config.senderName}. Amount: ${config.currency} ${config.amount}. Due: ${config.dueDate}.`,
+      });
+      console.log('Invoice email sent to:', config.email);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send invoice email:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  async notifyPayrollProcessed(userId: string, payroll: { 
+    totalAmount: number;
+    currency: string;
+    employeeCount: number;
+    payPeriod: string;
+  }): Promise<void> {
+    await this.send({
+      userId,
+      type: 'payroll_processed',
+      title: 'Payroll Processed',
+      message: `Payroll of ${payroll.currency} ${payroll.totalAmount.toLocaleString()} for ${payroll.employeeCount} employees (${payroll.payPeriod}) has been processed.`,
+      data: { actionUrl: '/payroll' },
+      channels: ['in_app', 'email', 'push'],
+    });
+  }
+
+  async sendPayslipEmail(config: {
+    email: string;
+    employeeName: string;
+    payPeriod: string;
+    grossSalary: number;
+    deductions: number;
+    netPay: number;
+    currency: string;
+    paymentDate: string;
+    companyName: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Your Payslip</title>
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+          <div style="background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); padding: 32px; text-align: center;">
+            <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Payslip</h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0;">${config.payPeriod}</p>
+          </div>
+          <div style="padding: 32px;">
+            <p style="font-size: 16px; color: #1f2937;">Dear <strong>${config.employeeName}</strong>,</p>
+            <p style="color: #4b5563; line-height: 1.6;">Your salary for ${config.payPeriod} has been processed by <strong>${config.companyName}</strong>.</p>
+            
+            <div style="background-color: #f9fafb; border-radius: 8px; padding: 20px; margin: 24px 0;">
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 12px 0; color: #6b7280; font-size: 14px; border-bottom: 1px solid #e5e7eb;">Gross Salary</td>
+                  <td style="padding: 12px 0; color: #1f2937; text-align: right; font-size: 16px; border-bottom: 1px solid #e5e7eb;">${config.currency} ${config.grossSalary.toLocaleString()}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 0; color: #6b7280; font-size: 14px; border-bottom: 1px solid #e5e7eb;">Deductions</td>
+                  <td style="padding: 12px 0; color: #dc2626; text-align: right; font-size: 16px; border-bottom: 1px solid #e5e7eb;">- ${config.currency} ${config.deductions.toLocaleString()}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 12px 0; color: #1f2937; font-weight: 600; font-size: 16px;">Net Pay</td>
+                  <td style="padding: 12px 0; color: #10B981; font-weight: 700; text-align: right; font-size: 20px;">${config.currency} ${config.netPay.toLocaleString()}</td>
+                </tr>
+              </table>
+            </div>
+
+            <p style="color: #6b7280; font-size: 14px;"><strong>Payment Date:</strong> ${config.paymentDate}</p>
+            <p style="color: #6b7280; font-size: 14px;">The funds have been transferred to your registered bank account.</p>
+          </div>
+          <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb;">
+            <p style="color: #9ca3af; font-size: 12px; margin: 0;">&copy; ${new Date().getFullYear()} ${config.companyName}. Powered by Spendly.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      await this.sendEmail({
+        to: config.email,
+        subject: `Your Payslip - ${config.payPeriod}`,
+        html,
+        text: `Hi ${config.employeeName}, Your salary for ${config.payPeriod} has been processed. Net Pay: ${config.currency} ${config.netPay}. Payment Date: ${config.paymentDate}.`,
+      });
+      console.log('Payslip email sent to:', config.email);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send payslip email:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  async sendLoginAlertEmail(config: {
+    email: string;
+    name: string;
+    loginTime: string;
+    ipAddress?: string;
+    device?: string;
+    location?: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>New Login Alert</title>
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+          <div style="background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); padding: 32px; text-align: center;">
+            <h1 style="color: #ffffff; margin: 0; font-size: 24px;">New Login Detected</h1>
+          </div>
+          <div style="padding: 32px;">
+            <p style="font-size: 16px; color: #1f2937;">Hi <strong>${config.name}</strong>,</p>
+            <p style="color: #4b5563; line-height: 1.6;">We detected a new login to your Spendly account.</p>
+            <div style="background-color: #f9fafb; border-radius: 8px; padding: 20px; margin: 24px 0;">
+              <p style="margin: 8px 0; color: #374151;"><strong>Time:</strong> ${config.loginTime}</p>
+              ${config.device ? `<p style="margin: 8px 0; color: #374151;"><strong>Device:</strong> ${config.device}</p>` : ''}
+              ${config.ipAddress ? `<p style="margin: 8px 0; color: #374151;"><strong>IP Address:</strong> ${config.ipAddress}</p>` : ''}
+              ${config.location ? `<p style="margin: 8px 0; color: #374151;"><strong>Location:</strong> ${config.location}</p>` : ''}
+            </div>
+            <div style="background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 16px; margin: 24px 0; border-radius: 4px;">
+              <p style="color: #92400e; margin: 0; font-size: 14px;"><strong>Wasn't you?</strong> If you didn't log in, please change your password immediately and contact support.</p>
+            </div>
+          </div>
+          <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb;">
+            <p style="color: #9ca3af; font-size: 12px; margin: 0;">&copy; ${new Date().getFullYear()} Spendly. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      await this.sendEmail({
+        to: config.email,
+        subject: 'New Login to Your Spendly Account',
+        html,
+        text: `Hi ${config.name}, A new login was detected on your Spendly account at ${config.loginTime}. If this wasn't you, please change your password immediately.`,
+      });
+      console.log('Login alert email sent to:', config.email);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send login alert email:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  async sendTransactionAlertSms(config: {
+    phone: string;
+    type: 'credit' | 'debit';
+    amount: number;
+    currency: string;
+    description: string;
+    balance?: number;
+  }): Promise<{ success: boolean; error?: string }> {
+    const typeLabel = config.type === 'credit' ? 'Credited' : 'Debited';
+    const sign = config.type === 'credit' ? '+' : '-';
+    const balanceText = config.balance !== undefined ? ` Bal: ${config.currency}${config.balance.toLocaleString()}` : '';
+    
+    const message = `Spendly: ${typeLabel} ${sign}${config.currency}${config.amount.toLocaleString()} - ${config.description}.${balanceText}`;
+
+    try {
+      await this.sendSms({
+        to: config.phone,
+        body: message,
+      });
+      console.log('Transaction SMS alert sent to:', config.phone);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send transaction SMS:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
 }
 
 export const notificationService = new NotificationService();

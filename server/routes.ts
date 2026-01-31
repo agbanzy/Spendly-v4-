@@ -1377,6 +1377,28 @@ export async function registerRoutes(
         currency: 'USD',
       });
 
+      // Send payslip emails to each employee
+      const settings = await storage.getOrganizationSettings();
+      const companyName = settings?.companyName || 'Spendly';
+      const currency = settings?.currency || 'USD';
+      const payPeriod = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      
+      for (const entry of processedEntries) {
+        if (entry.email) {
+          notificationService.sendPayslipEmail({
+            email: entry.email,
+            employeeName: entry.employeeName,
+            payPeriod,
+            grossSalary: parseFloat(String(entry.salary || entry.grossSalary || 0)),
+            deductions: parseFloat(String(entry.deductions || 0)),
+            netPay: parseFloat(String(entry.netPay)),
+            currency,
+            paymentDate: new Date().toLocaleDateString(),
+            companyName,
+          }).catch(err => console.error('Failed to send payslip:', err));
+        }
+      }
+
       res.json({ 
         message: "Payroll processed successfully",
         processed: processedEntries.length,
@@ -1410,6 +1432,26 @@ export async function registerRoutes(
         description: `Salary payment - ${entry.employeeName}`,
         currency: 'USD',
       });
+
+      // Send payslip email to employee
+      if (entry.email) {
+        const settings = await storage.getOrganizationSettings();
+        const companyName = settings?.companyName || 'Spendly';
+        const currency = settings?.currency || 'USD';
+        const payPeriod = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        
+        notificationService.sendPayslipEmail({
+          email: entry.email,
+          employeeName: entry.employeeName,
+          payPeriod,
+          grossSalary: parseFloat(String(entry.salary || (entry as any).grossSalary || 0)),
+          deductions: parseFloat(String(entry.deductions || 0)),
+          netPay: parseFloat(String(entry.netPay)),
+          currency,
+          paymentDate: new Date().toLocaleDateString(),
+          companyName,
+        }).catch(err => console.error('Failed to send payslip:', err));
+      }
 
       res.json({ 
         message: "Payment processed successfully",
@@ -1462,6 +1504,31 @@ export async function registerRoutes(
         status: 'pending',
         items: items || [],
       });
+      
+      // Send invoice email to client if email provided
+      if (clientEmail) {
+        const settings = await storage.getOrganizationSettings();
+        const companyName = settings?.companyName || 'Spendly';
+        const appUrl = process.env.REPLIT_DEV_DOMAIN 
+          ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
+          : 'https://spendlymanager.com';
+        
+        notificationService.sendInvoiceEmail({
+          email: clientEmail,
+          clientName: client,
+          senderName: companyName,
+          invoiceNumber,
+          amount: parseFloat(amount),
+          currency: settings?.currency || 'USD',
+          dueDate: invoice.dueDate,
+          items: (items || []).map((item: any) => ({
+            description: item.description || 'Service',
+            quantity: item.quantity || 1,
+            price: parseFloat(item.price || item.amount || 0),
+          })),
+          paymentLink: `${appUrl}/pay/${invoice.id}`,
+        }).catch(err => console.error('Failed to send invoice email:', err));
+      }
       
       res.status(201).json(invoice);
     } catch (error) {
@@ -2669,6 +2736,13 @@ export async function registerRoutes(
         createdAt: now,
         updatedAt: now,
       });
+      
+      // Send welcome email to new user
+      notificationService.sendWelcomeEmail({
+        email,
+        name: displayName || email.split('@')[0],
+      }).catch(err => console.error('Failed to send welcome email:', err));
+      
       res.status(201).json(profile);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to create profile" });
@@ -3938,6 +4012,31 @@ export async function registerRoutes(
               { payoutId: payout.id }
             );
           }
+          
+          // Send payout confirmation notification
+          notificationService.notifyPayoutProcessed(payout.recipientId, {
+            amount: parseFloat(payout.amount),
+            currency: payout.currency,
+            recipientName: payout.recipientName,
+            bankName: destination.bankName,
+            reference: transferResult.reference,
+          }).catch(err => console.error('Failed to send payout notification:', err));
+          
+          // Also send detailed payout confirmation email if user has email
+          const recipientProfile = await storage.getUserProfile(payout.recipientId);
+          if (recipientProfile?.email) {
+            notificationService.sendPayoutConfirmationEmail({
+              email: recipientProfile.email,
+              name: payout.recipientName,
+              amount: parseFloat(payout.amount),
+              currency: payout.currency,
+              recipientName: payout.recipientName,
+              recipientBank: destination.bankName,
+              recipientAccount: destination.accountNumber,
+              reference: transferResult.reference || payout.id,
+              date: new Date().toLocaleDateString(),
+            }).catch(err => console.error('Failed to send payout email:', err));
+          }
         }
 
         res.json(updatedPayout);
@@ -4481,6 +4580,20 @@ export async function registerRoutes(
       
       // Return user info (without password)
       const { password: _, ...userWithoutPassword } = user;
+      
+      // Send login alert email if user has email
+      if (user.email) {
+        const ipAddress = req.headers['x-forwarded-for'] as string || req.socket.remoteAddress;
+        const userAgent = req.headers['user-agent'];
+        notificationService.sendLoginAlertEmail({
+          email: user.email,
+          name: user.displayName || user.username,
+          loginTime: new Date().toLocaleString(),
+          ipAddress: ipAddress?.split(',')[0],
+          device: userAgent,
+        }).catch(err => console.error('Failed to send login alert:', err));
+      }
+      
       res.json({
         success: true,
         user: userWithoutPassword,
@@ -4500,6 +4613,146 @@ export async function registerRoutes(
       res.json(adminUsers);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to fetch admin users" });
+    }
+  });
+
+  // ==================== NOTIFICATION API ENDPOINTS ====================
+
+  // Track user login (called from frontend after Firebase auth)
+  app.post("/api/auth/track-login", async (req, res) => {
+    try {
+      const { userId, email, displayName } = req.body;
+      
+      if (!userId || !email) {
+        return res.status(400).json({ error: "userId and email are required" });
+      }
+      
+      // Get user settings to check if login alerts are enabled
+      const settings = await storage.getNotificationSettings(userId);
+      
+      if (settings?.securityNotifications) {
+        const ipAddress = req.headers['x-forwarded-for'] as string || req.socket.remoteAddress;
+        const userAgent = req.headers['user-agent'];
+        
+        notificationService.sendLoginAlertEmail({
+          email,
+          name: displayName || email.split('@')[0],
+          loginTime: new Date().toLocaleString(),
+          ipAddress: ipAddress?.split(',')[0],
+          device: userAgent,
+        }).catch(err => console.error('Failed to send login alert:', err));
+      }
+      
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to track login" });
+    }
+  });
+
+  // Send password reset confirmation (called after successful reset)
+  app.post("/api/auth/password-reset-success", async (req, res) => {
+    try {
+      const { email, name } = req.body;
+      
+      if (!email) {
+        return res.status(400).json({ error: "email is required" });
+      }
+      
+      const result = await notificationService.sendPasswordResetSuccess({
+        email,
+        name: name || email.split('@')[0],
+      });
+      
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to send confirmation" });
+    }
+  });
+
+  // Send email verification
+  app.post("/api/auth/send-verification", async (req, res) => {
+    try {
+      const { email, name, verificationLink } = req.body;
+      
+      if (!email || !verificationLink) {
+        return res.status(400).json({ error: "email and verificationLink are required" });
+      }
+      
+      const result = await notificationService.sendEmailVerification({
+        email,
+        name: name || email.split('@')[0],
+        verificationLink,
+      });
+      
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to send verification" });
+    }
+  });
+
+  // Send transaction SMS alert
+  app.post("/api/notifications/transaction-sms", async (req, res) => {
+    try {
+      const { phone, type, amount, currency, description, balance } = req.body;
+      
+      if (!phone || !type || !amount || !currency) {
+        return res.status(400).json({ error: "phone, type, amount, and currency are required" });
+      }
+      
+      const result = await notificationService.sendTransactionAlertSms({
+        phone,
+        type,
+        amount: parseFloat(amount),
+        currency,
+        description: description || 'Transaction',
+        balance: balance ? parseFloat(balance) : undefined,
+      });
+      
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to send SMS" });
+    }
+  });
+
+  // Resend invoice email
+  app.post("/api/invoices/:id/send", async (req, res) => {
+    try {
+      const invoice = await storage.getInvoice(req.params.id);
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+      
+      if (!invoice.clientEmail) {
+        return res.status(400).json({ error: "Invoice has no client email" });
+      }
+      
+      const settings = await storage.getOrganizationSettings();
+      const companyName = settings?.companyName || 'Spendly';
+      const appUrl = process.env.REPLIT_DEV_DOMAIN 
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
+        : 'https://spendlymanager.com';
+      
+      const items = Array.isArray(invoice.items) ? invoice.items : [];
+      
+      const result = await notificationService.sendInvoiceEmail({
+        email: invoice.clientEmail,
+        clientName: invoice.client,
+        senderName: companyName,
+        invoiceNumber: invoice.invoiceNumber,
+        amount: parseFloat(invoice.amount),
+        currency: settings?.currency || 'USD',
+        dueDate: invoice.dueDate,
+        items: items.map((item: any) => ({
+          description: item.description || 'Service',
+          quantity: item.quantity || 1,
+          price: parseFloat(item.price || item.amount || 0),
+        })),
+        paymentLink: `${appUrl}/pay/${invoice.id}`,
+      });
+      
+      res.json({ success: result.success, message: result.success ? 'Invoice sent successfully' : result.error });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to send invoice" });
     }
   });
 
