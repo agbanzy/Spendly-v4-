@@ -71,6 +71,21 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
   return <Component />;
 }
 
+function AdminRoute({ component: Component }: { component: React.ComponentType }) {
+  const { isAuthenticated, isLoading } = useAuth();
+  const adminUser = localStorage.getItem("adminUser");
+  
+  if (isLoading) {
+    return <AuthLoading />;
+  }
+  
+  if (!isAuthenticated && !adminUser) {
+    return <Redirect to="/admin-login" />;
+  }
+  
+  return <Component />;
+}
+
 function AppRouter() {
   return (
     <Switch>
@@ -87,15 +102,15 @@ function AppRouter() {
       <Route path="/payroll">{() => <ProtectedRoute component={Payroll} />}</Route>
       <Route path="/invoices">{() => <ProtectedRoute component={Invoices} />}</Route>
       <Route path="/vendors">{() => <ProtectedRoute component={Vendors} />}</Route>
-      <Route path="/admin">{() => <ProtectedRoute component={Admin} />}</Route>
-      <Route path="/admin/users">{() => <ProtectedRoute component={AdminUsers} />}</Route>
-      <Route path="/admin/audit-logs">{() => <ProtectedRoute component={AdminAuditLogs} />}</Route>
-      <Route path="/admin/organization">{() => <ProtectedRoute component={AdminOrganization} />}</Route>
-      <Route path="/admin/security">{() => <ProtectedRoute component={AdminSecurity} />}</Route>
-      <Route path="/admin/wallets">{() => <ProtectedRoute component={AdminWallets} />}</Route>
-      <Route path="/admin/payouts">{() => <ProtectedRoute component={AdminPayouts} />}</Route>
-      <Route path="/admin/exchange-rates">{() => <ProtectedRoute component={AdminExchangeRates} />}</Route>
-      <Route path="/admin/database">{() => <ProtectedRoute component={AdminDatabase} />}</Route>
+      <Route path="/admin">{() => <AdminRoute component={Admin} />}</Route>
+      <Route path="/admin/users">{() => <AdminRoute component={AdminUsers} />}</Route>
+      <Route path="/admin/audit-logs">{() => <AdminRoute component={AdminAuditLogs} />}</Route>
+      <Route path="/admin/organization">{() => <AdminRoute component={AdminOrganization} />}</Route>
+      <Route path="/admin/security">{() => <AdminRoute component={AdminSecurity} />}</Route>
+      <Route path="/admin/wallets">{() => <AdminRoute component={AdminWallets} />}</Route>
+      <Route path="/admin/payouts">{() => <AdminRoute component={AdminPayouts} />}</Route>
+      <Route path="/admin/exchange-rates">{() => <AdminRoute component={AdminExchangeRates} />}</Route>
+      <Route path="/admin/database">{() => <AdminRoute component={AdminDatabase} />}</Route>
       <Route component={NotFound} />
     </Switch>
   );
@@ -145,9 +160,12 @@ function PublicRoute({ component: Component }: { component: React.ComponentType 
 function AppContent() {
   const [location] = useLocation();
   const { isAuthenticated, isLoading } = useAuth();
+  const adminUser = localStorage.getItem("adminUser");
+  const isAdminAuthenticated = !!adminUser;
   
   const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/terms", "/privacy", "/onboarding", "/admin-login"];
   const isPublicRoute = publicRoutes.includes(location);
+  const isAdminRoute = location.startsWith("/admin");
 
   if (isLoading) {
     return <AuthLoading />;
@@ -166,6 +184,10 @@ function AppContent() {
         <Route path="/admin-login" component={AdminLogin} />
       </Switch>
     );
+  }
+
+  if (isAdminRoute && !isAuthenticated && !isAdminAuthenticated) {
+    return <Redirect to="/admin-login" />;
   }
 
   return <AppLayout />;
