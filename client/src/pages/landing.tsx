@@ -144,7 +144,7 @@ export default function LandingPage() {
               </p>
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
                 <Button size="lg" onClick={() => setLocation("/signup")} data-testid="button-get-started">
-                  Start Free Trial
+                  Get Started
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
                 <Button size="lg" variant="outline" data-testid="button-demo">
@@ -152,9 +152,6 @@ export default function LandingPage() {
                   Book a Demo
                 </Button>
               </div>
-              <p className="mt-4 text-sm text-muted-foreground">
-                No credit card required. Free 14-day trial.
-              </p>
             </div>
           </div>
         </section>
@@ -301,11 +298,11 @@ export default function LandingPage() {
             </h2>
             <p className="text-lg opacity-90 mb-8 max-w-2xl mx-auto">
               Join thousands of companies that trust Spendly to manage their finances.
-              Start your free trial today.
+              Get started today.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Button size="lg" variant="secondary" onClick={() => setLocation("/signup")}>
-                Start Free Trial
+                Get Started
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
               <Button size="lg" variant="outline" className="bg-transparent border-white/30 text-white hover:bg-white/10">

@@ -89,11 +89,11 @@ export default function SignupPage() {
 
 
   const benefits = [
-    "14-day free trial, no credit card required",
     "Unlimited virtual cards",
     "Real-time expense tracking",
     "Team collaboration tools",
-    "24/7 priority support"
+    "24/7 priority support",
+    "Multi-currency support"
   ];
 
   return (
@@ -106,7 +106,7 @@ export default function SignupPage() {
           </div>
         </Link>
         <div className="text-white">
-          <h1 className="text-4xl font-bold mb-4">Start your free trial</h1>
+          <h1 className="text-4xl font-bold mb-4">Get started with Spendly</h1>
           <p className="text-xl text-white/80 mb-8">
             Join thousands of companies managing their finances with Spendly.
           </p>
@@ -141,7 +141,7 @@ export default function SignupPage() {
             <CardHeader className="text-center">
               <CardTitle className="text-2xl" data-testid="text-signup-title">Create your account</CardTitle>
               <CardDescription>
-                Get started with your 14-day free trial
+                Create your account to get started
               </CardDescription>
             </CardHeader>
             <CardContent>
