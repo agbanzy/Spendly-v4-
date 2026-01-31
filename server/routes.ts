@@ -2671,22 +2671,31 @@ export async function registerRoutes(
     z.string().optional()
   );
   
+  // Helper to coerce any value to string for required string fields
+  const requiredString = (fieldName: string) => z.preprocess(
+    (val) => {
+      if (val === false || val === null || val === undefined || val === '') return '';
+      return String(val);
+    },
+    z.string().min(1, `${fieldName} is required`)
+  );
+  
   const kycSubmissionSchema = z.object({
-    firebaseUid: z.string().min(1, "Firebase UID is required"),
-    firstName: z.string().min(1, "First name is required"),
-    lastName: z.string().min(1, "Last name is required"),
+    firebaseUid: requiredString("Firebase UID"),
+    firstName: requiredString("First name"),
+    lastName: requiredString("Last name"),
     middleName: optionalString,
-    dateOfBirth: z.string().min(1, "Date of birth is required"),
+    dateOfBirth: requiredString("Date of birth"),
     gender: optionalString,
-    nationality: z.string().min(1, "Nationality is required"),
-    phoneNumber: z.string().min(1, "Phone number is required"),
+    nationality: requiredString("Nationality"),
+    phoneNumber: requiredString("Phone number"),
     alternatePhone: optionalString,
-    addressLine1: z.string().min(1, "Address is required"),
+    addressLine1: requiredString("Address"),
     addressLine2: optionalString,
-    city: z.string().min(1, "City is required"),
-    state: z.string().min(1, "State is required"),
-    country: z.string().min(1, "Country is required"),
-    postalCode: z.string().min(1, "Postal code is required"),
+    city: requiredString("City"),
+    state: requiredString("State"),
+    country: requiredString("Country"),
+    postalCode: requiredString("Postal code"),
     idType: optionalString,
     idNumber: optionalString,
     idExpiryDate: optionalString,

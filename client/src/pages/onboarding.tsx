@@ -174,10 +174,41 @@ export default function Onboarding() {
 
   const submitKycMutation = useMutation({
     mutationFn: async (data: FormData) => {
-      const res = await apiRequest("POST", "/api/kyc", {
+      // Ensure all string fields are actually strings (not booleans)
+      const sanitizedData = {
         firebaseUid: user?.id,
-        ...data,
-      });
+        firstName: String(data.firstName || ''),
+        lastName: String(data.lastName || ''),
+        middleName: data.middleName || undefined,
+        dateOfBirth: String(data.dateOfBirth || ''),
+        gender: data.gender || undefined,
+        nationality: String(data.nationality || ''),
+        phoneNumber: String(data.phoneNumber || ''),
+        alternatePhone: data.alternatePhone || undefined,
+        addressLine1: String(data.addressLine1 || ''),
+        addressLine2: data.addressLine2 || undefined,
+        city: String(data.city || ''),
+        state: String(data.state || ''),
+        country: String(data.country || ''),
+        postalCode: String(data.postalCode || ''),
+        idType: data.idType || undefined,
+        idNumber: data.idNumber || undefined,
+        idExpiryDate: data.idExpiryDate || undefined,
+        idFrontUrl: data.idFrontUrl || undefined,
+        idBackUrl: data.idBackUrl || undefined,
+        selfieUrl: data.selfieUrl || undefined,
+        proofOfAddressUrl: data.proofOfAddressUrl || undefined,
+        isBusinessAccount: Boolean(data.isBusinessAccount),
+        businessName: data.businessName || undefined,
+        businessType: data.businessType || undefined,
+        businessRegistrationNumber: data.businessRegistrationNumber || undefined,
+        businessAddress: data.businessAddress || undefined,
+        businessDocumentUrl: data.businessDocumentUrl || undefined,
+        acceptTerms: Boolean(data.acceptTerms),
+        bvnNumber: data.bvnNumber || undefined,
+      };
+      console.log('Submitting KYC data:', JSON.stringify(sanitizedData, null, 2));
+      const res = await apiRequest("POST", "/api/kyc", sanitizedData);
       return res.json();
     },
     onSuccess: () => {
