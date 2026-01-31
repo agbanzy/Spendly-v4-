@@ -33,6 +33,25 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { isPaystackRegion } from "@/lib/constants";
+import { useAuth } from "@/lib/auth";
+
+interface UserSettings {
+  emailNotifications: boolean;
+  pushNotifications: boolean;
+  smsNotifications: boolean;
+  expenseAlerts: boolean;
+  budgetWarnings: boolean;
+  paymentReminders: boolean;
+  weeklyDigest: boolean;
+  preferredCurrency: string;
+  preferredLanguage: string;
+  preferredTimezone: string;
+  preferredDateFormat: string;
+  darkMode: boolean;
+  twoFactorEnabled: boolean;
+  transactionPinEnabled: boolean;
+  sessionTimeout: number;
+}
 
 interface CompanySettings {
   companyName: string;
@@ -81,6 +100,7 @@ const COUNTRY_OPTIONS = [
 
 export default function Settings() {
   const { toast } = useToast();
+  const { user } = useAuth();
   
   const { data: settings, isLoading } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
@@ -94,6 +114,18 @@ export default function Settings() {
     queryKey: ["/api/payment/keys"],
   });
 
+  // Fetch user-specific settings
+  const { data: userSettings } = useQuery<UserSettings>({
+    queryKey: ["/api/user-settings", user?.uid],
+    queryFn: async () => {
+      if (!user?.uid) return null;
+      const res = await fetch(`/api/user-settings/${user.uid}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!user?.uid,
+  });
+
   const [formData, setFormData] = useState<Partial<CompanySettings>>({});
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [expenseAlerts, setExpenseAlerts] = useState(true);
@@ -103,9 +135,18 @@ export default function Settings() {
   useEffect(() => {
     if (settings) {
       setFormData(settings);
-      setEmailNotifications(settings.notificationsEnabled);
     }
   }, [settings]);
+
+  // Update user settings from fetched data
+  useEffect(() => {
+    if (userSettings) {
+      setEmailNotifications(userSettings.emailNotifications);
+      setExpenseAlerts(userSettings.expenseAlerts);
+      setBudgetWarnings(userSettings.budgetWarnings);
+      setTransactionPin(userSettings.transactionPinEnabled);
+    }
+  }, [userSettings]);
 
   const updateSettingsMutation = useMutation({
     mutationFn: async (data: Partial<CompanySettings>) => {
@@ -122,6 +163,28 @@ export default function Settings() {
       toast({
         title: "Error",
         description: "Failed to save settings. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Mutation for user-specific settings
+  const updateUserSettingsMutation = useMutation({
+    mutationFn: async (data: Partial<UserSettings>) => {
+      if (!user?.uid) throw new Error("Not authenticated");
+      return apiRequest("PATCH", `/api/user-settings/${user.uid}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/user-settings", user?.uid] });
+      toast({
+        title: "Preferences saved",
+        description: "Your preferences have been updated.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to save preferences. Please try again.",
         variant: "destructive",
       });
     },
@@ -162,11 +225,15 @@ export default function Settings() {
     });
   };
 
-  const handleNotificationChange = (key: string, value: boolean) => {
-    if (key === "email") {
-      setEmailNotifications(value);
-      updateSettingsMutation.mutate({ notificationsEnabled: value });
-    }
+  const handleUserSettingChange = (key: keyof UserSettings, value: boolean | string | number) => {
+    // Update local state
+    if (key === "emailNotifications") setEmailNotifications(value as boolean);
+    if (key === "expenseAlerts") setExpenseAlerts(value as boolean);
+    if (key === "budgetWarnings") setBudgetWarnings(value as boolean);
+    if (key === "transactionPinEnabled") setTransactionPin(value as boolean);
+    
+    // Save to server
+    updateUserSettingsMutation.mutate({ [key]: value });
   };
 
   if (isLoading) {
@@ -500,7 +567,7 @@ export default function Settings() {
             </div>
             <Switch 
               checked={emailNotifications}
-              onCheckedChange={(checked) => handleNotificationChange("email", checked)}
+              onCheckedChange={(checked) => handleUserSettingChange("emailNotifications", checked)}
               data-testid="switch-email-notifications" 
             />
           </div>
@@ -514,7 +581,7 @@ export default function Settings() {
             </div>
             <Switch 
               checked={expenseAlerts}
-              onCheckedChange={setExpenseAlerts}
+              onCheckedChange={(checked) => handleUserSettingChange("expenseAlerts", checked)}
               data-testid="switch-expense-alerts" 
             />
           </div>
@@ -528,7 +595,7 @@ export default function Settings() {
             </div>
             <Switch 
               checked={budgetWarnings}
-              onCheckedChange={setBudgetWarnings}
+              onCheckedChange={(checked) => handleUserSettingChange("budgetWarnings", checked)}
               data-testid="switch-budget-warnings" 
             />
           </div>
@@ -572,7 +639,7 @@ export default function Settings() {
             </div>
             <Switch 
               checked={transactionPin}
-              onCheckedChange={setTransactionPin}
+              onCheckedChange={(checked) => handleUserSettingChange("transactionPinEnabled", checked)}
               data-testid="switch-transaction-pin" 
             />
           </div>
@@ -597,10 +664,17 @@ export default function Settings() {
           <div className="space-y-2">
             <Label>Auto-Approve Threshold</Label>
             <p className="text-sm text-muted-foreground mb-2">
-              Automatically approve expenses below this amount.
+              Automatically approve expenses below this amount ({formData.currency || 'USD'}).
             </p>
             <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">$</span>
+              <span className="text-muted-foreground font-medium">
+                {formData.currency === 'NGN' ? '₦' : 
+                 formData.currency === 'EUR' ? '€' : 
+                 formData.currency === 'GBP' ? '£' : 
+                 formData.currency === 'KES' ? 'KSh' : 
+                 formData.currency === 'GHS' ? '₵' : 
+                 formData.currency === 'ZAR' ? 'R' : '$'}
+              </span>
               <Input 
                 type="number"
                 className="w-32"
@@ -612,8 +686,9 @@ export default function Settings() {
                 size="sm" 
                 variant="outline"
                 onClick={() => updateSettingsMutation.mutate({ autoApproveBelow: formData.autoApproveBelow })}
+                disabled={updateSettingsMutation.isPending}
               >
-                Update
+                {updateSettingsMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Update'}
               </Button>
             </div>
           </div>

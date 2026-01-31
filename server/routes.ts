@@ -326,17 +326,37 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid expense data", details: result.error.issues });
       }
-      const { merchant, amount, category, note, receiptUrl, expenseType, attachments, taggedReviewers } = result.data;
+      const { merchant, amount, category, note, receiptUrl, expenseType, attachments, taggedReviewers, userId, user } = result.data;
+
+      // Get company settings for auto-approval and currency
+      const settings = await storage.getSettings();
+      const currency = settings.currency || 'USD';
+      const autoApproveThreshold = parseFloat(settings.autoApproveBelow?.toString() || '100');
+      const expenseAmount = parseFloat(amount);
+      
+      // Determine status based on expense type and auto-approval threshold
+      let status = 'PENDING';
+      let autoApproved = false;
+      
+      if (expenseType === 'spent') {
+        // Already spent - auto approve
+        status = 'APPROVED';
+        autoApproved = true;
+      } else if (expenseAmount <= autoApproveThreshold) {
+        // Below auto-approve threshold
+        status = 'APPROVED';
+        autoApproved = true;
+      }
 
       const expense = await storage.createExpense({
         merchant,
         amount,
-        currency: 'USD',
+        currency,
         date: new Date().toISOString().split('T')[0],
         category,
-        status: expenseType === 'spent' ? 'APPROVED' : 'PENDING',
-        user: 'John Doe',
-        userId: '1',
+        status,
+        user: user || 'Unknown User',
+        userId: userId || '1',
         department: 'General',
         note,
         receiptUrl,
@@ -345,7 +365,7 @@ export async function registerRoutes(
         taggedReviewers: taggedReviewers || [],
       });
       
-      res.status(201).json(expense);
+      res.status(201).json({ ...expense, autoApproved });
     } catch (error) {
       res.status(500).json({ error: "Failed to create expense" });
     }
@@ -2647,6 +2667,86 @@ export async function registerRoutes(
       res.json(profile);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to update profile" });
+    }
+  });
+
+  // Get user settings (notification preferences, etc.)
+  app.get("/api/user-settings/:firebaseUid", async (req, res) => {
+    try {
+      const { firebaseUid } = req.params;
+      const profile = await storage.getUserProfile(firebaseUid);
+      if (!profile) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      // Return user-specific settings
+      res.json({
+        emailNotifications: profile.emailNotifications ?? true,
+        pushNotifications: profile.pushNotifications ?? true,
+        smsNotifications: profile.smsNotifications ?? false,
+        expenseAlerts: profile.expenseAlerts ?? true,
+        budgetWarnings: profile.budgetWarnings ?? true,
+        paymentReminders: profile.paymentReminders ?? true,
+        weeklyDigest: profile.weeklyDigest ?? true,
+        preferredCurrency: profile.preferredCurrency ?? 'USD',
+        preferredLanguage: profile.preferredLanguage ?? 'en',
+        preferredTimezone: profile.preferredTimezone ?? 'America/Los_Angeles',
+        preferredDateFormat: profile.preferredDateFormat ?? 'MM/DD/YYYY',
+        darkMode: profile.darkMode ?? false,
+        twoFactorEnabled: profile.twoFactorEnabled ?? false,
+        transactionPinEnabled: profile.transactionPinEnabled ?? false,
+        sessionTimeout: profile.sessionTimeout ?? 30,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch user settings" });
+    }
+  });
+
+  // Update user settings
+  app.patch("/api/user-settings/:firebaseUid", async (req, res) => {
+    try {
+      const { firebaseUid } = req.params;
+      const allowedFields = [
+        'emailNotifications', 'pushNotifications', 'smsNotifications',
+        'expenseAlerts', 'budgetWarnings', 'paymentReminders', 'weeklyDigest',
+        'preferredCurrency', 'preferredLanguage', 'preferredTimezone', 
+        'preferredDateFormat', 'darkMode', 'sessionTimeout'
+      ];
+      
+      // Filter to only allowed settings fields
+      const updates: Record<string, any> = {};
+      for (const key of allowedFields) {
+        if (req.body[key] !== undefined) {
+          updates[key] = req.body[key];
+        }
+      }
+      
+      const profile = await storage.updateUserProfile(firebaseUid, updates);
+      if (!profile) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      res.json({
+        success: true,
+        message: "Settings updated successfully",
+        settings: {
+          emailNotifications: profile.emailNotifications,
+          pushNotifications: profile.pushNotifications,
+          smsNotifications: profile.smsNotifications,
+          expenseAlerts: profile.expenseAlerts,
+          budgetWarnings: profile.budgetWarnings,
+          paymentReminders: profile.paymentReminders,
+          weeklyDigest: profile.weeklyDigest,
+          preferredCurrency: profile.preferredCurrency,
+          preferredLanguage: profile.preferredLanguage,
+          preferredTimezone: profile.preferredTimezone,
+          preferredDateFormat: profile.preferredDateFormat,
+          darkMode: profile.darkMode,
+          sessionTimeout: profile.sessionTimeout,
+        }
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to update user settings" });
     }
   });
 
