@@ -2681,19 +2681,23 @@ export async function registerRoutes(
     state: z.string().min(1, "State is required"),
     country: z.string().min(1, "Country is required"),
     postalCode: z.string().min(1, "Postal code is required"),
-    idType: z.string().min(1, "ID type is required"),
-    idNumber: z.string().min(1, "ID number is required"),
+    idType: z.string().optional(), // Optional - BVN/Stripe verification may not require this
+    idNumber: z.string().optional(), // Optional - BVN/Stripe verification may not require this
     idExpiryDate: z.string().optional(),
     idFrontUrl: z.string().optional(),
     idBackUrl: z.string().optional(),
     selfieUrl: z.string().optional(),
     proofOfAddressUrl: z.string().optional(),
-    isBusinessAccount: z.boolean().optional().default(false),
+    isBusinessAccount: z.union([z.boolean(), z.string()]).optional().default(false),
     businessName: z.string().optional(),
     businessType: z.string().optional(),
     businessRegistrationNumber: z.string().optional(),
     businessAddress: z.string().optional(),
     businessDocumentUrl: z.string().optional(),
+    // Frontend form fields that may be passed
+    acceptTerms: z.boolean().optional(),
+    accountType: z.string().optional(),
+    bvnNumber: z.string().optional(),
   });
 
   // Submit KYC
@@ -2729,8 +2733,8 @@ export async function registerRoutes(
         state: data.state,
         country: data.country,
         postalCode: data.postalCode,
-        idType: data.idType,
-        idNumber: data.idNumber,
+        idType: data.idType || 'BVN', // Default to BVN if not provided (BVN-verified users)
+        idNumber: data.idNumber || data.bvnNumber || 'N/A', // Use BVN number if available
         idExpiryDate: data.idExpiryDate || null,
         idFrontUrl: data.idFrontUrl || null,
         idBackUrl: data.idBackUrl || null,
