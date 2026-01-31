@@ -490,7 +490,7 @@ export default function Dashboard() {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
             <div className="space-y-3">
               <div className="flex items-center gap-3">
-                <p className="text-xs font-bold text-primary uppercase tracking-widest">Total Balance (USD)</p>
+                <p className="text-xs font-bold text-primary uppercase tracking-widest">Total Balance ({currency})</p>
                 <Button 
                   variant="ghost" 
                   size="icon" 
