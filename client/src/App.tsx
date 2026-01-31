@@ -40,6 +40,7 @@ import AdminWallets from "@/pages/admin-wallets";
 import AdminPayouts from "@/pages/admin-payouts";
 import AdminExchangeRates from "@/pages/admin-exchange-rates";
 import AdminDatabase from "@/pages/admin-database";
+import AdminLogin from "@/pages/admin-login";
 
 function AuthLoading() {
   return (
@@ -145,7 +146,7 @@ function AppContent() {
   const [location] = useLocation();
   const { isAuthenticated, isLoading } = useAuth();
   
-  const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/terms", "/privacy", "/onboarding"];
+  const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/terms", "/privacy", "/onboarding", "/admin-login"];
   const isPublicRoute = publicRoutes.includes(location);
 
   if (isLoading) {
@@ -162,6 +163,7 @@ function AppContent() {
         <Route path="/terms" component={Terms} />
         <Route path="/privacy" component={Privacy} />
         <Route path="/onboarding">{() => isAuthenticated ? <Onboarding /> : <Redirect to="/login" />}</Route>
+        <Route path="/admin-login" component={AdminLogin} />
       </Switch>
     );
   }
