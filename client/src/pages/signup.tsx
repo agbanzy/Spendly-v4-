@@ -9,12 +9,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import { Wallet, Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, User, Building2, CheckCircle2 } from "lucide-react";
-import { SiGoogle } from "react-icons/si";
 
 export default function SignupPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { signup, loginWithGoogle } = useAuth();
+  const { signup } = useAuth();
   const [formData, setFormData] = useState({
     fullName: "",
     email: "",
@@ -88,46 +87,6 @@ export default function SignupPage() {
     }
   };
 
-  const handleGoogleSignup = async () => {
-    setIsLoading(true);
-    try {
-      await loginWithGoogle();
-      
-      // Check if user has a profile (returning user vs new user)
-      const auth = await import("firebase/auth");
-      const currentUser = auth.getAuth().currentUser;
-      if (currentUser) {
-        const profileRes = await fetch(`/api/user-profile/${currentUser.uid}`);
-        if (profileRes.ok) {
-          // Returning user with existing profile - go to dashboard
-          toast({
-            title: "Welcome back!",
-            description: "Signed in with Google successfully."
-          });
-          setLocation("/dashboard");
-          return;
-        }
-      }
-      
-      // New user without profile - go to onboarding
-      toast({
-        title: "Welcome!",
-        description: "Signed up with Google successfully."
-      });
-      setLocation("/onboarding");
-    } catch (error: any) {
-      const errorMessage = error?.code === "auth/popup-closed-by-user" 
-        ? "Sign-up cancelled." 
-        : "Google sign-up failed. Please try again.";
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const benefits = [
     "14-day free trial, no credit card required",
@@ -307,24 +266,6 @@ export default function SignupPage() {
                   )}
                 </Button>
               </form>
-
-              <div className="relative my-6">
-                <Separator />
-                <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
-                  OR CONTINUE WITH
-                </span>
-              </div>
-
-              <Button 
-                variant="outline" 
-                className="w-full" 
-                onClick={handleGoogleSignup}
-                disabled={isLoading}
-                data-testid="button-google-signup"
-              >
-                <SiGoogle className="mr-2 h-4 w-4" />
-                Sign up with Google
-              </Button>
 
               <p className="text-center text-sm text-muted-foreground mt-6">
                 Already have an account?{" "}

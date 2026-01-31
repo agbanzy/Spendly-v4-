@@ -8,12 +8,11 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import { Wallet, Mail, Lock, Eye, EyeOff, ArrowRight, Loader2 } from "lucide-react";
-import { SiGoogle } from "react-icons/si";
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { login, loginWithGoogle } = useAuth();
+  const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -51,47 +50,6 @@ export default function LoginPage() {
       } else if (error?.code === "auth/too-many-requests") {
         errorMessage = "Too many attempts. Please try again later.";
       }
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleGoogleLogin = async () => {
-    setIsLoading(true);
-    try {
-      await loginWithGoogle();
-      
-      // Check if user has a profile (new user vs returning user)
-      const auth = await import("firebase/auth");
-      const currentUser = auth.getAuth().currentUser;
-      if (currentUser) {
-        const profileRes = await fetch(`/api/user-profile/${currentUser.uid}`);
-        if (profileRes.ok) {
-          // Returning user with existing profile - go to dashboard
-          toast({
-            title: "Welcome back!",
-            description: "Signed in with Google successfully."
-          });
-          setLocation("/dashboard");
-          return;
-        }
-      }
-      
-      // New user without profile - go to onboarding
-      toast({
-        title: "Welcome!",
-        description: "Please complete your profile setup."
-      });
-      setLocation("/onboarding");
-    } catch (error: any) {
-      const errorMessage = error?.code === "auth/popup-closed-by-user" 
-        ? "Sign-in cancelled." 
-        : "Google sign-in failed. Please try again.";
       toast({
         title: "Error",
         description: errorMessage,
@@ -208,24 +166,6 @@ export default function LoginPage() {
                   )}
                 </Button>
               </form>
-
-              <div className="relative my-6">
-                <Separator />
-                <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
-                  OR CONTINUE WITH
-                </span>
-              </div>
-
-              <Button 
-                variant="outline" 
-                className="w-full" 
-                onClick={handleGoogleLogin}
-                disabled={isLoading}
-                data-testid="button-google-login"
-              >
-                <SiGoogle className="mr-2 h-4 w-4" />
-                Sign in with Google
-              </Button>
 
               <p className="text-center text-sm text-muted-foreground mt-6">
                 Don't have an account?{" "}
