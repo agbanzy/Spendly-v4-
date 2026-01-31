@@ -334,6 +334,26 @@ export const userProfiles = pgTable("user_profiles", {
   onboardingStep: integer("onboarding_step").notNull().default(1),
   transactionPinHash: text("transaction_pin_hash"),
   transactionPinEnabled: boolean("transaction_pin_enabled").notNull().default(false),
+  // User Notification Settings
+  emailNotifications: boolean("email_notifications").notNull().default(true),
+  pushNotifications: boolean("push_notifications").notNull().default(true),
+  smsNotifications: boolean("sms_notifications").notNull().default(false),
+  expenseAlerts: boolean("expense_alerts").notNull().default(true),
+  budgetWarnings: boolean("budget_warnings").notNull().default(true),
+  paymentReminders: boolean("payment_reminders").notNull().default(true),
+  weeklyDigest: boolean("weekly_digest").notNull().default(true),
+  // User Preferences
+  preferredCurrency: text("preferred_currency").default('USD'),
+  preferredLanguage: text("preferred_language").default('en'),
+  preferredTimezone: text("preferred_timezone").default('America/Los_Angeles'),
+  preferredDateFormat: text("preferred_date_format").default('MM/DD/YYYY'),
+  darkMode: boolean("dark_mode").notNull().default(false),
+  // Security Settings
+  twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
+  twoFactorSecret: text("two_factor_secret"),
+  sessionTimeout: integer("session_timeout").default(30), // minutes
+  lastLoginAt: text("last_login_at"),
+  lastLoginIp: text("last_login_ip"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
