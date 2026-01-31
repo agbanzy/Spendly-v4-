@@ -2665,39 +2665,45 @@ export async function registerRoutes(
   });
 
   // KYC submission validation schema
+  // Helper to coerce falsy values to undefined for optional string fields
+  const optionalString = z.preprocess(
+    (val) => (val === false || val === '' || val === null || val === undefined) ? undefined : String(val),
+    z.string().optional()
+  );
+  
   const kycSubmissionSchema = z.object({
     firebaseUid: z.string().min(1, "Firebase UID is required"),
     firstName: z.string().min(1, "First name is required"),
     lastName: z.string().min(1, "Last name is required"),
-    middleName: z.string().optional(),
+    middleName: optionalString,
     dateOfBirth: z.string().min(1, "Date of birth is required"),
-    gender: z.string().optional(),
+    gender: optionalString,
     nationality: z.string().min(1, "Nationality is required"),
     phoneNumber: z.string().min(1, "Phone number is required"),
-    alternatePhone: z.string().optional(),
+    alternatePhone: optionalString,
     addressLine1: z.string().min(1, "Address is required"),
-    addressLine2: z.string().optional(),
+    addressLine2: optionalString,
     city: z.string().min(1, "City is required"),
     state: z.string().min(1, "State is required"),
     country: z.string().min(1, "Country is required"),
     postalCode: z.string().min(1, "Postal code is required"),
-    idType: z.string().optional(), // Optional - BVN/Stripe verification may not require this
-    idNumber: z.string().optional(), // Optional - BVN/Stripe verification may not require this
-    idExpiryDate: z.string().optional(),
-    idFrontUrl: z.string().optional(),
-    idBackUrl: z.string().optional(),
-    selfieUrl: z.string().optional(),
-    proofOfAddressUrl: z.string().optional(),
+    idType: optionalString,
+    idNumber: optionalString,
+    idExpiryDate: optionalString,
+    idFrontUrl: optionalString,
+    idBackUrl: optionalString,
+    selfieUrl: optionalString,
+    proofOfAddressUrl: optionalString,
     isBusinessAccount: z.union([z.boolean(), z.string()]).optional().default(false).transform(v => v === true || v === 'true'),
-    businessName: z.string().optional(),
-    businessType: z.string().optional(),
-    businessRegistrationNumber: z.string().optional(),
-    businessAddress: z.string().optional(),
-    businessDocumentUrl: z.string().optional(),
+    businessName: optionalString,
+    businessType: optionalString,
+    businessRegistrationNumber: optionalString,
+    businessAddress: optionalString,
+    businessDocumentUrl: optionalString,
     // Frontend form fields that may be passed
-    acceptTerms: z.boolean().optional(),
-    accountType: z.string().optional(),
-    bvnNumber: z.string().optional(),
+    acceptTerms: z.union([z.boolean(), z.string()]).optional().transform(v => v === true || v === 'true'),
+    accountType: optionalString,
+    bvnNumber: optionalString,
   });
 
   // Submit KYC
@@ -2705,7 +2711,11 @@ export async function registerRoutes(
     try {
       const parseResult = kycSubmissionSchema.safeParse(req.body);
       if (!parseResult.success) {
-        return res.status(400).json({ error: parseResult.error.errors[0]?.message || "Invalid request data" });
+        const firstError = parseResult.error.errors[0];
+        const errorPath = firstError?.path?.join('.') || 'unknown';
+        const errorMessage = firstError?.message || "Invalid request data";
+        console.error('KYC validation error:', { path: errorPath, message: errorMessage, received: firstError?.received });
+        return res.status(400).json({ error: `${errorMessage} (field: ${errorPath})` });
       }
 
       const data = parseResult.data;
