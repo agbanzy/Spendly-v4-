@@ -992,6 +992,22 @@ export async function registerRoutes(
         currency: 'USD',
       });
       
+      // Send transaction notification if user has phone
+      if (account.userId) {
+        const profile = await storage.getUserProfile(account.userId);
+        const settings = await storage.getNotificationSettings(account.userId);
+        if (profile?.phone && settings?.transactionNotifications) {
+          notificationService.sendTransactionAlertSms({
+            phone: profile.phone,
+            type: 'debit',
+            amount,
+            currency: 'USD',
+            description: `Withdrawal from ${account.name}`,
+            balance: newBalance,
+          }).catch(err => console.error('Transaction SMS failed:', err));
+        }
+      }
+      
       res.json({ 
         success: true, 
         newBalance,

@@ -205,9 +205,9 @@ export default function Onboarding() {
         businessAddress: data.businessAddress || undefined,
         businessDocumentUrl: data.businessDocumentUrl || undefined,
         acceptTerms: Boolean(data.acceptTerms),
-        bvnNumber: data.bvnNumber || undefined,
+        bvnNumber: bvnNumber || undefined,
         bvnVerified: bvnVerified,
-        stripeVerified: stripeVerified,
+        stripeVerified: stripeVerificationStatus === 'verified',
       };
       console.log('Submitting KYC data:', JSON.stringify(sanitizedData, null, 2));
       const res = await apiRequest("POST", "/api/kyc", sanitizedData);
