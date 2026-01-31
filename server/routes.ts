@@ -366,8 +366,8 @@ export async function registerRoutes(
         user: user || 'Unknown User',
         userId: userId || '1',
         department: 'General',
-        note,
-        receiptUrl,
+        note: note || null,
+        receiptUrl: receiptUrl || null,
         expenseType: expenseType || 'request',
         attachments: attachments || [],
         taggedReviewers: taggedReviewers || [],
@@ -394,7 +394,7 @@ export async function registerRoutes(
       
       // Send notification if status changed
       if (originalExpense && expense.status !== originalExpense.status) {
-        const userId = expense.submittedBy || expense.userId || 'system';
+        const userId = (expense as any).submittedBy || expense.userId || 'system';
         
         if (expense.status === 'APPROVED') {
           notificationService.notifyExpenseApproved(userId, {
@@ -542,6 +542,7 @@ export async function registerRoutes(
         category: category || 'Other',
         status: 'Unpaid',
         currency: 'USD',
+        logo: null,
       });
       
       res.status(201).json(bill);
@@ -612,7 +613,7 @@ export async function registerRoutes(
         name,
         category,
         limit,
-        spent: 0,
+        spent: '0',
         currency: 'USD',
         period: (period || 'monthly') as any,
       });
@@ -782,22 +783,23 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Card not found" });
       }
       
-      if (card.status !== 'active') {
+      if (card.status !== 'Active') {
         return res.status(400).json({ error: "Card is not active" });
       }
       
-      if (card.balance < amount) {
+      const cardBalance = parseFloat(card.balance);
+      if (cardBalance < amount) {
         return res.status(400).json({ error: "Insufficient card balance" });
       }
       
       // Deduct from card balance
-      const newBalance = card.balance - amount;
-      await storage.updateCard(req.params.id, { balance: newBalance });
+      const newBalance = cardBalance - amount;
+      await storage.updateCard(req.params.id, { balance: String(newBalance) });
       
       // Create card transaction record
       const cardTx = await storage.createCardTransaction({
         cardId: req.params.id,
-        amount,
+        amount: String(amount),
         merchant,
         category: category || 'General',
         description: description || '',
@@ -808,7 +810,7 @@ export async function registerRoutes(
       // Create expense record
       await storage.createExpense({
         merchant,
-        amount,
+        amount: String(amount),
         currency: card.currency || 'USD',
         date: new Date().toISOString().split('T')[0],
         category: category || 'General',
@@ -817,6 +819,13 @@ export async function registerRoutes(
         userId: '1',
         department: 'General',
         note: `Paid with virtual card ****${card.last4}`,
+        receiptUrl: null,
+        expenseType: 'spent',
+        attachments: [],
+        taggedReviewers: [],
+        vendorId: null,
+        payoutStatus: 'not_started',
+        payoutId: null,
       });
       
       res.json({ 
@@ -867,13 +876,12 @@ export async function registerRoutes(
       const bankCode = currency === 'NGN' ? 'PAYSTACK' : 'STRIPE';
       
       const account = await storage.createVirtualAccount({
-        id: `VA-${Date.now()}`,
         name,
         accountNumber,
         bankName: bankCode === 'PAYSTACK' ? 'Wema Bank' : 'Stripe Treasury',
         bankCode,
         currency: currency || 'USD',
-        balance: 0,
+        balance: '0',
         type: type || 'collection',
         status: 'active',
         createdAt: new Date().toISOString(),
@@ -948,13 +956,14 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Virtual account not found" });
       }
       
-      if (account.balance < amount) {
+      const accountBalance = parseFloat(account.balance);
+      if (accountBalance < amount) {
         return res.status(400).json({ error: "Insufficient balance" });
       }
       
       // Update balance
-      const newBalance = account.balance - amount;
-      await storage.updateVirtualAccount(req.params.id, { balance: newBalance });
+      const newBalance = accountBalance - amount;
+      await storage.updateVirtualAccount(req.params.id, { balance: String(newBalance) });
       
       // Create transaction record
       await storage.createTransaction({
@@ -1096,6 +1105,8 @@ export async function registerRoutes(
         email,
         role: (role || 'EMPLOYEE') as any,
         department: (department || 'General') as any,
+        departmentId: null,
+        avatar: null,
         status: 'Active',
         joinedAt: new Date().toISOString().split('T')[0],
         permissions: ['CREATE_EXPENSE'],
@@ -1180,7 +1191,6 @@ export async function registerRoutes(
       
       const now = new Date();
       const report = await storage.createReport({
-        id: `RPT${Date.now()}`,
         name,
         type,
         dateRange,
@@ -1191,7 +1201,7 @@ export async function registerRoutes(
       
       // Simulate report generation - mark as completed after short delay
       setTimeout(async () => {
-        await storage.updateReport(report.id, { 
+        await storage.updateReportStatus(report.id, { 
           status: "completed", 
           fileSize: `${(Math.random() * 5 + 0.5).toFixed(1)} MB` 
         });
@@ -1287,18 +1297,19 @@ export async function registerRoutes(
       }
       const { employeeId, employeeName, department, salary, bonus, deductions, payDate } = result.data;
 
-      const salaryNum = salary;
-      const bonusNum = bonus || 0;
-      const deductionsNum = deductions || 0;
+      const salaryNum = parseFloat(salary);
+      const bonusNum = parseFloat(bonus || '0');
+      const deductionsNum = parseFloat(deductions || '0');
+      const netPayNum = salaryNum + bonusNum - deductionsNum;
       
       const entry = await storage.createPayrollEntry({
         employeeId: employeeId || String(Date.now()),
         employeeName,
         department: department || 'General',
-        salary: salaryNum,
-        bonus: bonusNum,
-        deductions: deductionsNum,
-        netPay: salaryNum + bonusNum - deductionsNum,
+        salary,
+        bonus: bonus || '0',
+        deductions: deductions || '0',
+        netPay: String(netPayNum),
         status: 'pending',
         payDate: payDate || new Date().toISOString().split('T')[0],
       });
@@ -1523,8 +1534,8 @@ export async function registerRoutes(
         address: address || '',
         category: category || 'Other',
         status: 'active',
-        totalPaid: 0,
-        pendingPayments: 0,
+        totalPaid: '0',
+        pendingPayments: '0',
         lastPayment: '',
       });
       
@@ -2247,13 +2258,13 @@ export async function registerRoutes(
         try {
           await storage.createFundingSource({
             userId: customer.email || customer.customer_code,
-            sourceType: 'virtual_account',
+            type: 'virtual_account',
             provider: 'paystack',
             accountNumber: dedicated_account.account_number,
             bankName: dedicated_account.bank?.name || 'Wema Bank',
-            accountName: customer.first_name ? `${customer.first_name} ${customer.last_name || ''}` : customer.email,
             currency: 'NGN',
             isActive: true,
+            isVerified: false,
             metadata: { customerCode: customer.customer_code, assignedAt: new Date().toISOString() },
           });
         } catch (err) {
@@ -2834,7 +2845,7 @@ export async function registerRoutes(
         const firstError = parseResult.error.errors[0];
         const errorPath = firstError?.path?.join('.') || 'unknown';
         const errorMessage = firstError?.message || "Invalid request data";
-        console.error('KYC validation error:', { path: errorPath, message: errorMessage, received: firstError?.received });
+        console.error('KYC validation error:', { path: errorPath, message: errorMessage, received: (firstError as any)?.received });
         return res.status(400).json({ error: `${errorMessage} (field: ${errorPath})` });
       }
 
@@ -2916,15 +2927,15 @@ export async function registerRoutes(
 
             // Store in database
             virtualAccount = await storage.createVirtualAccount({
-              userId: data.firebaseUid,
-              provider: result.provider,
+              name: result.accountName || `${data.firstName} ${data.lastName}`,
               accountNumber: result.accountNumber || '',
               bankName: result.bankName || 'Spendly',
-              accountName: result.accountName || `${data.firstName} ${data.lastName}`,
+              bankCode: result.bankCode || 'SPENDLY',
               currency: getCurrencyForCountry(data.country).currency,
-              country: data.country,
+              balance: '0',
+              type: 'personal',
               status: 'active',
-              metadata: result,
+              createdAt: new Date().toISOString(),
             });
 
             // Create wallet for this user if not exists
@@ -3417,7 +3428,7 @@ export async function registerRoutes(
         settings = await storage.updateNotificationSettings(userId, settingsData);
       }
       
-      res.json(settings);
+      res.json(settings || null);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to update notification settings" });
     }
@@ -4060,12 +4071,10 @@ export async function registerRoutes(
       });
 
       // Send notification
-      await notificationService.sendNotification({
-        userId: expense.userId,
-        type: 'expense_approved',
-        title: 'Expense Approved',
-        message: `Your expense request for ${expense.currency} ${expense.amount} has been approved`,
-        data: { expenseId: expense.id, payoutId: payout.id },
+      await notificationService.notifyExpenseApproved(expense.userId, {
+        id: expense.id,
+        merchant: expense.merchant,
+        amount: parseFloat(expense.amount),
       });
 
       res.json({ expense: updatedExpense, payout });
@@ -4088,18 +4097,18 @@ export async function registerRoutes(
           if (!entry || entry.status === 'paid') continue;
 
           // Get employee's payout destination
-          const destinations = await storage.getPayoutDestinations(entry.memberId);
+          const destinations = await storage.getPayoutDestinations(entry.employeeId);
           const defaultDestination = destinations.find(d => d.isDefault) || destinations[0];
 
           // Create payout
           const payout = await storage.createPayout({
             type: 'payroll',
-            amount: entry.netSalary || entry.salary,
+            amount: entry.netPay || entry.salary,
             currency: 'USD',
             status: 'pending',
             recipientType: 'employee',
-            recipientId: entry.memberId,
-            recipientName: entry.name,
+            recipientId: entry.employeeId,
+            recipientName: entry.employeeName,
             destinationId: defaultDestination?.id,
             provider: defaultDestination?.provider || 'stripe',
             relatedEntityType: 'payroll',
