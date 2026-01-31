@@ -48,8 +48,8 @@ const expenseSchema = z.object({
   expenseType: z.enum(['spent', 'request']).optional().default('request'),
   attachments: z.array(z.string()).optional().default([]),
   taggedReviewers: z.array(z.string()).optional().default([]),
-  userId: z.string().optional(),
-  user: z.string().optional(),
+  userId: z.string().default('1'),
+  user: z.string().default('Unknown User'),
 });
 
 const transactionSchema = z.object({
@@ -160,8 +160,8 @@ const invoiceUpdateSchema = invoiceSchema.partial().extend({
 });
 const vendorUpdateSchema = vendorSchema.partial().extend({
   status: z.string().optional(),
-  totalPaid: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) : val),
-  pendingPayments: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  totalPaid: z.union([z.string(), z.number()]).optional().transform(val => String(val || '0')),
+  pendingPayments: z.union([z.string(), z.number()]).optional().transform(val => String(val || '0')),
 });
 
 export async function registerRoutes(
@@ -2927,6 +2927,7 @@ export async function registerRoutes(
 
             // Store in database
             virtualAccount = await storage.createVirtualAccount({
+              userId: data.firebaseUid,
               name: result.accountName || `${data.firstName} ${data.lastName}`,
               accountNumber: result.accountNumber || '',
               bankName: result.bankName || 'Spendly',
@@ -4199,14 +4200,15 @@ export async function registerRoutes(
       // Store in database
       const virtualAccount = await storage.createVirtualAccount({
         userId,
-        provider: result.provider,
+        name: result.accountName || `${firstName} ${lastName}`,
         accountNumber: result.accountNumber || '',
         bankName: result.bankName || 'Spendly',
-        accountName: result.accountName || `${firstName} ${lastName}`,
+        bankCode: result.bankCode || 'SPENDLY',
         currency: getCurrencyForCountry(countryCode).currency,
-        country: countryCode,
+        balance: '0',
+        type: 'personal',
         status: 'active',
-        metadata: result,
+        createdAt: new Date().toISOString(),
       });
 
       // Create wallet for this user if not exists

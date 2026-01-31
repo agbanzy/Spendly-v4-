@@ -260,6 +260,7 @@ export const cardTransactions = pgTable("card_transactions", {
 // Virtual Accounts table
 export const virtualAccounts = pgTable("virtual_accounts", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  userId: text("user_id"),
   name: text("name").notNull(),
   accountNumber: text("account_number").notNull(),
   bankName: text("bank_name").notNull(),
