@@ -41,26 +41,28 @@ const upload = multer({
 
 const expenseSchema = z.object({
   merchant: z.string().min(1),
-  amount: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  amount: z.union([z.string(), z.number()]).transform(val => String(val)),
   category: z.string().min(1),
-  note: z.string().optional(),
-  receiptUrl: z.string().optional(),
+  note: z.string().optional().nullable(),
+  receiptUrl: z.string().optional().nullable(),
   expenseType: z.enum(['spent', 'request']).optional().default('request'),
   attachments: z.array(z.string()).optional().default([]),
   taggedReviewers: z.array(z.string()).optional().default([]),
+  userId: z.string().optional(),
+  user: z.string().optional(),
 });
 
 const transactionSchema = z.object({
   type: z.string().min(1),
-  amount: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  amount: z.union([z.string(), z.number()]).transform(val => String(val)),
   description: z.string().optional(),
-  fee: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) || 0 : val || 0),
+  fee: z.union([z.string(), z.number()]).optional().transform(val => String(val || '0')),
 });
 
 const billSchema = z.object({
   name: z.string().min(1),
   provider: z.string().optional().default(''),
-  amount: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  amount: z.union([z.string(), z.number()]).transform(val => String(val)),
   dueDate: z.string().min(1),
   category: z.string().optional().default('Other'),
 });
@@ -68,13 +70,13 @@ const billSchema = z.object({
 const budgetSchema = z.object({
   name: z.string().min(1),
   category: z.string().min(1),
-  limit: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  limit: z.union([z.string(), z.number()]).transform(val => String(val)),
   period: z.string().optional().default('monthly'),
 });
 
 const cardSchema = z.object({
   name: z.string().min(1),
-  limit: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  limit: z.union([z.string(), z.number()]).transform(val => String(val)),
   type: z.string().optional().default('Visa'),
   color: z.string().optional().default('indigo'),
 });
@@ -106,16 +108,16 @@ const payrollSchema = z.object({
   employeeId: z.string().optional(),
   employeeName: z.string().min(1),
   department: z.string().optional().default('General'),
-  salary: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseFloat(val) : val),
-  bonus: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) || 0 : val || 0),
-  deductions: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) || 0 : val || 0),
+  salary: z.union([z.string(), z.number()]).transform(val => String(val)),
+  bonus: z.union([z.string(), z.number()]).optional().transform(val => String(val || '0')),
+  deductions: z.union([z.string(), z.number()]).optional().transform(val => String(val || '0')),
   payDate: z.string().optional(),
 });
 
 const invoiceSchema = z.object({
   client: z.string().min(1),
   clientEmail: z.string().optional().default(''),
-  amount: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  amount: z.union([z.string(), z.number()]).transform(val => String(val)),
   dueDate: z.string().optional(),
   items: z.array(z.any()).optional().default([]),
 });
@@ -128,24 +130,30 @@ const vendorSchema = z.object({
   category: z.string().optional().default('Other'),
 });
 
-const expenseUpdateSchema = expenseSchema.partial();
+const expenseUpdateSchema = expenseSchema.partial().extend({
+  status: z.string().optional(),
+  rejectionReason: z.string().optional(),
+});
 const transactionUpdateSchema = transactionSchema.partial();
 const billUpdateSchema = billSchema.partial().extend({
   status: z.string().optional(),
 });
 const budgetUpdateSchema = budgetSchema.partial().extend({
-  spent: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  spent: z.union([z.string(), z.number()]).optional().transform(val => String(val || '0')),
 });
 const cardUpdateSchema = cardSchema.partial().extend({
   status: z.string().optional(),
-  balance: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  balance: z.union([z.string(), z.number()]).optional().transform(val => String(val || '0')),
 });
 const teamMemberUpdateSchema = teamMemberSchema.partial().extend({
   status: z.string().optional(),
 });
 const payrollUpdateSchema = payrollSchema.partial().extend({
   status: z.enum(['pending', 'processing', 'paid']).optional(),
-  netPay: z.union([z.string(), z.number()]).optional().transform(val => typeof val === 'string' ? parseFloat(val) : val),
+  netPay: z.union([z.string(), z.number()]).optional().transform(val => String(val || '0')),
+  bankName: z.string().optional().nullable(),
+  accountNumber: z.string().optional().nullable(),
+  accountName: z.string().optional().nullable(),
 });
 const invoiceUpdateSchema = invoiceSchema.partial().extend({
   status: z.string().optional(),
