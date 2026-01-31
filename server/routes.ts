@@ -2713,6 +2713,9 @@ export async function registerRoutes(
     acceptTerms: z.union([z.boolean(), z.string()]).optional().transform(v => v === true || v === 'true'),
     accountType: optionalString,
     bvnNumber: optionalString,
+    // Auto-approval flags
+    bvnVerified: z.union([z.boolean(), z.string()]).optional().transform(v => v === true || v === 'true'),
+    stripeVerified: z.union([z.boolean(), z.string()]).optional().transform(v => v === true || v === 'true'),
   });
 
   // Submit KYC
@@ -2736,6 +2739,11 @@ export async function registerRoutes(
       }
 
       const now = new Date().toISOString();
+      
+      // Auto-approve if BVN or Stripe verification was successful
+      const isAutoApproved = data.bvnVerified || data.stripeVerified;
+      const kycStatus = isAutoApproved ? 'approved' : 'pending_review';
+      
       const submission = await storage.createKycSubmission({
         userProfileId: userProfile.id,
         firstName: data.firstName,
@@ -2765,10 +2773,10 @@ export async function registerRoutes(
         businessRegistrationNumber: data.businessRegistrationNumber || null,
         businessAddress: data.businessAddress || null,
         businessDocumentUrl: data.businessDocumentUrl || null,
-        status: 'pending_review',
-        reviewNotes: null,
-        reviewedBy: null,
-        reviewedAt: null,
+        status: kycStatus,
+        reviewNotes: isAutoApproved ? 'Auto-approved via BVN/Stripe verification' : null,
+        reviewedBy: isAutoApproved ? 'system' : null,
+        reviewedAt: isAutoApproved ? now : null,
         submittedAt: now,
         createdAt: now,
         updatedAt: now,
@@ -2776,7 +2784,7 @@ export async function registerRoutes(
 
       // Update user profile KYC status using firebaseUid
       await storage.updateUserProfile(data.firebaseUid, { 
-        kycStatus: 'pending_review',
+        kycStatus: kycStatus,
         onboardingCompleted: true,
         onboardingStep: 5,
       });
