@@ -10,6 +10,13 @@ import { notificationService } from "./services/notification-service";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import {
+  authLimiter,
+  sensitiveLimiter,
+  financialLimiter,
+  emailLimiter
+} from "./middleware/rateLimiter";
+import { requireAuth, requireAdmin } from "./middleware/auth";
 
 const uploadDir = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -1884,7 +1891,7 @@ export async function registerRoutes(
     }),
   });
 
-  app.post("/api/payment/transfer", async (req, res) => {
+  app.post("/api/payment/transfer", financialLimiter, async (req, res) => {
     try {
       const result = transferSchema.safeParse(req.body);
       if (!result.success) {
@@ -2079,7 +2086,7 @@ export async function registerRoutes(
     reason: z.string().default('Payout'),
   });
 
-  app.post("/api/wallet/payout", async (req, res) => {
+  app.post("/api/wallet/payout", financialLimiter, async (req, res) => {
     try {
       const result = payoutSchema.safeParse(req.body);
       if (!result.success) {
@@ -2087,22 +2094,43 @@ export async function registerRoutes(
       }
 
       const { amount, countryCode, recipientDetails, reason } = result.data;
-      
+      const { currency } = getCurrencyForCountry(countryCode);
+
+      // Get balance in the correct currency
       const balances = await storage.getBalances();
-      const currentUsd = parseFloat(String(balances.usd || 0));
-      if (currentUsd < amount) {
-        return res.status(400).json({ error: "Insufficient wallet balance" });
+      let currentBalance = 0;
+
+      // Map currency to balance field (temporary workaround for legacy balance structure)
+      if (currency === 'USD' || ['US', 'CA'].includes(countryCode)) {
+        currentBalance = parseFloat(String(balances.usd || 0));
+      } else {
+        // For non-USD currencies, use local balance
+        currentBalance = parseFloat(String(balances.local || 0));
       }
-      
+
+      if (currentBalance < amount) {
+        return res.status(400).json({
+          error: "Insufficient wallet balance",
+          required: amount,
+          available: currentBalance,
+          currency
+        });
+      }
+
       const transferResult = await paymentService.initiateTransfer(
         amount,
         recipientDetails,
         countryCode,
         reason
       );
-      
-      await storage.updateBalances({ usd: String(currentUsd - amount) });
-      
+
+      // Deduct from correct currency balance
+      if (currency === 'USD' || ['US', 'CA'].includes(countryCode)) {
+        await storage.updateBalances({ usd: String(currentBalance - amount) });
+      } else {
+        await storage.updateBalances({ local: String(currentBalance - amount) });
+      }
+
       await storage.createTransaction({
         type: 'Payout',
         amount: String(amount),
@@ -2110,12 +2138,17 @@ export async function registerRoutes(
         status: 'Processing',
         date: new Date().toISOString().split('T')[0],
         description: reason,
-        currency: getCurrencyForCountry(countryCode).currency,
+        currency,
       });
-      
+
       res.json({
         success: true,
         transferDetails: transferResult,
+        balanceDeducted: {
+          amount,
+          currency,
+          remainingBalance: currentBalance - amount
+        }
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to process payout" });
@@ -2302,17 +2335,22 @@ export async function registerRoutes(
     try {
       const crypto = await import('crypto');
       const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
-      
-      if (paystackSecretKey) {
-        const hash = crypto.createHmac('sha512', paystackSecretKey)
-          .update(JSON.stringify(req.body))
-          .digest('hex');
-        
-        const signature = req.headers['x-paystack-signature'];
-        if (hash !== signature) {
-          console.error('Paystack webhook signature verification failed');
-          return res.status(401).json({ error: "Invalid signature" });
-        }
+
+      // SECURITY: Reject webhook if secret key is not configured
+      if (!paystackSecretKey) {
+        console.error('Paystack webhook rejected: PAYSTACK_SECRET_KEY not configured');
+        return res.status(500).json({ error: "Webhook configuration error" });
+      }
+
+      // Verify webhook signature
+      const hash = crypto.createHmac('sha512', paystackSecretKey)
+        .update(JSON.stringify(req.body))
+        .digest('hex');
+
+      const signature = req.headers['x-paystack-signature'];
+      if (hash !== signature) {
+        console.error('Paystack webhook signature verification failed');
+        return res.status(401).json({ error: "Invalid signature" });
       }
       
       const event = req.body;
@@ -2438,16 +2476,16 @@ export async function registerRoutes(
             'virtual_account_funding',
             `Bank transfer via DVA - Ref: ${reference}`,
             reference,
-            { 
-              provider: 'paystack', 
-              channel: 'dedicated_nuban', 
+            {
+              provider: 'paystack',
+              channel: 'dedicated_nuban',
               customerCode: customer?.customer_code,
               accountNumber: dedicatedAccount?.account_number,
               senderName: authorization?.sender_name || 'Unknown'
             }
           );
           console.log(`Wallet ${userWallet.id} credited with ${amountValue} via DVA (${reference})`);
-          
+
           // Send SMS notification if user has phone number
           try {
             if (userWallet.userId) {
@@ -2471,7 +2509,61 @@ export async function registerRoutes(
             console.error('Failed to send DVA funding SMS notification:', smsError);
           }
         } else {
-          console.warn(`No wallet found for customer ${customer?.customer_code || customer?.email}. DVA funding not credited. Consider manual reconciliation.`);
+          // CRITICAL: Wallet not found - attempt to auto-create wallet
+          console.warn(`No wallet found for customer ${customer?.customer_code || customer?.email}. Attempting auto-creation.`);
+
+          try {
+            const userId = virtualAccount?.userId || customer?.email;
+            if (userId) {
+              // Auto-create wallet for this user
+              const newWallet = await storage.createWallet({
+                userId,
+                type: 'personal',
+                currency: event.data.currency || 'NGN',
+                balance: '0',
+                availableBalance: '0',
+                pendingBalance: '0',
+                status: 'active',
+                virtualAccountId: virtualAccount?.id || dedicatedAccount?.account_number,
+              });
+
+              // Now credit the newly created wallet
+              await storage.creditWallet(
+                newWallet.id,
+                amountValue,
+                'virtual_account_funding',
+                `Bank transfer via DVA - Ref: ${reference} (Auto-created wallet)`,
+                reference,
+                {
+                  provider: 'paystack',
+                  channel: 'dedicated_nuban',
+                  customerCode: customer?.customer_code,
+                  accountNumber: dedicatedAccount?.account_number,
+                  senderName: authorization?.sender_name || 'Unknown',
+                  autoCreated: true
+                }
+              );
+              console.log(`✅ Auto-created wallet ${newWallet.id} and credited ${amountValue} for user ${userId}`);
+            } else {
+              throw new Error('Cannot determine userId for wallet creation');
+            }
+          } catch (walletCreationError: any) {
+            // If auto-creation fails, store as pending transaction for manual reconciliation
+            console.error(`❌ Failed to auto-create wallet: ${walletCreationError.message}`);
+
+            await storage.createTransaction({
+              type: 'Funding',
+              amount: amountValue.toString(),
+              fee: '0',
+              status: 'Pending',
+              description: `UNMATCHED DVA DEPOSIT - Manual reconciliation required. Customer: ${customer?.customer_code || customer?.email}, Account: ${dedicatedAccount?.account_number}`,
+              currency: event.data.currency || 'NGN',
+              date: new Date().toISOString().split('T')[0],
+            });
+
+            // TODO: Send alert to administrators about unmatched deposit
+            console.error(`⚠️ ALERT: Unmatched deposit of ${amountValue} ${event.data.currency} stored as pending transaction. Reference: ${reference}`);
+          }
         }
       }
 
@@ -2998,7 +3090,7 @@ export async function registerRoutes(
   });
 
   // Submit KYC
-  app.post("/api/kyc", async (req, res) => {
+  app.post("/api/kyc", sensitiveLimiter, async (req, res) => {
     try {
       const parseResult = kycSubmissionSchema.safeParse(req.body);
       if (!parseResult.success) {
@@ -4420,7 +4512,7 @@ export async function registerRoutes(
   // ==================== ADMIN UTILITIES ====================
   
   // Get all users (admin)
-  app.get("/api/admin/users", async (req, res) => {
+  app.get("/api/admin/users", requireAdmin, async (req, res) => {
     try {
       const usersList = await storage.getUsers();
       res.json(usersList);
@@ -4430,7 +4522,7 @@ export async function registerRoutes(
   });
 
   // Update user (admin)
-  app.put("/api/admin/users/:id", async (req, res) => {
+  app.put("/api/admin/users/:id", requireAdmin, async (req, res) => {
     try {
       const user = await storage.updateUser(req.params.id, req.body);
       if (!user) {
@@ -4443,7 +4535,7 @@ export async function registerRoutes(
   });
 
   // Delete user (admin)
-  app.delete("/api/admin/users/:id", async (req, res) => {
+  app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
     try {
       const deleted = await storage.deleteUser(req.params.id);
       if (!deleted) {
@@ -4456,7 +4548,7 @@ export async function registerRoutes(
   });
 
   // Purge database (admin)
-  app.post("/api/admin/purge-database", async (req, res) => {
+  app.post("/api/admin/purge-database", requireAdmin, async (req, res) => {
     try {
       const { tablesToPreserve, confirmPurge } = req.body;
       
@@ -4505,7 +4597,7 @@ export async function registerRoutes(
   });
 
   // Single admin enforcement
-  app.post("/api/admin/set-single-admin", async (req, res) => {
+  app.post("/api/admin/set-single-admin", requireAdmin, async (req, res) => {
     try {
       const { adminUserId } = req.body;
       
@@ -4638,7 +4730,7 @@ export async function registerRoutes(
   });
 
   // Admin login
-  app.post("/api/admin/login", async (req, res) => {
+  app.post("/api/admin/login", authLimiter, async (req, res) => {
     try {
       const { username, password } = req.body;
       

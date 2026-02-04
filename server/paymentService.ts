@@ -132,13 +132,15 @@ export const paymentService = {
 
   async initiateTransfer(amount: number, recipientDetails: any, countryCode: string, reason: string) {
     const provider = getPaymentProvider(countryCode);
-    
+    const { currency } = getCurrencyForCountry(countryCode);
+
     if (provider === 'paystack') {
       const { accountNumber, bankCode, accountName } = recipientDetails;
       const recipientResult = await paystackClient.createTransferRecipient(
         accountName,
         accountNumber,
-        bankCode
+        bankCode,
+        currency
       );
       const transfer = await paystackClient.initiateTransfer(
         amount,
@@ -150,12 +152,13 @@ export const paymentService = {
         transferCode: transfer.data.transfer_code,
         status: transfer.data.status,
         reference: transfer.data.reference,
+        currency,
       };
     } else {
       const stripe = await getUncachableStripeClient();
       const transfer = await stripe.transfers.create({
         amount: Math.round(amount * 100),
-        currency: recipientDetails.currency || 'usd',
+        currency: recipientDetails.currency || currency.toLowerCase(),
         destination: recipientDetails.stripeAccountId,
         description: reason,
       });
@@ -163,6 +166,7 @@ export const paymentService = {
         provider: 'stripe',
         transferId: transfer.id,
         status: transfer.destination ? 'pending' : 'failed',
+        currency,
       };
     }
   },

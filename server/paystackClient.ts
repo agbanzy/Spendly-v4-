@@ -60,13 +60,13 @@ export const paystackClient = {
     return paystackRequest(`/transaction/verify/${reference}`);
   },
 
-  async createTransferRecipient(name: string, accountNumber: string, bankCode: string) {
+  async createTransferRecipient(name: string, accountNumber: string, bankCode: string, currency: string = 'NGN') {
     return paystackRequest('/transferrecipient', 'POST', {
       type: 'nuban',
       name,
       account_number: accountNumber,
       bank_code: bankCode,
-      currency: 'NGN',
+      currency,
     });
   },
 

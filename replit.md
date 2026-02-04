@@ -3,7 +3,18 @@
 ## Overview
 Spendly is a comprehensive financial operating system for high-growth teams. It provides expense tracking, budget management, virtual cards, team management, payroll, invoicing, vendor management, and transaction monitoring in a unified platform.
 
-## Recent Changes (January 31, 2026)
+## Recent Changes (February 4, 2026)
+- **Security Middleware Integration**: Merged security enhancements from Spendly-v4- repository
+  - Rate limiting middleware: API (100/15min), Auth (5/15min), Financial (3/min), Email (3/hr)
+  - Firebase Admin SDK integration with fail-closed production mode
+  - Password validation utilities with breach checking
+  - Auth middleware for token verification and admin role checking
+- **Security Documentation**: Added comprehensive audit documents
+  - ADMIN_SYSTEM_AUDIT.md, APPROVAL_PAYOUT_AUDIT.md, AUTH_SECURITY_AUDIT.md
+  - DEPLOYMENT_GUIDE.md, MOBILE_APP_AUDIT.md, PAYROLL_SECURITY_AUDIT.md
+  - SECURITY_FIXES_IMPLEMENTATION.md, VIRTUAL_CARD_AUDIT.md
+
+## Previous Changes (January 31, 2026)
 - **User-Generated Virtual Accounts**: Users can now generate their own virtual account numbers directly from the dashboard
   - "Generate Virtual Account" button appears when no account exists
   - Virtual accounts are linked to user's wallet for automatic crediting
