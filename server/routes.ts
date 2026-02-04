@@ -2373,6 +2373,9 @@ export async function registerRoutes(
     ZA: { phone: /^0[678]\d{8}$/, meter: /^\d{13,14}$/, smartcard: /^\d{10}$/ },
     US: { phone: /^\d{10}$/, meter: /^\d{9,12}$/, smartcard: /^\d{10}$/ },
     GB: { phone: /^0[1-9]\d{9}$/, meter: /^[A-Z0-9]{8,12}$/i, smartcard: /^\d{10}$/ },
+    EU: { phone: /^\+?[0-9]{8,15}$/, meter: /^[A-Z]{2}[0-9A-Z]{8,16}$/i, smartcard: /^\d{10,14}$/ },
+    DE: { phone: /^\+?49[0-9]{9,12}$/, meter: /^DE[0-9A-Z]{10,14}$/i, smartcard: /^\d{10,12}$/ },
+    FR: { phone: /^\+?33[0-9]{9}$/, meter: /^[0-9]{14}$/, smartcard: /^\d{10}$/ },
   };
 
   // Determine payment provider based on country
@@ -2413,6 +2416,42 @@ export async function registerRoutes(
         if (!patterns.smartcard.test(smartcardToValidate)) {
           return res.status(400).json({ error: `Invalid smart card number format for ${countryCode}` });
         }
+      }
+      
+      if (type === 'internet') {
+        const meterToValidate = meterNumber || reference;
+        if (!patterns.meter.test(meterToValidate)) {
+          return res.status(400).json({ error: `Invalid account number format for ${countryCode}` });
+        }
+      }
+
+      // Valid providers by type and region
+      const validProviders: Record<string, Record<string, string[]>> = {
+        Africa: {
+          airtime: ['mtn', 'glo', 'airtel', '9mobile', 'safaricom', 'vodacom'],
+          data: ['mtn-data', 'glo-data', 'airtel-data', '9mobile-data', 'spectranet', 'smile'],
+          electricity: ['eko', 'ikeja', 'abuja', 'ibadan', 'kplc', 'eskom'],
+          cable: ['dstv', 'gotv', 'startimes', 'showmax'],
+          internet: ['spectranet', 'smile', 'swift', 'ntel'],
+        },
+        'US/Europe': {
+          airtime: ['verizon', 'tmobile', 'att', 'vodafone', 'ee', 'o2'],
+          data: ['verizon-data', 'tmobile-data', 'att-data'],
+          electricity: ['pge', 'coned', 'duke', 'edf', 'british-gas'],
+          cable: ['netflix', 'hulu', 'hbo', 'disney', 'sky'],
+          internet: ['xfinity', 'spectrum', 'att-fiber', 'virgin', 'bt'],
+        },
+      };
+      
+      const africanCountries = ['NG', 'KE', 'GH', 'ZA', 'EG', 'TZ', 'UG', 'RW'];
+      const region = africanCountries.includes(countryCode?.toUpperCase() || 'US') ? 'Africa' : 'US/Europe';
+      const validProvidersForType = validProviders[region][type] || [];
+      
+      if (!validProvidersForType.includes(provider.toLowerCase())) {
+        return res.status(400).json({ 
+          error: `Invalid provider '${provider}' for ${type} in ${region}`,
+          validProviders: validProvidersForType
+        });
       }
 
       // Get wallet for balance check
