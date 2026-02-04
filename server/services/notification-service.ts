@@ -355,6 +355,17 @@ class NotificationService {
     }
   }
 
+  // HTML escape function to prevent XSS in email templates
+  private escapeHtml(unsafe: string): string {
+    if (!unsafe) return '';
+    return unsafe
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   private formatEmailHtml(title: string, message: string, data?: Record<string, unknown>): string {
     return `
       <!DOCTYPE html>
@@ -486,17 +497,22 @@ class NotificationService {
     });
   }
 
-  async sendTeamInvite(config: { 
-    email: string; 
-    name: string; 
-    role: string; 
+  async sendTeamInvite(config: {
+    email: string;
+    name: string;
+    role: string;
     department?: string;
     invitedBy?: string;
   }): Promise<{ success: boolean; error?: string }> {
-    const appUrl = process.env.REPLIT_DEV_DOMAIN 
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
+    const appUrl = process.env.REPLIT_DEV_DOMAIN
+      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
       : 'https://spendly.app';
-    
+
+    // Escape user inputs to prevent XSS
+    const safeName = this.escapeHtml(config.name);
+    const safeRole = this.escapeHtml(config.role);
+    const safeDepartment = config.department ? this.escapeHtml(config.department) : '';
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -510,8 +526,8 @@ class NotificationService {
           <h1 style="color: white; margin: 0; font-size: 28px;">Welcome to Spendly!</h1>
         </div>
         <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px;">
-          <p style="font-size: 16px;">Hi <strong>${config.name}</strong>,</p>
-          <p style="font-size: 16px;">You've been invited to join your team on Spendly as a <strong>${config.role}</strong>${config.department ? ` in the ${config.department} department` : ''}.</p>
+          <p style="font-size: 16px;">Hi <strong>${safeName}</strong>,</p>
+          <p style="font-size: 16px;">You've been invited to join your team on Spendly as a <strong>${safeRole}</strong>${safeDepartment ? ` in the ${safeDepartment} department` : ''}.</p>
           <p style="font-size: 16px;">Spendly is your team's expense management platform where you can:</p>
           <ul style="font-size: 15px; color: #555;">
             <li>Submit and track expenses</li>
@@ -530,6 +546,7 @@ class NotificationService {
       </html>
     `;
 
+    // Use original (unescaped) values for plain text email - no XSS risk in plain text
     const text = `Hi ${config.name},
 
 You've been invited to join your team on Spendly as a ${config.role}${config.department ? ` in the ${config.department} department` : ''}.
@@ -556,10 +573,13 @@ If you have any questions, please contact your team administrator.
   }
 
   async sendWelcomeEmail(config: { email: string; name: string }): Promise<{ success: boolean; error?: string }> {
-    const appUrl = process.env.REPLIT_DEV_DOMAIN 
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
+    const appUrl = process.env.REPLIT_DEV_DOMAIN
+      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
       : 'https://spendlymanager.com';
-    
+
+    // Escape user input to prevent XSS
+    const safeName = this.escapeHtml(config.name);
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -575,7 +595,7 @@ If you have any questions, please contact your team administrator.
             <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 16px;">Your financial operating system</p>
           </div>
           <div style="padding: 32px;">
-            <p style="font-size: 18px; color: #1f2937;">Hi <strong>${config.name}</strong>,</p>
+            <p style="font-size: 18px; color: #1f2937;">Hi <strong>${safeName}</strong>,</p>
             <p style="color: #4b5563; line-height: 1.6; font-size: 16px;">Thank you for signing up for Spendly! We're excited to have you on board.</p>
             <p style="color: #4b5563; line-height: 1.6; font-size: 16px;">Here's what you can do with Spendly:</p>
             <ul style="color: #4b5563; line-height: 1.8; font-size: 15px;">
@@ -739,6 +759,15 @@ If you have any questions, please contact your team administrator.
     reference: string;
     date: string;
   }): Promise<{ success: boolean; error?: string }> {
+    // Escape all user inputs to prevent XSS
+    const safeName = this.escapeHtml(config.name);
+    const safeRecipientName = this.escapeHtml(config.recipientName);
+    const safeRecipientBank = config.recipientBank ? this.escapeHtml(config.recipientBank) : '';
+    const safeRecipientAccount = config.recipientAccount ? this.escapeHtml(config.recipientAccount) : '';
+    const safeReference = this.escapeHtml(config.reference);
+    const safeDate = this.escapeHtml(config.date);
+    const safeCurrency = this.escapeHtml(config.currency);
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -754,37 +783,37 @@ If you have any questions, please contact your team administrator.
             <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Payout Successful</h1>
           </div>
           <div style="padding: 32px;">
-            <p style="font-size: 16px; color: #1f2937;">Hi <strong>${config.name}</strong>,</p>
+            <p style="font-size: 16px; color: #1f2937;">Hi <strong>${safeName}</strong>,</p>
             <p style="color: #4b5563; line-height: 1.6;">Your payout has been successfully processed. Here are the details:</p>
             <div style="background-color: #f9fafb; border-radius: 8px; padding: 20px; margin: 24px 0;">
               <table style="width: 100%; border-collapse: collapse;">
                 <tr>
                   <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Amount</td>
-                  <td style="padding: 8px 0; color: #1f2937; font-weight: 600; text-align: right; font-size: 18px;">${config.currency} ${config.amount.toLocaleString()}</td>
+                  <td style="padding: 8px 0; color: #1f2937; font-weight: 600; text-align: right; font-size: 18px;">${safeCurrency} ${config.amount.toLocaleString()}</td>
                 </tr>
                 <tr>
                   <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Recipient</td>
-                  <td style="padding: 8px 0; color: #1f2937; text-align: right;">${config.recipientName}</td>
+                  <td style="padding: 8px 0; color: #1f2937; text-align: right;">${safeRecipientName}</td>
                 </tr>
-                ${config.recipientBank ? `
+                ${safeRecipientBank ? `
                 <tr>
                   <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Bank</td>
-                  <td style="padding: 8px 0; color: #1f2937; text-align: right;">${config.recipientBank}</td>
+                  <td style="padding: 8px 0; color: #1f2937; text-align: right;">${safeRecipientBank}</td>
                 </tr>
                 ` : ''}
-                ${config.recipientAccount ? `
+                ${safeRecipientAccount ? `
                 <tr>
                   <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Account</td>
-                  <td style="padding: 8px 0; color: #1f2937; text-align: right;">****${config.recipientAccount.slice(-4)}</td>
+                  <td style="padding: 8px 0; color: #1f2937; text-align: right;">****${safeRecipientAccount.slice(-4)}</td>
                 </tr>
                 ` : ''}
                 <tr>
                   <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Reference</td>
-                  <td style="padding: 8px 0; color: #1f2937; text-align: right; font-family: monospace;">${config.reference}</td>
+                  <td style="padding: 8px 0; color: #1f2937; text-align: right; font-family: monospace;">${safeReference}</td>
                 </tr>
                 <tr>
                   <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Date</td>
-                  <td style="padding: 8px 0; color: #1f2937; text-align: right;">${config.date}</td>
+                  <td style="padding: 8px 0; color: #1f2937; text-align: right;">${safeDate}</td>
                 </tr>
               </table>
             </div>
