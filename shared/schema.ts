@@ -137,6 +137,11 @@ export const bills = pgTable("bills", {
   status: text("status").notNull().default('Unpaid'),
   currency: text("currency").notNull().default('USD'),
   logo: text("logo"),
+  userId: varchar("user_id", { length: 36 }),
+  recurring: boolean("recurring").default(false),
+  frequency: text("frequency").default('monthly'),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 // Budgets table

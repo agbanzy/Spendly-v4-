@@ -67,11 +67,24 @@ const transactionSchema = z.object({
 });
 
 const billSchema = z.object({
-  name: z.string().min(1),
-  provider: z.string().optional().default(''),
-  amount: z.union([z.string(), z.number()]).transform(val => String(val)),
-  dueDate: z.string().min(1),
-  category: z.string().optional().default('Other'),
+  name: z.string().min(2, "Bill name must be at least 2 characters").max(100, "Bill name must be less than 100 characters"),
+  provider: z.string().min(2, "Provider must be at least 2 characters").optional().default(''),
+  amount: z.union([z.string(), z.number()])
+    .transform(val => String(val))
+    .refine(val => {
+      const num = parseFloat(val);
+      return !isNaN(num) && num > 0 && num <= 1000000000;
+    }, "Amount must be a positive number and less than 1 billion"),
+  dueDate: z.string().min(1, "Due date is required").refine(val => {
+    const selectedDate = new Date(val);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return selectedDate >= today;
+  }, "Due date cannot be in the past"),
+  category: z.string().min(1, "Category is required").optional().default('Other'),
+  recurring: z.boolean().optional().default(false),
+  frequency: z.enum(['once', 'weekly', 'monthly', 'quarterly', 'yearly']).optional().default('monthly'),
+  userId: z.string().optional(),
 });
 
 const budgetSchema = z.object({
@@ -540,7 +553,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid bill data", details: result.error.issues });
       }
-      const { name, provider, amount, dueDate, category } = result.data;
+      const { name, provider, amount, dueDate, category, recurring, frequency, userId } = result.data;
 
       const bill = await storage.createBill({
         name,
@@ -551,6 +564,11 @@ export async function registerRoutes(
         status: 'Unpaid',
         currency: 'USD',
         logo: null,
+        userId: userId || null,
+        recurring: recurring || false,
+        frequency: frequency || 'monthly',
+        createdAt: new Date(),
+        updatedAt: new Date(),
       });
       
       res.status(201).json(bill);
