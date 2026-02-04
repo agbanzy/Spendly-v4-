@@ -4,6 +4,25 @@
 Spendly is a comprehensive financial operating system for high-growth teams. It provides expense tracking, budget management, virtual cards, team management, payroll, invoicing, vendor management, and transaction monitoring in a unified platform.
 
 ## Recent Changes (February 4, 2026)
+- **Currency Formatting Fix**: Fixed currency display across all pages
+  - Changed toLocaleString() to use 'en-US' locale consistently
+  - Ensures proper formatting: commas for thousands (40,000.00) not periods (40.000.00)
+  - Fixed in dashboard, expenses, transactions, cards, bills, budget, payroll, admin, invoices, team, vendors, analytics
+- **Virtual Card Multi-Currency Support**: Enhanced virtual card system
+  - Cards can be created in multiple currencies: USD, EUR, GBP (Stripe) and NGN, GHS, KES, ZAR (Paystack)
+  - Provider auto-selected based on currency
+  - Card funding from user wallets with balance verification
+  - Exchange rate conversion for cross-currency funding
+  - Fund Card option added to card dropdown menu
+- **Exchange Rate System**: Complete currency conversion infrastructure
+  - Exchange rate storage and retrieval
+  - Default exchange rates seeded (USD, EUR, GBP, NGN, GHS, KES, ZAR)
+  - Admin-only endpoint for seeding rates
+- **Security Enhancements for Transfers**: 
+  - Per-user wallet balance verification before transfers
+  - Daily transfer limits ($50k/day per user) tracked by wallet
+  - requireAdmin added to team mutation endpoints
+  - requireAuth added to card creation/funding endpoints
 - **Security Middleware Integration**: Merged security enhancements from Spendly-v4- repository
   - Rate limiting middleware: API (100/15min), Auth (5/15min), Financial (3/min), Email (3/hr)
   - Firebase Admin SDK integration with fail-closed production mode

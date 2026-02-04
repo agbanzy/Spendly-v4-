@@ -86,6 +86,7 @@ const cardSchema = z.object({
   limit: z.union([z.string(), z.number()]).transform(val => String(val)),
   type: z.string().optional().default('Visa'),
   color: z.string().optional().default('indigo'),
+  currency: z.string().optional().default('USD'),
 });
 
 const teamMemberSchema = z.object({
@@ -681,28 +682,40 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/cards", async (req, res) => {
+  app.post("/api/cards", requireAuth, async (req, res) => {
     try {
       const result = cardSchema.safeParse(req.body);
       if (!result.success) {
         return res.status(400).json({ error: "Invalid card data", details: result.error.issues });
       }
-      const { name, limit, type, color } = result.data;
+      const { name, limit, type, color, currency: cardCurrency } = result.data;
 
       const last4 = String(Math.floor(1000 + Math.random() * 9000));
+      const selectedCurrency = cardCurrency || 'USD';
+      
+      // Determine provider based on currency
+      const isLocalCurrency = ['NGN', 'GHS', 'KES', 'ZAR', 'EGP', 'RWF', 'XOF'].includes(selectedCurrency);
+      const provider = isLocalCurrency ? 'paystack' : 'stripe';
+      
+      // For Stripe currencies, cards are Visa; for Paystack, use Mastercard
+      const cardType = isLocalCurrency ? 'Mastercard' : (type || 'Visa');
       
       const card = await storage.createCard({
         name,
         last4,
-        balance: limit,
-        limit,
-        type: (type || 'Visa') as any,
+        balance: 0, // Start with 0, needs to be funded from wallet
+        limit: limit || 0,
+        type: cardType as any,
         color: color || 'indigo',
-        currency: 'USD',
+        currency: selectedCurrency,
         status: 'Active',
       });
       
-      res.status(201).json(card);
+      res.status(201).json({
+        ...card,
+        provider,
+        message: `Virtual ${cardType} card created. Fund it from your wallet to start using.`,
+      });
     } catch (error) {
       res.status(500).json({ error: "Failed to create card" });
     }
@@ -736,10 +749,16 @@ export async function registerRoutes(
     }
   });
 
-  // Fund a virtual card
-  app.post("/api/cards/:id/fund", async (req, res) => {
+  // Fund a virtual card from wallet
+  app.post("/api/cards/:id/fund", requireAuth, async (req, res) => {
     try {
-      const { amount, paymentMethod } = req.body;
+      const { amount, sourceCurrency } = req.body;
+      const userId = (req as any).user?.uid;
+
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
       if (!amount || amount <= 0) {
         return res.status(400).json({ error: "Valid amount is required" });
       }
@@ -748,29 +767,91 @@ export async function registerRoutes(
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
+
+      const cardCurrency = card.currency || 'USD';
+      const fundingCurrency = sourceCurrency || cardCurrency;
       
+      // Get user's wallet for the source currency
+      const sourceWallet = await storage.getWalletByUserId(userId, fundingCurrency);
+      if (!sourceWallet) {
+        return res.status(400).json({ 
+          error: `No ${fundingCurrency} wallet found. Please fund your wallet first.` 
+        });
+      }
+
+      const walletBalance = parseFloat(String(sourceWallet.balance || 0));
+      
+      // Calculate exchange rate if currencies differ
+      let amountToDeduct = amount;
+      let amountToCredit = amount;
+      let exchangeRate = 1;
+
+      if (fundingCurrency !== cardCurrency) {
+        // Get exchange rate
+        const rate = await storage.getExchangeRate(fundingCurrency, cardCurrency);
+        if (!rate) {
+          return res.status(400).json({ 
+            error: `No exchange rate available for ${fundingCurrency} to ${cardCurrency}. Contact admin.` 
+          });
+        }
+        exchangeRate = parseFloat(String(rate.rate));
+        // User provides amount in card currency, we calculate source currency needed
+        amountToDeduct = amount / exchangeRate;
+        amountToCredit = amount;
+      }
+
+      // Check wallet balance
+      if (walletBalance < amountToDeduct) {
+        return res.status(400).json({ 
+          error: "Insufficient wallet balance",
+          required: amountToDeduct,
+          available: walletBalance,
+          currency: fundingCurrency
+        });
+      }
+      
+      // Debit from wallet
+      await storage.debitWallet(
+        sourceWallet.id,
+        amountToDeduct,
+        'card_funding',
+        `Fund card ${card.name} (****${card.last4})`,
+        `CFUND-${Date.now()}`,
+        { cardId: card.id, exchangeRate, cardCurrency }
+      );
+
       // Update card balance
-      const newBalance = card.balance + amount;
+      const currentBalance = parseFloat(String(card.balance || 0));
+      const newBalance = currentBalance + amountToCredit;
       const updated = await storage.updateCard(req.params.id, { balance: newBalance });
       
       // Create funding transaction
       await storage.createTransaction({
         description: `Card funding - ${card.name} (****${card.last4})`,
-        amount: String(amount),
+        amount: String(amountToCredit),
         fee: "0",
         type: 'Funding',
         status: 'Completed',
         date: new Date().toISOString().split('T')[0],
-        currency: 'USD',
+        currency: cardCurrency,
       });
+
+      const currencySymbols: Record<string, string> = {
+        USD: '$', EUR: '€', GBP: '£', NGN: '₦', GHS: 'GH₵', KES: 'KSh', ZAR: 'R'
+      };
+      const cardSymbol = currencySymbols[cardCurrency] || cardCurrency;
       
       res.json({ 
         success: true, 
         card: updated,
-        message: `$${amount.toLocaleString()} funded to card`
+        amountCredited: amountToCredit,
+        amountDebited: amountToDeduct,
+        exchangeRate: exchangeRate !== 1 ? exchangeRate : undefined,
+        message: `${cardSymbol}${amountToCredit.toLocaleString('en-US', { minimumFractionDigits: 2 })} funded to card`
       });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fund card" });
+    } catch (error: any) {
+      console.error('Card funding error:', error);
+      res.status(500).json({ error: error.message || "Failed to fund card" });
     }
   });
 
@@ -4275,6 +4356,46 @@ export async function registerRoutes(
       res.json(rate);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to fetch exchange rate" });
+    }
+  });
+
+  // Seed default exchange rates (admin only)
+  app.post("/api/exchange-rates/seed", requireAdmin, async (req, res) => {
+    try {
+      const defaultRates = [
+        { baseCurrency: 'USD', targetCurrency: 'NGN', rate: '1550.00' },
+        { baseCurrency: 'USD', targetCurrency: 'EUR', rate: '0.92' },
+        { baseCurrency: 'USD', targetCurrency: 'GBP', rate: '0.79' },
+        { baseCurrency: 'USD', targetCurrency: 'GHS', rate: '15.50' },
+        { baseCurrency: 'USD', targetCurrency: 'KES', rate: '152.50' },
+        { baseCurrency: 'USD', targetCurrency: 'ZAR', rate: '18.50' },
+        { baseCurrency: 'NGN', targetCurrency: 'USD', rate: '0.000645' },
+        { baseCurrency: 'EUR', targetCurrency: 'USD', rate: '1.087' },
+        { baseCurrency: 'GBP', targetCurrency: 'USD', rate: '1.266' },
+        { baseCurrency: 'EUR', targetCurrency: 'NGN', rate: '1685.00' },
+        { baseCurrency: 'GBP', targetCurrency: 'NGN', rate: '1961.00' },
+      ];
+
+      const createdRates = [];
+      for (const rateData of defaultRates) {
+        // Check if rate already exists
+        const existing = await storage.getExchangeRate(rateData.baseCurrency, rateData.targetCurrency);
+        if (!existing) {
+          const rate = await storage.createExchangeRate({
+            ...rateData,
+            source: 'system',
+            validFrom: new Date().toISOString(),
+          });
+          createdRates.push(rate);
+        }
+      }
+
+      res.json({
+        message: `Seeded ${createdRates.length} exchange rates`,
+        rates: createdRates
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to seed exchange rates" });
     }
   });
 

@@ -57,7 +57,10 @@ export default function Cards() {
   const { toast } = useToast();
   const [showNumbers, setShowNumbers] = useState<Record<string, boolean>>({});
   const [isOpen, setIsOpen] = useState(false);
+  const [isFundOpen, setIsFundOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<VirtualCard | null>(null);
+  const [fundingCard, setFundingCard] = useState<VirtualCard | null>(null);
+  const [fundAmount, setFundAmount] = useState("");
 
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
@@ -73,7 +76,7 @@ export default function Cards() {
   const formatCurrency = (amount: number | string, cardCurrency?: string) => {
     const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
     const symbol = cardCurrency ? (currencySymbols[cardCurrency] || '$') : currencySymbol;
-    return `${symbol}${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `${symbol}${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
   const [formData, setFormData] = useState({
     name: "",
@@ -144,6 +147,39 @@ export default function Cards() {
     },
   });
 
+  const fundCardMutation = useMutation({
+    mutationFn: async ({ id, amount }: { id: string; amount: number }) => {
+      const res = await apiRequest("POST", `/api/cards/${id}/fund`, { amount });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cards"] });
+      toast({ title: data.message || "Card funded successfully" });
+      setIsFundOpen(false);
+      setFundingCard(null);
+      setFundAmount("");
+    },
+    onError: (error: any) => {
+      toast({ title: error.message || "Failed to fund card", variant: "destructive" });
+    },
+  });
+
+  const openFundDialog = (card: VirtualCard) => {
+    setFundingCard(card);
+    setFundAmount("");
+    setIsFundOpen(true);
+  };
+
+  const handleFundCard = () => {
+    if (!fundingCard || !fundAmount) return;
+    const amount = parseFloat(fundAmount);
+    if (isNaN(amount) || amount <= 0) {
+      toast({ title: "Please enter a valid amount", variant: "destructive" });
+      return;
+    }
+    fundCardMutation.mutate({ id: fundingCard.id, amount });
+  };
+
   const resetForm = () => {
     setFormData({ name: "", limit: "", type: "Visa", color: "indigo", currency: currency });
   };
@@ -172,7 +208,7 @@ export default function Cards() {
     setShowNumbers((prev) => ({ ...prev, [cardId]: !prev[cardId] }));
   };
 
-  const totalBalance = cards?.reduce((sum, c) => sum + c.balance, 0) || 0;
+  const totalBalance = cards?.reduce((sum, c) => sum + parseFloat(String(c.balance) || '0'), 0) || 0;
   const activeCards = cards?.filter((c) => c.status === "Active").length || 0;
 
   return (
@@ -261,6 +297,7 @@ export default function Cards() {
                           <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-white/10"><MoreVertical className="h-4 w-4" /></Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => openFundDialog(card)}><Plus className="h-4 w-4 mr-2" />Fund Card</DropdownMenuItem>
                           <DropdownMenuItem onClick={() => openEditDialog(card)}><Pencil className="h-4 w-4 mr-2" />Edit</DropdownMenuItem>
                           <DropdownMenuItem onClick={() => toggleStatusMutation.mutate({ id: card.id, status: card.status === "Active" ? "Frozen" : "Active" })}>
                             {card.status === "Active" ? <><PauseCircle className="h-4 w-4 mr-2" />Freeze Card</> : <><PlayCircle className="h-4 w-4 mr-2" />Activate Card</>}
@@ -373,6 +410,58 @@ export default function Cards() {
             <Button onClick={handleSubmit} disabled={createMutation.isPending || updateMutation.isPending} data-testid="button-submit-card">
               {(createMutation.isPending || updateMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {editingCard ? "Update Card" : "Issue Card"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isFundOpen} onOpenChange={setIsFundOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Fund Card</DialogTitle>
+            <DialogDescription>
+              {fundingCard && `Add funds to ${fundingCard.name} (****${fundingCard.last4})`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {fundingCard && (
+              <>
+                <div className="p-4 rounded-lg bg-muted">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Current Balance</span>
+                    <span className="font-bold">{formatCurrency(fundingCard.balance, fundingCard.currency)}</span>
+                  </div>
+                  <div className="flex justify-between items-center mt-2">
+                    <span className="text-sm text-muted-foreground">Card Currency</span>
+                    <span className="font-medium">{fundingCard.currency}</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="fundAmount">Amount ({currencySymbols[fundingCard.currency] || fundingCard.currency})</Label>
+                  <Input
+                    id="fundAmount"
+                    type="number"
+                    value={fundAmount}
+                    onChange={(e) => setFundAmount(e.target.value)}
+                    placeholder="Enter amount to fund"
+                    data-testid="input-fund-amount"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Funds will be deducted from your {fundingCard.currency} wallet.
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsFundOpen(false)}>Cancel</Button>
+            <Button 
+              onClick={handleFundCard} 
+              disabled={fundCardMutation.isPending || !fundAmount}
+              data-testid="button-confirm-fund"
+            >
+              {fundCardMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Fund Card
             </Button>
           </DialogFooter>
         </DialogContent>
