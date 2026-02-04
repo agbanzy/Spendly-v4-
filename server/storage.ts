@@ -72,9 +72,20 @@ export interface IStorage {
 
   getTeam(): Promise<TeamMember[]>;
   getTeamMember(id: string): Promise<TeamMember | undefined>;
+  getTeamMemberByEmail(email: string): Promise<TeamMember | undefined>;
   createTeamMember(member: Omit<TeamMember, 'id'>): Promise<TeamMember>;
   updateTeamMember(id: string, member: Partial<Omit<TeamMember, 'id'>>): Promise<TeamMember | undefined>;
   deleteTeamMember(id: string): Promise<boolean>;
+  
+  // Transfer tracking for security limits
+  getDailyTransferTotal(userId: string): Promise<number>;
+  
+  // Webhook idempotency
+  isWebhookProcessed(reference: string): Promise<boolean>;
+  markWebhookProcessed(reference: string, provider: string): Promise<void>;
+  
+  // Transaction status updates
+  updateTransactionByReference(reference: string, data: Partial<Transaction>): Promise<Transaction | undefined>;
   
   getBalances(): Promise<CompanyBalances>;
   updateBalances(balances: Partial<CompanyBalances>): Promise<CompanyBalances>;
@@ -174,7 +185,7 @@ export interface IStorage {
   deletePayoutDestination(id: string): Promise<boolean>;
   
   // Payouts
-  getPayouts(filters?: { recipientType?: string; recipientId?: string; status?: string }): Promise<Payout[]>;
+  getPayouts(filters?: { recipientType?: string; recipientId?: string; status?: string; providerReference?: string }): Promise<Payout[]>;
   getPayout(id: string): Promise<Payout | undefined>;
   createPayout(payout: InsertPayout): Promise<Payout>;
   updatePayout(id: string, data: Partial<Payout>): Promise<Payout | undefined>;
@@ -434,6 +445,62 @@ export class DatabaseStorage implements IStorage {
   async deleteTeamMember(id: string): Promise<boolean> {
     const result = await db.delete(teamMembers).where(eq(teamMembers.id, id)).returning();
     return result.length > 0;
+  }
+
+  async getTeamMemberByEmail(email: string): Promise<TeamMember | undefined> {
+    const result = await db.select().from(teamMembers).where(eq(teamMembers.email, email)).limit(1);
+    return result[0];
+  }
+
+  // ==================== TRANSFER TRACKING FOR SECURITY ====================
+  async getDailyTransferTotal(userId: string): Promise<number> {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // First get all wallets for this user
+    const userWallets = await this.getWallets(userId);
+    if (userWallets.length === 0) {
+      return 0;
+    }
+    
+    const walletIds = userWallets.map(w => w.id);
+    
+    // Sum all transfer_out transactions for today from user's wallets
+    let total = 0;
+    for (const walletId of walletIds) {
+      const txs = await db.select().from(walletTransactions)
+        .where(
+          and(
+            eq(walletTransactions.walletId, walletId),
+            eq(walletTransactions.type, 'transfer_out'),
+            sql`DATE(${walletTransactions.createdAt}) = ${today}`
+          )
+        );
+      total += txs.reduce((sum, tx) => sum + parseFloat(String(tx.amount || 0)), 0);
+    }
+    
+    return total;
+  }
+
+  // ==================== WEBHOOK IDEMPOTENCY ====================
+  async isWebhookProcessed(reference: string): Promise<boolean> {
+    // Check in transactions table for existing reference
+    const result = await db.select().from(transactions)
+      .where(eq(transactions.description, reference))
+      .limit(1);
+    return result.length > 0;
+  }
+
+  async markWebhookProcessed(reference: string, provider: string): Promise<void> {
+    // This is handled by creating the transaction - using description as reference marker
+    console.log(`Webhook ${reference} from ${provider} marked as processed`);
+  }
+
+  async updateTransactionByReference(reference: string, data: Partial<Transaction>): Promise<Transaction | undefined> {
+    const result = await db.update(transactions)
+      .set(data as any)
+      .where(eq(transactions.description, reference))
+      .returning();
+    return result[0];
   }
 
   // ==================== BALANCES ====================
@@ -1055,8 +1122,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== PAYOUTS ====================
-  async getPayouts(filters?: { recipientType?: string; recipientId?: string; status?: string }): Promise<Payout[]> {
-    let query = db.select().from(payouts);
+  async getPayouts(filters?: { recipientType?: string; recipientId?: string; status?: string; providerReference?: string }): Promise<Payout[]> {
+    // Filter by provider reference (for webhook lookups)
+    if (filters?.providerReference) {
+      return await db.select().from(payouts)
+        .where(eq(payouts.providerReference, filters.providerReference))
+        .orderBy(desc(payouts.createdAt));
+    }
     
     if (filters?.recipientType && filters?.recipientId) {
       return await db.select().from(payouts)

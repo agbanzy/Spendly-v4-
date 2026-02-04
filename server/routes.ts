@@ -1131,13 +1131,19 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/team", async (req, res) => {
+  app.post("/api/team", requireAuth, requireAdmin, async (req, res) => {
     try {
       const result = teamMemberSchema.safeParse(req.body);
       if (!result.success) {
         return res.status(400).json({ error: "Invalid team member data", details: result.error.issues });
       }
       const { name, email, role, department } = result.data;
+
+      // Check for duplicate email
+      const existingMember = await storage.getTeamMemberByEmail(email);
+      if (existingMember) {
+        return res.status(400).json({ error: "Team member with this email already exists" });
+      }
 
       const member = await storage.createTeamMember({
         name,
@@ -1173,7 +1179,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/team/:id", async (req, res) => {
+  app.patch("/api/team/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
       const result = teamMemberUpdateSchema.safeParse(req.body);
       if (!result.success) {
@@ -1189,7 +1195,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/team/:id", async (req, res) => {
+  app.delete("/api/team/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
       const deleted = await storage.deleteTeamMember(req.params.id);
       if (!deleted) {
@@ -1891,7 +1897,7 @@ export async function registerRoutes(
     }),
   });
 
-  app.post("/api/payment/transfer", financialLimiter, async (req, res) => {
+  app.post("/api/payment/transfer", requireAuth, financialLimiter, async (req, res) => {
     try {
       const result = transferSchema.safeParse(req.body);
       if (!result.success) {
@@ -1899,14 +1905,105 @@ export async function registerRoutes(
       }
 
       const { amount, countryCode, reason, recipientDetails } = result.data;
+      const { currency } = getCurrencyForCountry(countryCode);
+      const userId = (req as any).user?.uid;
+
+      if (!userId) {
+        return res.status(401).json({ error: "User authentication required" });
+      }
+
+      // SECURITY: Verify user's personal wallet balance before transfer
+      const userWallet = await storage.getWalletByUserId(userId, currency);
+      if (!userWallet) {
+        return res.status(400).json({ 
+          error: "No wallet found for this user",
+          currency 
+        });
+      }
+
+      const walletBalance = parseFloat(String(userWallet.balance || 0));
+      if (walletBalance < amount) {
+        return res.status(400).json({
+          error: "Insufficient wallet balance",
+          required: amount,
+          available: walletBalance,
+          currency
+        });
+      }
+
+      // SECURITY: Check daily transfer limits (per-user)
+      const dailyTotal = await storage.getDailyTransferTotal(userId);
+      const DAILY_LIMIT = 50000; // $50k daily limit per user
+      if (dailyTotal + amount > DAILY_LIMIT) {
+        return res.status(400).json({
+          error: "Daily transfer limit exceeded",
+          limit: DAILY_LIMIT,
+          used: dailyTotal,
+          requested: amount,
+          currency
+        });
+      }
+
+      // SECURITY: Large transaction requires additional verification
+      const LARGE_TRANSACTION_THRESHOLD = 10000;
+      if (amount > LARGE_TRANSACTION_THRESHOLD) {
+        console.log(`SECURITY ALERT: Large transfer of ${currency} ${amount} by user ${userId}`);
+        // In production, this would require 2FA or admin approval
+      }
+
+      // Generate unique reference for idempotency tracking
+      const transferReference = `TRF-${userId.substring(0, 8)}-${Date.now()}`;
+
       const transferResult = await paymentService.initiateTransfer(
         amount,
         recipientDetails,
         countryCode,
         reason
       );
+
+      // Debit from user's wallet after successful transfer initiation
+      await storage.debitWallet(
+        userWallet.id,
+        amount,
+        'transfer_out',
+        `Transfer: ${reason}`,
+        transferResult.reference || transferReference,
+        { recipientName: recipientDetails.accountName, countryCode }
+      );
+
+      // Create transaction record with provider reference for webhook tracking
+      const providerRef = transferResult.reference || transferResult.transferId || transferReference;
+      await storage.createTransaction({
+        type: 'Transfer',
+        amount: String(amount),
+        fee: "0",
+        status: 'Processing',
+        date: new Date().toISOString().split('T')[0],
+        description: providerRef, // Store provider reference in description for lookup
+        currency,
+      });
+
+      // Send notification
+      try {
+        const userEmail = (req as any).user?.email;
+        if (userEmail) {
+          await notificationService.notifyPayoutProcessed({
+            email: userEmail,
+            name: recipientDetails.accountName || 'User',
+            recipientName: recipientDetails.accountName || 'Recipient',
+            recipientBank: recipientDetails.bankCode,
+            recipientAccount: recipientDetails.accountNumber,
+            amount,
+            currency,
+            reference: providerRef,
+            date: new Date().toLocaleDateString(),
+          });
+        }
+      } catch (notifError) {
+        console.warn('Transfer notification failed:', notifError);
+      }
       
-      res.json(transferResult);
+      res.json({ ...transferResult, reference: providerRef });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to initiate transfer" });
     }
@@ -1919,7 +2016,7 @@ export async function registerRoutes(
     countryCode: z.string().min(2).max(2),
   });
 
-  app.post("/api/payment/virtual-account", async (req, res) => {
+  app.post("/api/payment/virtual-account", requireAuth, async (req, res) => {
     try {
       const result = virtualAccountSchema.safeParse(req.body);
       if (!result.success) {
@@ -2086,7 +2183,7 @@ export async function registerRoutes(
     reason: z.string().default('Payout'),
   });
 
-  app.post("/api/wallet/payout", financialLimiter, async (req, res) => {
+  app.post("/api/wallet/payout", requireAuth, financialLimiter, async (req, res) => {
     try {
       const result = payoutSchema.safeParse(req.body);
       if (!result.success) {
@@ -2290,7 +2387,7 @@ export async function registerRoutes(
     countryCode: z.string().min(2).max(2).default('NG'),
   });
 
-  app.post("/api/payment/validate-account", async (req, res) => {
+  app.post("/api/payment/validate-account", requireAuth, financialLimiter, async (req, res) => {
     try {
       const result = validateAccountSchema.safeParse(req.body);
       if (!result.success) {
@@ -2421,8 +2518,7 @@ export async function registerRoutes(
         }
         
         // Storage-level idempotency: check if transaction with this reference already exists
-        const existingTransactions = await storage.getWalletTransactions({});
-        const alreadyProcessed = existingTransactions.some((t: any) => t.reference === reference);
+        const alreadyProcessed = await storage.isWebhookProcessed(reference);
         if (alreadyProcessed) {
           console.log(`DVA funding reference ${reference} already exists in storage`);
           processedPaystackReferences.add(reference);
@@ -2490,13 +2586,13 @@ export async function registerRoutes(
           try {
             if (userWallet.userId) {
               const userProfile = await storage.getUserProfile(userWallet.userId);
-              if (userProfile?.phone) {
+              if (userProfile?.phoneNumber) {
                 const wallet = await storage.getWallet(userWallet.id);
-                const settings = await storage.getCompanySettings();
+                const settings = await storage.getSettings();
                 const currency = settings?.currency || 'NGN';
                 const newBalance = wallet?.balance || userWallet.balance;
-                await notificationService.sendTransactionSms(
-                  userProfile.phone,
+                await notificationService.sendTransactionAlertSms(
+                  userProfile.phoneNumber,
                   'credit',
                   amountValue,
                   currency,
@@ -2694,6 +2790,183 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error('Paystack callback error:', error);
       res.redirect('/dashboard?payment=failed');
+    }
+  });
+
+  // ==================== STRIPE WEBHOOK ====================
+  const processedStripeEvents = new Set<string>();
+  
+  app.post("/api/stripe/webhook", async (req, res) => {
+    try {
+      const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+      const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+      // SECURITY: Reject webhook if secret key is not configured
+      if (!stripeSecretKey) {
+        console.error('Stripe webhook rejected: STRIPE_SECRET_KEY not configured');
+        return res.status(500).json({ error: "Webhook configuration error" });
+      }
+
+      let event = req.body;
+      
+      // If webhook secret is configured, verify signature
+      if (stripeWebhookSecret) {
+        const Stripe = await import('stripe');
+        const stripe = new Stripe.default(stripeSecretKey);
+        const sig = req.headers['stripe-signature'];
+        
+        if (sig) {
+          try {
+            // Note: For raw body parsing, Express needs express.raw() for this route
+            const payload = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+            event = stripe.webhooks.constructEvent(payload, sig, stripeWebhookSecret);
+          } catch (err: any) {
+            console.error('Stripe webhook signature verification failed:', err.message);
+            return res.status(401).json({ error: "Invalid signature" });
+          }
+        }
+      }
+
+      const eventId = event.id;
+      const eventType = event.type;
+
+      // Idempotency check
+      if (processedStripeEvents.has(eventId)) {
+        console.log(`Stripe event ${eventId} already processed`);
+        return res.status(200).json({ received: true });
+      }
+
+      // Handle transfer events
+      if (eventType === 'transfer.paid') {
+        processedStripeEvents.add(eventId);
+        const transfer = event.data.object;
+        const reference = transfer.id;
+
+        console.log(`Stripe transfer completed: ${reference}`);
+        
+        // Update transaction status
+        await storage.updateTransactionByReference(reference, {
+          status: 'Completed',
+        });
+
+        // Find and update payout if exists
+        const payouts = await storage.getPayouts({ providerReference: reference });
+        if (payouts.length > 0) {
+          await storage.updatePayout(payouts[0].id, {
+            status: 'completed',
+            processedAt: new Date().toISOString(),
+          });
+        }
+      }
+
+      if (eventType === 'transfer.failed') {
+        processedStripeEvents.add(eventId);
+        const transfer = event.data.object;
+        const reference = transfer.id;
+        const failureMessage = transfer.failure_message || 'Transfer failed';
+
+        console.log(`Stripe transfer failed: ${reference} - ${failureMessage}`);
+        
+        // Update transaction status
+        await storage.updateTransactionByReference(reference, {
+          status: 'Failed',
+        });
+
+        // Find and update payout if exists
+        const payouts = await storage.getPayouts({ providerReference: reference });
+        if (payouts.length > 0) {
+          await storage.updatePayout(payouts[0].id, {
+            status: 'failed',
+            failureReason: failureMessage,
+          });
+
+          // Refund the wallet balance if initiatedBy user has a wallet
+          const payout = payouts[0];
+          if (payout.initiatedBy) {
+            try {
+              const userWallet = await storage.getWalletByUserId(payout.initiatedBy, payout.currency);
+              if (userWallet) {
+                await storage.creditWallet(
+                  userWallet.id,
+                  parseFloat(String(payout.amount)),
+                  'transfer_refund',
+                  `Refund for failed transfer ${reference}`,
+                  `refund-${reference}`,
+                  { originalReference: reference, failureReason: failureMessage }
+                );
+                console.log(`Wallet ${userWallet.id} refunded for failed transfer ${reference}`);
+              }
+            } catch (refundError) {
+              console.error(`Failed to refund wallet for transfer ${reference}:`, refundError);
+            }
+          }
+        }
+      }
+
+      if (eventType === 'transfer.reversed') {
+        processedStripeEvents.add(eventId);
+        const transfer = event.data.object;
+        const reference = transfer.id;
+
+        console.log(`Stripe transfer reversed: ${reference}`);
+        
+        // Update transaction status
+        await storage.updateTransactionByReference(reference, {
+          status: 'Reversed',
+        });
+
+        // Find and update payout if exists
+        const payouts = await storage.getPayouts({ providerReference: reference });
+        if (payouts.length > 0) {
+          await storage.updatePayout(payouts[0].id, {
+            status: 'failed',
+            failureReason: 'Transfer reversed',
+          });
+        }
+      }
+
+      // Handle payment intent events (for card payments)
+      if (eventType === 'payment_intent.succeeded') {
+        processedStripeEvents.add(eventId);
+        const paymentIntent = event.data.object;
+        const amount = paymentIntent.amount / 100;
+        const currency = paymentIntent.currency.toUpperCase();
+        const reference = paymentIntent.id;
+
+        console.log(`Stripe payment succeeded: ${reference} - ${currency} ${amount}`);
+        
+        // Credit wallet if metadata contains wallet info
+        if (paymentIntent.metadata?.walletId) {
+          await storage.creditWallet(
+            paymentIntent.metadata.walletId,
+            amount,
+            'card_funding',
+            `Card payment via Stripe - ${reference}`,
+            reference,
+            { provider: 'stripe', paymentIntentId: paymentIntent.id }
+          );
+        } else {
+          // Fallback: credit company balance
+          const balances = await storage.getBalances();
+          const currentUsd = parseFloat(String(balances.usd || 0));
+          await storage.updateBalances({ usd: String(currentUsd + amount) });
+          
+          await storage.createTransaction({
+            type: 'Funding',
+            amount: String(amount),
+            fee: '0',
+            status: 'Completed',
+            description: `Card payment via Stripe - ${reference}`,
+            currency,
+            date: new Date().toISOString().split('T')[0],
+          });
+        }
+      }
+
+      res.status(200).json({ received: true });
+    } catch (error: any) {
+      console.error('Stripe webhook error:', error);
+      res.status(500).json({ error: "Webhook processing failed" });
     }
   });
 
