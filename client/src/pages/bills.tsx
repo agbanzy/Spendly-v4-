@@ -58,82 +58,82 @@ import {
   Building2,
   Sparkles,
 } from "lucide-react";
-import type { Bill, CompanySettings } from "@shared/schema";
+import type { Bill, CompanySettings, Wallet } from "@shared/schema";
 
 // Country-specific utility providers
 const utilityProvidersByRegion = {
   Africa: {
     airtime: [
-      { id: "mtn", name: "MTN", logo: "🟡" },
-      { id: "glo", name: "Glo", logo: "🟢" },
-      { id: "airtel", name: "Airtel", logo: "🔴" },
-      { id: "9mobile", name: "9Mobile", logo: "🟢" },
-      { id: "safaricom", name: "Safaricom", logo: "🟢" },
-      { id: "vodacom", name: "Vodacom", logo: "🔴" },
+      { id: "mtn", name: "MTN", color: "text-yellow-500" },
+      { id: "glo", name: "Glo", color: "text-green-500" },
+      { id: "airtel", name: "Airtel", color: "text-red-500" },
+      { id: "9mobile", name: "9Mobile", color: "text-green-600" },
+      { id: "safaricom", name: "Safaricom", color: "text-emerald-500" },
+      { id: "vodacom", name: "Vodacom", color: "text-red-600" },
     ],
     data: [
-      { id: "mtn-data", name: "MTN Data", logo: "🟡" },
-      { id: "glo-data", name: "Glo Data", logo: "🟢" },
-      { id: "airtel-data", name: "Airtel Data", logo: "🔴" },
-      { id: "9mobile-data", name: "9Mobile Data", logo: "🟢" },
-      { id: "spectranet", name: "Spectranet", logo: "🔵" },
-      { id: "smile", name: "Smile", logo: "🟣" },
+      { id: "mtn-data", name: "MTN Data", color: "text-yellow-500" },
+      { id: "glo-data", name: "Glo Data", color: "text-green-500" },
+      { id: "airtel-data", name: "Airtel Data", color: "text-red-500" },
+      { id: "9mobile-data", name: "9Mobile Data", color: "text-green-600" },
+      { id: "spectranet", name: "Spectranet", color: "text-blue-500" },
+      { id: "smile", name: "Smile", color: "text-purple-500" },
     ],
     electricity: [
-      { id: "eko", name: "Eko Electric (EKEDC)", logo: "⚡" },
-      { id: "ikeja", name: "Ikeja Electric (IKEDC)", logo: "⚡" },
-      { id: "abuja", name: "Abuja Electric (AEDC)", logo: "⚡" },
-      { id: "ibadan", name: "Ibadan Electric (IBEDC)", logo: "⚡" },
-      { id: "kplc", name: "Kenya Power", logo: "⚡" },
-      { id: "eskom", name: "Eskom", logo: "⚡" },
+      { id: "eko", name: "Eko Electric (EKEDC)", color: "text-yellow-500" },
+      { id: "ikeja", name: "Ikeja Electric (IKEDC)", color: "text-yellow-600" },
+      { id: "abuja", name: "Abuja Electric (AEDC)", color: "text-amber-500" },
+      { id: "ibadan", name: "Ibadan Electric (IBEDC)", color: "text-orange-500" },
+      { id: "kplc", name: "Kenya Power", color: "text-yellow-500" },
+      { id: "eskom", name: "Eskom", color: "text-yellow-600" },
     ],
     cable: [
-      { id: "dstv", name: "DSTV", logo: "📺" },
-      { id: "gotv", name: "GOTV", logo: "📺" },
-      { id: "startimes", name: "Startimes", logo: "📺" },
-      { id: "showmax", name: "Showmax", logo: "📺" },
+      { id: "dstv", name: "DSTV", color: "text-blue-500" },
+      { id: "gotv", name: "GOTV", color: "text-purple-500" },
+      { id: "startimes", name: "Startimes", color: "text-orange-500" },
+      { id: "showmax", name: "Showmax", color: "text-red-500" },
     ],
     internet: [
-      { id: "spectranet", name: "Spectranet", logo: "🌐" },
-      { id: "smile", name: "Smile", logo: "🌐" },
-      { id: "swift", name: "Swift Networks", logo: "🌐" },
-      { id: "ntel", name: "ntel", logo: "🌐" },
+      { id: "spectranet", name: "Spectranet", color: "text-blue-500" },
+      { id: "smile", name: "Smile", color: "text-purple-500" },
+      { id: "swift", name: "Swift Networks", color: "text-indigo-500" },
+      { id: "ntel", name: "ntel", color: "text-cyan-500" },
     ],
   },
   "US/Europe": {
     airtime: [
-      { id: "verizon", name: "Verizon", logo: "🔴" },
-      { id: "tmobile", name: "T-Mobile", logo: "🟣" },
-      { id: "att", name: "AT&T", logo: "🔵" },
-      { id: "vodafone", name: "Vodafone", logo: "🔴" },
-      { id: "ee", name: "EE", logo: "🟢" },
-      { id: "o2", name: "O2", logo: "🔵" },
+      { id: "verizon", name: "Verizon", color: "text-red-500" },
+      { id: "tmobile", name: "T-Mobile", color: "text-pink-500" },
+      { id: "att", name: "AT&T", color: "text-blue-500" },
+      { id: "vodafone", name: "Vodafone", color: "text-red-600" },
+      { id: "ee", name: "EE", color: "text-green-500" },
+      { id: "o2", name: "O2", color: "text-blue-600" },
     ],
     data: [
-      { id: "verizon-data", name: "Verizon Data", logo: "🔴" },
-      { id: "tmobile-data", name: "T-Mobile Data", logo: "🟣" },
-      { id: "att-data", name: "AT&T Data", logo: "🔵" },
+      { id: "verizon-data", name: "Verizon Data", color: "text-red-500" },
+      { id: "tmobile-data", name: "T-Mobile Data", color: "text-pink-500" },
+      { id: "att-data", name: "AT&T Data", color: "text-blue-500" },
     ],
     electricity: [
-      { id: "pge", name: "PG&E", logo: "⚡" },
-      { id: "coned", name: "Con Edison", logo: "⚡" },
-      { id: "duke", name: "Duke Energy", logo: "⚡" },
-      { id: "edf", name: "EDF Energy", logo: "⚡" },
-      { id: "british-gas", name: "British Gas", logo: "⚡" },
+      { id: "pge", name: "PG&E", color: "text-yellow-500" },
+      { id: "coned", name: "Con Edison", color: "text-orange-500" },
+      { id: "duke", name: "Duke Energy", color: "text-amber-500" },
+      { id: "edf", name: "EDF Energy", color: "text-blue-500" },
+      { id: "british-gas", name: "British Gas", color: "text-blue-600" },
     ],
     cable: [
-      { id: "netflix", name: "Netflix", logo: "📺" },
-      { id: "hulu", name: "Hulu", logo: "📺" },
-      { id: "hbo", name: "HBO Max", logo: "📺" },
-      { id: "disney", name: "Disney+", logo: "📺" },
-      { id: "sky", name: "Sky", logo: "📺" },
+      { id: "netflix", name: "Netflix", color: "text-red-500" },
+      { id: "hulu", name: "Hulu", color: "text-green-500" },
+      { id: "hbo", name: "HBO Max", color: "text-purple-500" },
+      { id: "disney", name: "Disney+", color: "text-blue-500" },
+      { id: "sky", name: "Sky", color: "text-blue-600" },
     ],
     internet: [
-      { id: "xfinity", name: "Xfinity", logo: "🌐" },
-      { id: "spectrum", name: "Spectrum", logo: "🌐" },
-      { id: "att-fiber", name: "AT&T Fiber", logo: "🌐" },
-      { id: "virgin", name: "Virgin Media", logo: "🌐" },
-      { id: "bt", name: "BT Broadband", logo: "🌐" },
+      { id: "xfinity", name: "Xfinity", color: "text-indigo-500" },
+      { id: "spectrum", name: "Spectrum", color: "text-blue-500" },
+      { id: "att-fiber", name: "AT&T Fiber", color: "text-blue-600" },
+      { id: "virgin", name: "Virgin Media", color: "text-red-500" },
+      { id: "bt", name: "BT Broadband", color: "text-indigo-600" },
     ],
   },
 };
@@ -167,6 +167,27 @@ const cablePlans = [
   { value: "ultimate", label: "Ultimate", price: 85 },
 ];
 
+// Country code mapping from currency
+const currencyToCountry: Record<string, string> = {
+  NGN: 'NG', KES: 'KE', GHS: 'GH', ZAR: 'ZA', USD: 'US', EUR: 'EU', GBP: 'GB'
+};
+
+// Validation patterns per country
+const getValidationPattern = (countryCode: string, type: 'phone' | 'meter' | 'smartcard'): RegExp => {
+  const patterns: Record<string, { phone: RegExp; meter: RegExp; smartcard: RegExp }> = {
+    NG: { phone: /^0[789][01]\d{8}$/, meter: /^\d{11,13}$/, smartcard: /^\d{10,12}$/ },
+    KE: { phone: /^0[17]\d{8}$/, meter: /^\d{8,11}$/, smartcard: /^\d{10}$/ },
+    GH: { phone: /^0[235]\d{8}$/, meter: /^\d{11,13}$/, smartcard: /^\d{10}$/ },
+    ZA: { phone: /^0[678]\d{8}$/, meter: /^\d{13,14}$/, smartcard: /^\d{10}$/ },
+    US: { phone: /^\d{10}$/, meter: /^\d{9,12}$/, smartcard: /^\d{10}$/ },
+    GB: { phone: /^0[1-9]\d{9}$/, meter: /^[A-Z0-9]{8,12}$/i, smartcard: /^\d{10}$/ },
+    EU: { phone: /^\+?[0-9]{8,15}$/, meter: /^[A-Z]{2}[0-9A-Z]{8,16}$/i, smartcard: /^\d{10,14}$/ },
+    DE: { phone: /^\+?49[0-9]{9,12}$/, meter: /^DE[0-9A-Z]{10,14}$/i, smartcard: /^\d{10,12}$/ },
+    FR: { phone: /^\+?33[0-9]{9}$/, meter: /^[0-9]{14}$/, smartcard: /^\d{10}$/ },
+  };
+  return patterns[countryCode]?.[type] || patterns['EU']?.[type] || patterns['US'][type];
+};
+
 export default function Bills() {
   const { toast } = useToast();
   const [isOpen, setIsOpen] = useState(false);
@@ -175,6 +196,7 @@ export default function Bills() {
   const [activeTab, setActiveTab] = useState("all");
   const [utilityDialogOpen, setUtilityDialogOpen] = useState(false);
   const [utilityType, setUtilityType] = useState<"airtime" | "data" | "electricity" | "cable" | "internet">("airtime");
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [utilityForm, setUtilityForm] = useState({
     provider: "",
     phoneNumber: "",
@@ -210,10 +232,18 @@ export default function Bills() {
 
   // Get region-specific utility providers
   const utilityProviders = utilityProvidersByRegion[region];
+  const countryCode = currencyToCountry[currency] || 'US';
 
   const { data: bills, isLoading } = useQuery<Bill[]>({
     queryKey: ["/api/bills"],
   });
+
+  // Fetch user wallet for balance display
+  const { data: wallets } = useQuery<Wallet[]>({
+    queryKey: ["/api/wallets"],
+  });
+  const userWallet = wallets?.[0];
+  const walletBalance = parseFloat(String(userWallet?.balance || 0));
 
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
@@ -273,17 +303,36 @@ export default function Bills() {
   });
 
   const payUtilityMutation = useMutation({
-    mutationFn: async (data: { type: string; provider: string; amount: number; reference: string }) => {
+    mutationFn: async (data: { 
+      type: string; 
+      provider: string; 
+      amount: number; 
+      reference: string;
+      walletId?: string;
+      countryCode: string;
+      phoneNumber?: string;
+      meterNumber?: string;
+      smartCardNumber?: string;
+    }) => {
       return apiRequest("POST", "/api/payments/utility", data);
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
-      toast({ title: "Payment successful!", description: "Your utility payment has been processed." });
+      queryClient.invalidateQueries({ queryKey: ["/api/wallets"] });
+      toast({ 
+        title: "Payment successful!", 
+        description: `Your ${data?.type || 'utility'} payment has been processed via ${data?.paymentProvider || 'wallet'}.`
+      });
       setUtilityDialogOpen(false);
       resetUtilityForm();
     },
-    onError: () => {
-      toast({ title: "Payment failed", variant: "destructive", description: "Please try again or contact support." });
+    onError: (error: any) => {
+      const errorMessage = error?.message || "Please try again or contact support.";
+      toast({ 
+        title: "Payment failed", 
+        variant: "destructive", 
+        description: errorMessage 
+      });
     },
   });
 
@@ -293,6 +342,7 @@ export default function Bills() {
 
   const resetUtilityForm = () => {
     setUtilityForm({ provider: "", phoneNumber: "", amount: "", meterNumber: "", smartCardNumber: "", plan: "" });
+    setValidationErrors({});
   };
 
   const openEditDialog = (bill: Bill) => {
@@ -315,22 +365,100 @@ export default function Bills() {
     }
   };
 
+  const validateUtilityForm = (): boolean => {
+    const errors: Record<string, string> = {};
+    
+    if (!utilityForm.provider) {
+      errors.provider = "Please select a provider";
+    }
+
+    if (utilityType === "airtime" || utilityType === "data") {
+      const cleanPhone = utilityForm.phoneNumber.replace(/[\s\-\(\)]/g, '');
+      const pattern = getValidationPattern(countryCode, 'phone');
+      if (!cleanPhone) {
+        errors.phoneNumber = "Phone number is required";
+      } else if (!pattern.test(cleanPhone)) {
+        errors.phoneNumber = `Invalid phone number format for ${countryCode}`;
+      }
+    }
+
+    if (utilityType === "electricity" || utilityType === "internet") {
+      const pattern = getValidationPattern(countryCode, 'meter');
+      if (!utilityForm.meterNumber) {
+        errors.meterNumber = "Meter/Account number is required";
+      } else if (!pattern.test(utilityForm.meterNumber)) {
+        errors.meterNumber = `Invalid meter number format for ${countryCode}`;
+      }
+    }
+
+    if (utilityType === "cable") {
+      const pattern = getValidationPattern(countryCode, 'smartcard');
+      if (!utilityForm.smartCardNumber) {
+        errors.smartCardNumber = "Smart card number is required";
+      } else if (!pattern.test(utilityForm.smartCardNumber)) {
+        errors.smartCardNumber = `Invalid smart card format for ${countryCode}`;
+      }
+    }
+
+    if ((utilityType === "data" || utilityType === "cable") && !utilityForm.plan) {
+      errors.plan = "Please select a plan";
+    }
+
+    if ((utilityType === "airtime" || utilityType === "electricity" || utilityType === "internet")) {
+      const amount = parseFloat(utilityForm.amount);
+      if (!utilityForm.amount || isNaN(amount) || amount <= 0) {
+        errors.amount = "Please enter a valid amount";
+      } else if (amount > walletBalance) {
+        errors.amount = `Insufficient balance. Available: ${formatCurrency(walletBalance)}`;
+      }
+    }
+
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleUtilityPayment = () => {
+    if (!validateUtilityForm()) {
+      toast({ 
+        title: "Validation Error", 
+        variant: "destructive", 
+        description: "Please fix the errors in the form" 
+      });
+      return;
+    }
+
     const amount = utilityType === "data" 
       ? dataPlanOptions.find(p => p.value === utilityForm.plan)?.price || 0
       : utilityType === "cable"
       ? cablePlans.find(p => p.value === utilityForm.plan)?.price || 0
       : parseFloat(utilityForm.amount) || 0;
     
-    const reference = utilityType === "electricity" ? utilityForm.meterNumber : 
-                      utilityType === "cable" ? utilityForm.smartCardNumber :
-                      utilityForm.phoneNumber;
+    // Check wallet balance
+    if (amount > walletBalance) {
+      toast({ 
+        title: "Insufficient Balance", 
+        variant: "destructive", 
+        description: `You need ${formatCurrency(amount)} but only have ${formatCurrency(walletBalance)}` 
+      });
+      return;
+    }
+    
+    const reference = utilityType === "electricity" || utilityType === "internet" 
+      ? utilityForm.meterNumber 
+      : utilityType === "cable" 
+      ? utilityForm.smartCardNumber 
+      : utilityForm.phoneNumber;
     
     payUtilityMutation.mutate({
       type: utilityType,
       provider: utilityForm.provider,
       amount,
       reference,
+      walletId: userWallet?.id,
+      countryCode,
+      phoneNumber: utilityForm.phoneNumber || undefined,
+      meterNumber: utilityForm.meterNumber || undefined,
+      smartCardNumber: utilityForm.smartCardNumber || undefined,
     });
   };
 
@@ -636,38 +764,66 @@ export default function Bills() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            <div className="p-3 bg-primary/10 rounded-xl flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CreditCard className="h-4 w-4 text-primary" />
+                <span className="text-sm font-medium">Wallet Balance</span>
+              </div>
+              <span className="font-bold text-primary" data-testid="text-wallet-balance">
+                {formatCurrency(walletBalance)}
+              </span>
+            </div>
+            
             <div className="space-y-2">
-              <Label>Select Provider</Label>
+              <Label>Select Provider {validationErrors.provider && <span className="text-red-500 text-xs ml-2">{validationErrors.provider}</span>}</Label>
               <div className="grid grid-cols-3 gap-2">
-                {utilityProviders[utilityType]?.slice(0, 6).map((provider) => (
-                  <button
-                    key={provider.id}
-                    type="button"
-                    onClick={() => setUtilityForm({ ...utilityForm, provider: provider.id })}
-                    className={`p-3 rounded-xl border-2 text-center transition-all ${
-                      utilityForm.provider === provider.id 
-                        ? "border-primary bg-primary/10" 
-                        : "border-border hover:border-primary/50"
-                    }`}
-                    data-testid={`provider-${provider.id}`}
-                  >
-                    <span className="text-xl">{provider.logo}</span>
-                    <p className="text-xs font-medium mt-1 truncate">{provider.name}</p>
-                  </button>
-                ))}
+                {utilityProviders[utilityType]?.slice(0, 6).map((provider) => {
+                  const ProviderIcon = utilityType === "airtime" ? Phone 
+                    : utilityType === "data" ? Wifi 
+                    : utilityType === "electricity" ? Zap 
+                    : utilityType === "cable" ? Tv 
+                    : Globe;
+                  return (
+                    <button
+                      key={provider.id}
+                      type="button"
+                      onClick={() => {
+                        setUtilityForm({ ...utilityForm, provider: provider.id });
+                        setValidationErrors(prev => ({ ...prev, provider: '' }));
+                      }}
+                      className={`p-3 rounded-xl border-2 text-center transition-all ${
+                        utilityForm.provider === provider.id 
+                          ? "border-primary bg-primary/10" 
+                          : validationErrors.provider
+                          ? "border-red-300 hover:border-red-400"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                      data-testid={`provider-${provider.id}`}
+                    >
+                      <ProviderIcon className={`h-5 w-5 mx-auto ${provider.color}`} />
+                      <p className="text-xs font-medium mt-1 truncate">{provider.name}</p>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
             {(utilityType === "airtime" || utilityType === "data") && (
               <div className="space-y-2">
-                <Label htmlFor="phone">Phone Number</Label>
+                <Label htmlFor="phone">
+                  Phone Number
+                  {validationErrors.phoneNumber && <span className="text-red-500 text-xs ml-2">{validationErrors.phoneNumber}</span>}
+                </Label>
                 <Input 
                   id="phone" 
                   type="tel" 
                   value={utilityForm.phoneNumber} 
-                  onChange={(e) => setUtilityForm({ ...utilityForm, phoneNumber: e.target.value })} 
+                  onChange={(e) => {
+                    setUtilityForm({ ...utilityForm, phoneNumber: e.target.value });
+                    setValidationErrors(prev => ({ ...prev, phoneNumber: '' }));
+                  }} 
                   placeholder={placeholders.phone} 
-                  className="bg-muted/50"
+                  className={`bg-muted/50 ${validationErrors.phoneNumber ? 'border-red-500' : ''}`}
                   data-testid="input-phone"
                 />
               </div>
@@ -675,13 +831,19 @@ export default function Bills() {
 
             {utilityType === "electricity" && (
               <div className="space-y-2">
-                <Label htmlFor="meter">Meter Number</Label>
+                <Label htmlFor="meter">
+                  Meter Number
+                  {validationErrors.meterNumber && <span className="text-red-500 text-xs ml-2">{validationErrors.meterNumber}</span>}
+                </Label>
                 <Input 
                   id="meter" 
                   value={utilityForm.meterNumber} 
-                  onChange={(e) => setUtilityForm({ ...utilityForm, meterNumber: e.target.value })} 
+                  onChange={(e) => {
+                    setUtilityForm({ ...utilityForm, meterNumber: e.target.value });
+                    setValidationErrors(prev => ({ ...prev, meterNumber: '' }));
+                  }} 
                   placeholder={placeholders.meter} 
-                  className="bg-muted/50"
+                  className={`bg-muted/50 ${validationErrors.meterNumber ? 'border-red-500' : ''}`}
                   data-testid="input-meter"
                 />
               </div>
@@ -689,13 +851,19 @@ export default function Bills() {
 
             {utilityType === "cable" && (
               <div className="space-y-2">
-                <Label htmlFor="smartcard">Smart Card Number</Label>
+                <Label htmlFor="smartcard">
+                  Smart Card Number
+                  {validationErrors.smartCardNumber && <span className="text-red-500 text-xs ml-2">{validationErrors.smartCardNumber}</span>}
+                </Label>
                 <Input 
                   id="smartcard" 
                   value={utilityForm.smartCardNumber} 
-                  onChange={(e) => setUtilityForm({ ...utilityForm, smartCardNumber: e.target.value })} 
+                  onChange={(e) => {
+                    setUtilityForm({ ...utilityForm, smartCardNumber: e.target.value });
+                    setValidationErrors(prev => ({ ...prev, smartCardNumber: '' }));
+                  }} 
                   placeholder={placeholders.smartcard} 
-                  className="bg-muted/50"
+                  className={`bg-muted/50 ${validationErrors.smartCardNumber ? 'border-red-500' : ''}`}
                   data-testid="input-smartcard"
                 />
               </div>
@@ -703,13 +871,19 @@ export default function Bills() {
 
             {utilityType === "internet" && (
               <div className="space-y-2">
-                <Label htmlFor="account">Account Number</Label>
+                <Label htmlFor="account">
+                  Account Number
+                  {validationErrors.meterNumber && <span className="text-red-500 text-xs ml-2">{validationErrors.meterNumber}</span>}
+                </Label>
                 <Input 
                   id="account" 
                   value={utilityForm.meterNumber} 
-                  onChange={(e) => setUtilityForm({ ...utilityForm, meterNumber: e.target.value })} 
+                  onChange={(e) => {
+                    setUtilityForm({ ...utilityForm, meterNumber: e.target.value });
+                    setValidationErrors(prev => ({ ...prev, meterNumber: '' }));
+                  }} 
                   placeholder={placeholders.meter} 
-                  className="bg-muted/50"
+                  className={`bg-muted/50 ${validationErrors.meterNumber ? 'border-red-500' : ''}`}
                   data-testid="input-account"
                 />
               </div>
@@ -717,9 +891,20 @@ export default function Bills() {
 
             {utilityType === "data" && (
               <div className="space-y-2">
-                <Label>Select Data Plan</Label>
-                <Select value={utilityForm.plan} onValueChange={(value) => setUtilityForm({ ...utilityForm, plan: value })}>
-                  <SelectTrigger className="bg-muted/50" data-testid="select-data-plan"><SelectValue placeholder="Choose a plan" /></SelectTrigger>
+                <Label>
+                  Select Data Plan
+                  {validationErrors.plan && <span className="text-red-500 text-xs ml-2">{validationErrors.plan}</span>}
+                </Label>
+                <Select 
+                  value={utilityForm.plan} 
+                  onValueChange={(value) => {
+                    setUtilityForm({ ...utilityForm, plan: value });
+                    setValidationErrors(prev => ({ ...prev, plan: '' }));
+                  }}
+                >
+                  <SelectTrigger className={`bg-muted/50 ${validationErrors.plan ? 'border-red-500' : ''}`} data-testid="select-data-plan">
+                    <SelectValue placeholder="Choose a plan" />
+                  </SelectTrigger>
                   <SelectContent>
                     {dataPlanOptions.map((plan) => (
                       <SelectItem key={plan.value} value={plan.value}>
@@ -733,9 +918,20 @@ export default function Bills() {
 
             {utilityType === "cable" && (
               <div className="space-y-2">
-                <Label>Select Package</Label>
-                <Select value={utilityForm.plan} onValueChange={(value) => setUtilityForm({ ...utilityForm, plan: value })}>
-                  <SelectTrigger className="bg-muted/50" data-testid="select-cable-plan"><SelectValue placeholder="Choose a package" /></SelectTrigger>
+                <Label>
+                  Select Package
+                  {validationErrors.plan && <span className="text-red-500 text-xs ml-2">{validationErrors.plan}</span>}
+                </Label>
+                <Select 
+                  value={utilityForm.plan} 
+                  onValueChange={(value) => {
+                    setUtilityForm({ ...utilityForm, plan: value });
+                    setValidationErrors(prev => ({ ...prev, plan: '' }));
+                  }}
+                >
+                  <SelectTrigger className={`bg-muted/50 ${validationErrors.plan ? 'border-red-500' : ''}`} data-testid="select-cable-plan">
+                    <SelectValue placeholder="Choose a package" />
+                  </SelectTrigger>
                   <SelectContent>
                     {cablePlans.map((plan) => (
                       <SelectItem key={plan.value} value={plan.value}>
@@ -749,14 +945,20 @@ export default function Bills() {
 
             {(utilityType === "airtime" || utilityType === "electricity" || utilityType === "internet") && (
               <div className="space-y-2">
-                <Label htmlFor="utility-amount">Amount ({currencySymbol})</Label>
+                <Label htmlFor="utility-amount">
+                  Amount ({currencySymbol})
+                  {validationErrors.amount && <span className="text-red-500 text-xs ml-2">{validationErrors.amount}</span>}
+                </Label>
                 <Input 
                   id="utility-amount" 
                   type="number" 
                   value={utilityForm.amount} 
-                  onChange={(e) => setUtilityForm({ ...utilityForm, amount: e.target.value })} 
+                  onChange={(e) => {
+                    setUtilityForm({ ...utilityForm, amount: e.target.value });
+                    setValidationErrors(prev => ({ ...prev, amount: '' }));
+                  }} 
                   placeholder="0.00" 
-                  className="bg-muted/50"
+                  className={`bg-muted/50 ${validationErrors.amount ? 'border-red-500' : ''}`}
                   data-testid="input-utility-amount"
                 />
                 {utilityType === "airtime" && (

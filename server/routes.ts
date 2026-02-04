@@ -2339,7 +2339,29 @@ export async function registerRoutes(
     provider: z.string().min(1),
     amount: z.number().positive(),
     reference: z.string().min(1),
+    walletId: z.string().optional(),
+    userId: z.string().optional(),
+    countryCode: z.string().optional().default('US'),
+    phoneNumber: z.string().optional(),
+    meterNumber: z.string().optional(),
+    smartCardNumber: z.string().optional(),
   });
+
+  // Country-specific validation patterns
+  const validationPatterns: Record<string, { phone: RegExp; meter: RegExp; smartcard: RegExp }> = {
+    NG: { phone: /^0[789][01]\d{8}$/, meter: /^\d{11,13}$/, smartcard: /^\d{10,12}$/ },
+    KE: { phone: /^0[17]\d{8}$/, meter: /^\d{8,11}$/, smartcard: /^\d{10}$/ },
+    GH: { phone: /^0[235]\d{8}$/, meter: /^\d{11,13}$/, smartcard: /^\d{10}$/ },
+    ZA: { phone: /^0[678]\d{8}$/, meter: /^\d{13,14}$/, smartcard: /^\d{10}$/ },
+    US: { phone: /^\d{10}$/, meter: /^\d{9,12}$/, smartcard: /^\d{10}$/ },
+    GB: { phone: /^0[1-9]\d{9}$/, meter: /^[A-Z0-9]{8,12}$/i, smartcard: /^\d{10}$/ },
+  };
+
+  // Determine payment provider based on country
+  const getPaymentProvider = (countryCode: string): 'stripe' | 'paystack' => {
+    const africanCountries = ['NG', 'KE', 'GH', 'ZA', 'EG', 'TZ', 'UG', 'RW'];
+    return africanCountries.includes(countryCode.toUpperCase()) ? 'paystack' : 'stripe';
+  };
 
   app.post("/api/payments/utility", async (req, res) => {
     try {
@@ -2348,30 +2370,93 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid utility payment data", details: result.error.issues });
       }
 
-      const { type, provider, amount, reference } = result.data;
+      const { type, provider, amount, reference, walletId, userId, countryCode, phoneNumber, meterNumber, smartCardNumber } = result.data;
       
-      const balances = await storage.getBalances();
-      const currentLocal = parseFloat(String(balances.local || 0));
-      if (currentLocal < amount) {
-        return res.status(400).json({ error: "Insufficient wallet balance" });
+      // Validate reference based on type and country
+      const patterns = validationPatterns[countryCode?.toUpperCase() || 'US'] || validationPatterns['US'];
+      
+      if (type === 'airtime' || type === 'data') {
+        const phoneToValidate = phoneNumber || reference;
+        const cleanPhone = phoneToValidate.replace(/[\s\-\(\)]/g, '');
+        if (!patterns.phone.test(cleanPhone)) {
+          return res.status(400).json({ error: `Invalid phone number format for ${countryCode}` });
+        }
       }
       
-      await storage.updateBalances({ local: String(currentLocal - amount) });
+      if (type === 'electricity') {
+        const meterToValidate = meterNumber || reference;
+        if (!patterns.meter.test(meterToValidate)) {
+          return res.status(400).json({ error: `Invalid meter number format for ${countryCode}` });
+        }
+      }
       
+      if (type === 'cable') {
+        const smartcardToValidate = smartCardNumber || reference;
+        if (!patterns.smartcard.test(smartcardToValidate)) {
+          return res.status(400).json({ error: `Invalid smart card number format for ${countryCode}` });
+        }
+      }
+
+      // Get wallet for balance check
+      let wallet = null;
+      if (walletId) {
+        wallet = await storage.getWallet(walletId);
+      } else if (userId) {
+        wallet = await storage.getWalletByUserId(userId);
+      }
+
+      if (!wallet) {
+        // Fall back to company balance
+        const balances = await storage.getBalances();
+        const currentLocal = parseFloat(String(balances.local || 0));
+        if (currentLocal < amount) {
+          return res.status(400).json({ error: "Insufficient wallet balance" });
+        }
+        await storage.updateBalances({ local: String(currentLocal - amount) });
+      } else {
+        // Use user wallet
+        const walletBalance = parseFloat(String(wallet.balance || 0));
+        if (walletBalance < amount) {
+          return res.status(400).json({ 
+            error: "Insufficient wallet balance",
+            available: walletBalance,
+            required: amount
+          });
+        }
+        
+        // Debit wallet
+        await storage.debitWallet(
+          wallet.id,
+          amount,
+          'utility_payment',
+          `${type.charAt(0).toUpperCase() + type.slice(1)} - ${provider}`,
+          `UTL-${Date.now()}`,
+          { type, provider, reference, countryCode }
+        );
+      }
+      
+      // Determine payment provider
+      const paymentProvider = getPaymentProvider(countryCode || 'US');
+      
+      // Create transaction record
       await storage.createTransaction({
-        type: 'Payout',
+        type: 'Bill',
         amount: String(amount),
         fee: "0",
         status: 'Completed',
         date: new Date().toISOString().split('T')[0],
         description: `${type.charAt(0).toUpperCase() + type.slice(1)} - ${provider} (${reference})`,
-        currency: 'USD',
+        currency: wallet?.currency || 'USD',
       });
       
       res.json({
         success: true,
         message: `${type.charAt(0).toUpperCase() + type.slice(1)} payment successful`,
         reference: `UTL-${Date.now()}`,
+        paymentProvider,
+        amount,
+        type,
+        provider,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to process utility payment" });

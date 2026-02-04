@@ -42,7 +42,7 @@ Spendly is a comprehensive financial operating system for high-growth teams, off
 - **Dashboard**: Financial overview, balance cards, AI insights, recent activity.
 - **Transactions**: Full transaction history with filters.
 - **Expenses**: Tracking, creation, and approval workflow.
-- **Bills**: Recurring bill management.
+- **Bills**: Recurring bill management with utility payments (airtime, data, electricity, cable, internet). Country-specific validation for phone numbers, meter numbers, and smartcard numbers. Wallet balance verification before payment. Supports Africa (NG, KE, GH, ZA), US, GB, and EU regions with provider auto-selection based on currency.
 - **Budget**: Category-based budget tracking.
 - **Cards**: Virtual card management with multi-currency support.
 - **Analytics**: Spending trends, charts, category breakdown.
