@@ -212,6 +212,7 @@ export default function Bills() {
     dueDate: "",
     category: "Software",
   });
+  const [billFormErrors, setBillFormErrors] = useState<Record<string, string>>({});
 
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
@@ -338,6 +339,7 @@ export default function Bills() {
 
   const resetForm = () => {
     setFormData({ name: "", provider: "", amount: "", dueDate: "", category: "Software" });
+    setBillFormErrors({});
   };
 
   const resetUtilityForm = () => {
@@ -354,10 +356,65 @@ export default function Bills() {
       dueDate: bill.dueDate,
       category: bill.category,
     });
+    setBillFormErrors({});
     setIsOpen(true);
   };
 
+  const validateBillForm = (): boolean => {
+    const errors: Record<string, string> = {};
+    
+    if (!formData.name.trim()) {
+      errors.name = "Bill name is required";
+    } else if (formData.name.trim().length < 2) {
+      errors.name = "Bill name must be at least 2 characters";
+    } else if (formData.name.trim().length > 100) {
+      errors.name = "Bill name must be less than 100 characters";
+    }
+    
+    if (!formData.provider.trim()) {
+      errors.provider = "Provider is required";
+    } else if (formData.provider.trim().length < 2) {
+      errors.provider = "Provider name must be at least 2 characters";
+    }
+    
+    const amount = parseFloat(formData.amount);
+    if (!formData.amount) {
+      errors.amount = "Amount is required";
+    } else if (isNaN(amount) || amount <= 0) {
+      errors.amount = "Please enter a valid positive amount";
+    } else if (amount > 1000000000) {
+      errors.amount = "Amount exceeds maximum limit";
+    }
+    
+    if (!formData.dueDate) {
+      errors.dueDate = "Due date is required";
+    } else {
+      const selectedDate = new Date(formData.dueDate);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (selectedDate < today && !editingBill) {
+        errors.dueDate = "Due date cannot be in the past";
+      }
+    }
+    
+    if (!formData.category) {
+      errors.category = "Category is required";
+    }
+    
+    setBillFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleSubmit = () => {
+    if (!validateBillForm()) {
+      toast({ 
+        title: "Validation Error", 
+        variant: "destructive", 
+        description: "Please fix the errors in the form" 
+      });
+      return;
+    }
+    
     if (editingBill) {
       updateMutation.mutate({ id: editingBill.id, data: { ...formData, amount: formData.amount } });
     } else {
@@ -400,8 +457,26 @@ export default function Bills() {
       }
     }
 
-    if ((utilityType === "data" || utilityType === "cable") && !utilityForm.plan) {
-      errors.plan = "Please select a plan";
+    if (utilityType === "data") {
+      if (!utilityForm.plan) {
+        errors.plan = "Please select a data plan";
+      } else {
+        const selectedPlan = dataPlanOptions.find(p => p.value === utilityForm.plan);
+        if (selectedPlan && selectedPlan.price > walletBalance) {
+          errors.plan = `Insufficient balance for this plan. Available: ${formatCurrency(walletBalance)}`;
+        }
+      }
+    }
+
+    if (utilityType === "cable") {
+      if (!utilityForm.plan) {
+        errors.plan = "Please select a cable package";
+      } else {
+        const selectedPlan = cablePlans.find(p => p.value === utilityForm.plan);
+        if (selectedPlan && selectedPlan.price > walletBalance) {
+          errors.plan = `Insufficient balance for this package. Available: ${formatCurrency(walletBalance)}`;
+        }
+      }
     }
 
     if ((utilityType === "airtime" || utilityType === "electricity" || utilityType === "internet")) {
@@ -702,27 +777,91 @@ export default function Bills() {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="name">Bill Name</Label>
-              <Input id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="e.g., AWS Hosting" className="bg-muted/50" data-testid="input-bill-name" />
+              <Label htmlFor="name">
+                Bill Name
+                {billFormErrors.name && <span className="text-red-500 text-xs ml-2">{billFormErrors.name}</span>}
+              </Label>
+              <Input 
+                id="name" 
+                value={formData.name} 
+                onChange={(e) => {
+                  setFormData({ ...formData, name: e.target.value });
+                  setBillFormErrors(prev => ({ ...prev, name: '' }));
+                }} 
+                placeholder="e.g., AWS Hosting" 
+                className={`bg-muted/50 ${billFormErrors.name ? 'border-red-500' : ''}`}
+                data-testid="input-bill-name" 
+              />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="provider">Provider</Label>
-              <Input id="provider" value={formData.provider} onChange={(e) => setFormData({ ...formData, provider: e.target.value })} placeholder="e.g., Amazon Web Services" className="bg-muted/50" data-testid="input-bill-provider" />
+              <Label htmlFor="provider">
+                Provider
+                {billFormErrors.provider && <span className="text-red-500 text-xs ml-2">{billFormErrors.provider}</span>}
+              </Label>
+              <Input 
+                id="provider" 
+                value={formData.provider} 
+                onChange={(e) => {
+                  setFormData({ ...formData, provider: e.target.value });
+                  setBillFormErrors(prev => ({ ...prev, provider: '' }));
+                }} 
+                placeholder="e.g., Amazon Web Services" 
+                className={`bg-muted/50 ${billFormErrors.provider ? 'border-red-500' : ''}`}
+                data-testid="input-bill-provider" 
+              />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="amount">Amount ({currencySymbol})</Label>
-                <Input id="amount" type="number" value={formData.amount} onChange={(e) => setFormData({ ...formData, amount: e.target.value })} placeholder="0.00" className="bg-muted/50" data-testid="input-bill-amount" />
+                <Label htmlFor="amount">
+                  Amount ({currencySymbol})
+                  {billFormErrors.amount && <span className="text-red-500 text-xs ml-2">{billFormErrors.amount}</span>}
+                </Label>
+                <Input 
+                  id="amount" 
+                  type="number" 
+                  value={formData.amount} 
+                  onChange={(e) => {
+                    setFormData({ ...formData, amount: e.target.value });
+                    setBillFormErrors(prev => ({ ...prev, amount: '' }));
+                  }} 
+                  placeholder="0.00" 
+                  className={`bg-muted/50 ${billFormErrors.amount ? 'border-red-500' : ''}`}
+                  data-testid="input-bill-amount" 
+                />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="dueDate">Due Date</Label>
-                <Input id="dueDate" type="date" value={formData.dueDate} onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })} className="bg-muted/50" data-testid="input-bill-due-date" />
+                <Label htmlFor="dueDate">
+                  Due Date
+                  {billFormErrors.dueDate && <span className="text-red-500 text-xs ml-2">{billFormErrors.dueDate}</span>}
+                </Label>
+                <Input 
+                  id="dueDate" 
+                  type="date" 
+                  value={formData.dueDate} 
+                  onChange={(e) => {
+                    setFormData({ ...formData, dueDate: e.target.value });
+                    setBillFormErrors(prev => ({ ...prev, dueDate: '' }));
+                  }} 
+                  className={`bg-muted/50 ${billFormErrors.dueDate ? 'border-red-500' : ''}`}
+                  data-testid="input-bill-due-date" 
+                />
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="category">Category</Label>
-              <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
-                <SelectTrigger className="bg-muted/50" data-testid="select-bill-category"><SelectValue /></SelectTrigger>
+              <Label htmlFor="category">
+                Category
+                {billFormErrors.category && <span className="text-red-500 text-xs ml-2">{billFormErrors.category}</span>}
+              </Label>
+              <Select 
+                value={formData.category} 
+                onValueChange={(value) => {
+                  setFormData({ ...formData, category: value });
+                  setBillFormErrors(prev => ({ ...prev, category: '' }));
+                }}
+              >
+                <SelectTrigger className={`bg-muted/50 ${billFormErrors.category ? 'border-red-500' : ''}`} data-testid="select-bill-category">
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Software">Software</SelectItem>
                   <SelectItem value="Office">Office</SelectItem>
