@@ -6,7 +6,7 @@ import {
   cardTransactions, virtualAccounts, companyBalances, companySettings,
   userProfiles, kycSubmissions, notifications, notificationSettings, pushTokens,
   departments, auditLogs, organizationSettings, systemSettings, rolePermissions,
-  wallets, walletTransactions, exchangeRates, payoutDestinations, payouts, fundingSources, adminSettings,
+  wallets, walletTransactions, exchangeRates, exchangeRateSettings, payoutDestinations, payouts, fundingSources, adminSettings,
   type User, type InsertUser, type Expense, type Transaction, type Bill, 
   type Budget, type VirtualCard, type TeamMember, type PayrollEntry, 
   type Invoice, type Vendor, type Report, type CardTransaction, 
@@ -16,7 +16,8 @@ import {
   type PushToken, type InsertPushToken, type Department,
   type AuditLog, type OrganizationSettings, type SystemSettings, type RolePermissions,
   type Wallet, type InsertWallet, type WalletTransaction, type InsertWalletTransaction,
-  type ExchangeRate, type InsertExchangeRate, type PayoutDestination, type InsertPayoutDestination,
+  type ExchangeRate, type InsertExchangeRate, type ExchangeRateSettings,
+  type PayoutDestination, type InsertPayoutDestination,
   type Payout, type InsertPayout, type FundingSource, type InsertFundingSource,
   type AdminSettings, type InsertAdminSettings
 } from "@shared/schema";
@@ -176,6 +177,10 @@ export interface IStorage {
   getExchangeRate(baseCurrency: string, targetCurrency: string): Promise<ExchangeRate | undefined>;
   createExchangeRate(rate: InsertExchangeRate): Promise<ExchangeRate>;
   updateExchangeRate(id: string, data: Partial<ExchangeRate>): Promise<ExchangeRate | undefined>;
+  
+  // Exchange Rate Settings
+  getExchangeRateSettings(): Promise<ExchangeRateSettings | undefined>;
+  updateExchangeRateSettings(buyMarkup: string, sellMarkup: string, updatedBy?: string): Promise<ExchangeRateSettings>;
   
   // Payout Destinations
   getPayoutDestinations(userId?: string, vendorId?: string): Promise<PayoutDestination[]>;
@@ -1077,6 +1082,39 @@ export class DatabaseStorage implements IStorage {
       .where(eq(exchangeRates.id, id))
       .returning();
     return result[0];
+  }
+
+  // ==================== EXCHANGE RATE SETTINGS ====================
+  async getExchangeRateSettings(): Promise<ExchangeRateSettings | undefined> {
+    const result = await db.select().from(exchangeRateSettings).limit(1);
+    return result[0];
+  }
+
+  async updateExchangeRateSettings(buyMarkup: string, sellMarkup: string, updatedBy?: string): Promise<ExchangeRateSettings> {
+    const now = new Date().toISOString();
+    const existing = await this.getExchangeRateSettings();
+    
+    if (existing) {
+      const result = await db.update(exchangeRateSettings)
+        .set({
+          buyMarkupPercent: buyMarkup,
+          sellMarkupPercent: sellMarkup,
+          lastUpdatedBy: updatedBy,
+          updatedAt: now,
+        } as any)
+        .where(eq(exchangeRateSettings.id, existing.id))
+        .returning();
+      return result[0];
+    } else {
+      const result = await db.insert(exchangeRateSettings).values({
+        buyMarkupPercent: buyMarkup,
+        sellMarkupPercent: sellMarkup,
+        lastUpdatedBy: updatedBy,
+        createdAt: now,
+        updatedAt: now,
+      } as any).returning();
+      return result[0];
+    }
   }
 
   // ==================== PAYOUT DESTINATIONS ====================

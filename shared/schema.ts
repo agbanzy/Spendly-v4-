@@ -535,6 +535,16 @@ export const exchangeRates = pgTable("exchange_rates", {
   createdAt: text("created_at").notNull().default(sql`now()`),
 });
 
+// Exchange Rate Settings table - admin configurable markup/spread
+export const exchangeRateSettings = pgTable("exchange_rate_settings", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  buyMarkupPercent: decimal("buy_markup_percent", { precision: 5, scale: 2 }).notNull().default('10.00'),
+  sellMarkupPercent: decimal("sell_markup_percent", { precision: 5, scale: 2 }).notNull().default('10.00'),
+  lastUpdatedBy: text("last_updated_by"),
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+});
+
 // Payout Destinations table - bank accounts/virtual accounts for payouts
 export const payoutDestinations = pgTable("payout_destinations", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
@@ -647,6 +657,7 @@ export const insertRolePermissionsSchema = createInsertSchema(rolePermissions).o
 export const insertWalletSchema = createInsertSchema(wallets).omit({ id: true });
 export const insertWalletTransactionSchema = createInsertSchema(walletTransactions).omit({ id: true });
 export const insertExchangeRateSchema = createInsertSchema(exchangeRates).omit({ id: true });
+export const insertExchangeRateSettingsSchema = createInsertSchema(exchangeRateSettings).omit({ id: true });
 export const insertPayoutDestinationSchema = createInsertSchema(payoutDestinations).omit({ id: true });
 export const insertPayoutSchema = createInsertSchema(payouts).omit({ id: true });
 export const insertFundingSourceSchema = createInsertSchema(fundingSources).omit({ id: true });
@@ -722,6 +733,9 @@ export type WalletTransaction = typeof walletTransactions.$inferSelect;
 
 export type InsertExchangeRate = z.infer<typeof insertExchangeRateSchema>;
 export type ExchangeRate = typeof exchangeRates.$inferSelect;
+
+export type InsertExchangeRateSettings = z.infer<typeof insertExchangeRateSettingsSchema>;
+export type ExchangeRateSettings = typeof exchangeRateSettings.$inferSelect;
 
 export type InsertPayoutDestination = z.infer<typeof insertPayoutDestinationSchema>;
 export type PayoutDestination = typeof payoutDestinations.$inferSelect;

@@ -4399,6 +4399,153 @@ export async function registerRoutes(
     }
   });
 
+  // Get exchange rate settings (markup percentages)
+  app.get("/api/exchange-rates/settings", async (req, res) => {
+    try {
+      let settings = await storage.getExchangeRateSettings();
+      if (!settings) {
+        // Create default settings with 10% markup
+        settings = await storage.updateExchangeRateSettings('10.00', '10.00');
+      }
+      res.json(settings);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch exchange rate settings" });
+    }
+  });
+
+  // Update exchange rate settings (admin only)
+  app.put("/api/exchange-rates/settings", requireAdmin, async (req, res) => {
+    try {
+      const { buyMarkupPercent, sellMarkupPercent } = req.body;
+      
+      if (buyMarkupPercent === undefined || sellMarkupPercent === undefined) {
+        return res.status(400).json({ error: "buyMarkupPercent and sellMarkupPercent are required" });
+      }
+      
+      const buyMarkup = parseFloat(buyMarkupPercent);
+      const sellMarkup = parseFloat(sellMarkupPercent);
+      
+      if (isNaN(buyMarkup) || isNaN(sellMarkup) || buyMarkup < 0 || sellMarkup < 0 || buyMarkup > 50 || sellMarkup > 50) {
+        return res.status(400).json({ error: "Markup percentages must be between 0 and 50" });
+      }
+      
+      const adminId = (req as any).adminId || 'admin';
+      const settings = await storage.updateExchangeRateSettings(
+        buyMarkup.toFixed(2),
+        sellMarkup.toFixed(2),
+        adminId
+      );
+      
+      res.json(settings);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to update exchange rate settings" });
+    }
+  });
+
+  // Fetch live exchange rates from external API and store with markup
+  app.post("/api/exchange-rates/fetch-live", requireAdmin, async (req, res) => {
+    try {
+      const baseCurrencies = ['USD', 'EUR', 'GBP'];
+      const targetCurrencies = ['USD', 'EUR', 'GBP', 'NGN', 'GHS', 'KES', 'ZAR'];
+      
+      // Fetch live rates from exchangerate-api (free tier)
+      const fetchedRates: any[] = [];
+      
+      for (const base of baseCurrencies) {
+        try {
+          const response = await fetch(`https://api.exchangerate-api.com/v4/latest/${base}`);
+          if (response.ok) {
+            const data = await response.json();
+            
+            for (const target of targetCurrencies) {
+              if (base !== target && data.rates[target]) {
+                const rate = data.rates[target];
+                
+                // Check if rate already exists, update or create
+                const existing = await storage.getExchangeRate(base, target);
+                if (existing) {
+                  await storage.updateExchangeRate(existing.id, {
+                    rate: rate.toFixed(6),
+                    source: 'live_api',
+                    validFrom: new Date().toISOString(),
+                  });
+                } else {
+                  await storage.createExchangeRate({
+                    baseCurrency: base,
+                    targetCurrency: target,
+                    rate: rate.toFixed(6),
+                    source: 'live_api',
+                    validFrom: new Date().toISOString(),
+                  });
+                }
+                
+                fetchedRates.push({ base, target, rate: rate.toFixed(6) });
+              }
+            }
+          }
+        } catch (fetchError) {
+          console.error(`Failed to fetch rates for ${base}:`, fetchError);
+        }
+      }
+      
+      res.json({
+        message: `Fetched ${fetchedRates.length} live exchange rates`,
+        rates: fetchedRates
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch live exchange rates" });
+    }
+  });
+
+  // Get exchange rate with markup applied (for customer-facing transactions)
+  app.get("/api/exchange-rates/:base/:target/with-markup", async (req, res) => {
+    try {
+      const { base, target } = req.params;
+      const { type = 'buy' } = req.query; // 'buy' or 'sell'
+      
+      const rate = await storage.getExchangeRate(base, target);
+      if (!rate) {
+        return res.status(404).json({ error: "Exchange rate not found" });
+      }
+      
+      // Get markup settings
+      let settings = await storage.getExchangeRateSettings();
+      if (!settings) {
+        settings = await storage.updateExchangeRateSettings('10.00', '10.00');
+      }
+      
+      const baseRate = parseFloat(String(rate.rate));
+      const markupPercent = type === 'sell' 
+        ? parseFloat(String(settings.sellMarkupPercent))
+        : parseFloat(String(settings.buyMarkupPercent));
+      
+      // Apply markup: for buying foreign currency, increase rate; for selling, decrease rate
+      // Customer buys foreign currency at higher rate (pays more)
+      // Customer sells foreign currency at lower rate (receives less)
+      let adjustedRate: number;
+      if (type === 'buy') {
+        // Customer buying target currency - they pay more
+        adjustedRate = baseRate * (1 + markupPercent / 100);
+      } else {
+        // Customer selling target currency - they receive less
+        adjustedRate = baseRate * (1 - markupPercent / 100);
+      }
+      
+      res.json({
+        baseCurrency: base,
+        targetCurrency: target,
+        marketRate: baseRate,
+        markupPercent,
+        type,
+        customerRate: parseFloat(adjustedRate.toFixed(6)),
+        source: rate.source,
+        validFrom: rate.validFrom,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch exchange rate with markup" });
+    }
+  });
+
   // ==================== PAYOUT DESTINATIONS ROUTES ====================
   
   app.get("/api/payout-destinations", async (req, res) => {
