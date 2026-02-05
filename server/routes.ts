@@ -2237,7 +2237,7 @@ export async function registerRoutes(
   // ==================== DEPOSIT/FUND WALLET ====================
   const depositSchema = z.object({
     amount: z.number().positive(),
-    source: z.enum(['bank', 'card', 'crypto']),
+    source: z.enum(['bank', 'card']),
     countryCode: z.string().min(2).max(2).default('US'),
     email: z.string().email().optional(),
   });
