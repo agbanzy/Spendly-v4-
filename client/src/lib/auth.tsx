@@ -8,6 +8,7 @@ import {
   onAuthChange,
   type User as FirebaseUser 
 } from "./firebase";
+import { apiRequest } from "./queryClient";
 
 interface User {
   id: string;
@@ -56,18 +57,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe();
   }, []);
 
+  const ensureUserProfile = async (firebaseUser: FirebaseUser) => {
+    try {
+      await apiRequest("POST", "/api/user-profile", {
+        firebaseUid: firebaseUser.uid,
+        email: firebaseUser.email,
+        displayName: firebaseUser.displayName || firebaseUser.email?.split("@")[0],
+        photoUrl: firebaseUser.photoURL || null,
+      });
+    } catch (error) {
+      console.error("Failed to sync user profile:", error);
+    }
+  };
+
   const login = async (email: string, password: string) => {
     const userCredential = await signInWithEmail(email, password);
+    await ensureUserProfile(userCredential.user);
     setUser(mapFirebaseUser(userCredential.user));
   };
 
   const loginWithGoogle = async () => {
     const userCredential = await signInWithGoogle();
+    await ensureUserProfile(userCredential.user);
     setUser(mapFirebaseUser(userCredential.user));
   };
 
   const signup = async (name: string, email: string, password: string) => {
     const userCredential = await signUpWithEmail(email, password, name);
+    await ensureUserProfile(userCredential.user);
     setUser(mapFirebaseUser(userCredential.user));
   };
 

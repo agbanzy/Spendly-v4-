@@ -3614,18 +3614,19 @@ export async function registerRoutes(
           firebaseUid: data.firebaseUid,
           email: data.email || `${data.firebaseUid}@pending.spendly.com`,
           displayName: fullName,
-          firstName: data.firstName,
-          lastName: data.lastName,
           phoneNumber: data.phoneNumber,
           address: fullAddress,
+          city: data.city,
+          state: data.state,
           country: data.country,
+          postalCode: data.postalCode,
           nationality: data.nationality,
           dateOfBirth: data.dateOfBirth,
           createdAt: now,
           updatedAt: now,
           kycStatus: 'pending',
-          kycLevel: 0,
-          twoFactorEnabled: false,
+          onboardingCompleted: false,
+          onboardingStep: 5,
         });
       }
 
