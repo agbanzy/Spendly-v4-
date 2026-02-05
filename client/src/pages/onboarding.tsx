@@ -177,6 +177,7 @@ export default function Onboarding() {
       // Ensure all string fields are actually strings (not booleans)
       const sanitizedData = {
         firebaseUid: user?.id,
+        email: user?.email || '',
         firstName: String(data.firstName || ''),
         lastName: String(data.lastName || ''),
         middleName: data.middleName || undefined,

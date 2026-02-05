@@ -3549,6 +3549,7 @@ export async function registerRoutes(
   
   const kycSubmissionSchema = z.object({
     firebaseUid: requiredString("Firebase UID"),
+    email: optionalString,
     firstName: requiredString("First name"),
     lastName: requiredString("Last name"),
     middleName: optionalString,
@@ -3599,10 +3600,33 @@ export async function registerRoutes(
 
       const data = parseResult.data;
       
-      // Get user profile by firebaseUid to get the profile ID
-      const userProfile = await storage.getUserProfile(data.firebaseUid);
+      // Get user profile by firebaseUid to get the profile ID, or create if not exists
+      let userProfile = await storage.getUserProfile(data.firebaseUid);
       if (!userProfile) {
-        return res.status(404).json({ error: "User profile not found. Please complete registration first." });
+        // Auto-create user profile from KYC submission data
+        const now = new Date().toISOString();
+        const fullName = `${data.firstName} ${data.lastName}`.trim();
+        const fullAddress = [data.addressLine1, data.addressLine2, data.city, data.state, data.postalCode, data.country]
+          .filter(Boolean)
+          .join(', ');
+        
+        userProfile = await storage.createUserProfile({
+          firebaseUid: data.firebaseUid,
+          email: data.email || `${data.firebaseUid}@pending.spendly.com`,
+          displayName: fullName,
+          firstName: data.firstName,
+          lastName: data.lastName,
+          phoneNumber: data.phoneNumber,
+          address: fullAddress,
+          country: data.country,
+          nationality: data.nationality,
+          dateOfBirth: data.dateOfBirth,
+          createdAt: now,
+          updatedAt: now,
+          kycStatus: 'pending',
+          kycLevel: 0,
+          twoFactorEnabled: false,
+        });
       }
 
       const now = new Date().toISOString();
