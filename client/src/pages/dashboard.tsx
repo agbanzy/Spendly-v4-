@@ -75,7 +75,7 @@ export default function Dashboard() {
   const [accountValidation, setAccountValidation] = useState<{ name: string; validated: boolean } | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const [showBalance, setShowBalance] = useState(true);
-  const [fundingMethod, setFundingMethod] = useState<"card" | "bank" | "crypto">("card");
+  const [fundingMethod, setFundingMethod] = useState<"card" | "bank">("card");
 
   // Handle quick action to open funding dialog (runs once on mount)
   useEffect(() => {
@@ -830,11 +830,10 @@ export default function Dashboard() {
             
             <div className="space-y-2">
               <Label>Funding Method</Label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {[
                   { id: "card", label: "Card", icon: CreditCard },
-                  { id: "bank", label: "Bank", icon: Building },
-                  { id: "crypto", label: "Crypto", icon: Globe },
+                  { id: "bank", label: "Bank Transfer", icon: Building },
                 ].map((method) => (
                   <button
                     key={method.id}
@@ -868,7 +867,7 @@ export default function Dashboard() {
             <div className="grid grid-cols-4 gap-2">
               {[100, 500, 1000, 5000].map((amount) => (
                 <Button key={amount} variant="outline" size="sm" onClick={() => setFundingAmount(String(amount))} className="text-xs font-bold">
-                  ${amount}
+                  {currencySymbol}{amount.toLocaleString()}
                 </Button>
               ))}
             </div>
@@ -1126,7 +1125,7 @@ export default function Dashboard() {
             )}
             
             <div className="space-y-2">
-              <Label htmlFor="send-amount">Amount ($)</Label>
+              <Label htmlFor="send-amount">Amount ({currencySymbol})</Label>
               <Input 
                 id="send-amount" 
                 type="number" 
@@ -1175,7 +1174,7 @@ export default function Dashboard() {
               data-testid="button-confirm-send"
             >
               {sendMoneyMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              Send ${sendMoneyData.amount || '0'}
+              Send {currencySymbol}{sendMoneyData.amount || '0'}
             </Button>
           </DialogFooter>
         </DialogContent>
