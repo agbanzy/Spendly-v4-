@@ -6,6 +6,7 @@ declare global {
   namespace Express {
     interface Request {
       user?: {
+        uid: string;
         firebaseUid: string;
         email: string;
         displayName?: string;
@@ -62,8 +63,30 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
           message: 'Authentication service not configured'
         });
       }
-      // Only in development: bypass with warning
+      // Only in development: bypass with warning and extract user from token payload
       console.warn('DEV MODE: Firebase Admin not configured - bypassing token verification');
+      
+      // Try to decode the token payload (not verified, but useful for dev)
+      try {
+        const [, payloadBase64] = token.split('.');
+        if (payloadBase64) {
+          const payload = JSON.parse(Buffer.from(payloadBase64, 'base64').toString());
+          req.user = {
+            uid: payload.user_id || payload.sub || 'dev-user',
+            firebaseUid: payload.user_id || payload.sub || 'dev-user',
+            email: payload.email || 'dev@example.com',
+            displayName: payload.name || 'Dev User',
+          };
+        }
+      } catch (e) {
+        // If token parsing fails, set a default dev user
+        req.user = {
+          uid: 'dev-user',
+          firebaseUid: 'dev-user',
+          email: 'dev@example.com',
+          displayName: 'Dev User',
+        };
+      }
       return next();
     }
 
@@ -72,6 +95,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
       // Attach verified user info to request
       req.user = {
+        uid: decodedToken.uid,
         firebaseUid: decodedToken.uid,
         email: decodedToken.email || '',
         displayName: decodedToken.name,
