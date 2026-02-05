@@ -328,9 +328,16 @@ export default function Bills() {
       resetUtilityForm();
     },
     onError: (error: any) => {
-      const errorMessage = error?.message || "Please try again or contact support.";
+      // Extract detailed error message from response
+      let errorMessage = "Please try again or contact support.";
+      if (error?.message) {
+        errorMessage = error.message;
+      }
+      // Check for specific balance error
+      const isBalanceError = errorMessage.toLowerCase().includes('insufficient') || 
+                            errorMessage.toLowerCase().includes('balance');
       toast({ 
-        title: "Payment failed", 
+        title: isBalanceError ? "Insufficient Balance" : "Payment failed", 
         variant: "destructive", 
         description: errorMessage 
       });

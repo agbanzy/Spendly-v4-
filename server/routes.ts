@@ -2454,12 +2454,20 @@ export async function registerRoutes(
         });
       }
 
-      // Get wallet for balance check
+      // Get wallet for balance check - try user's wallet first, then company balance
       let wallet = null;
+      const authUserId = (req as any).user?.uid;
+      const effectiveUserId = userId || authUserId;
+      
       if (walletId) {
         wallet = await storage.getWallet(walletId);
-      } else if (userId) {
-        wallet = await storage.getWalletByUserId(userId);
+      } else if (effectiveUserId) {
+        // Try to get user's wallet in the appropriate currency
+        const africanCountries = ['NG', 'KE', 'GH', 'ZA', 'EG', 'TZ', 'UG', 'RW'];
+        const walletCurrency = africanCountries.includes(countryCode?.toUpperCase() || 'US') 
+          ? (countryCode === 'NG' ? 'NGN' : countryCode === 'KE' ? 'KES' : countryCode === 'GH' ? 'GHS' : countryCode === 'ZA' ? 'ZAR' : 'USD')
+          : 'USD';
+        wallet = await storage.getWalletByUserId(effectiveUserId, walletCurrency);
       }
 
       if (!wallet) {
@@ -2467,7 +2475,12 @@ export async function registerRoutes(
         const balances = await storage.getBalances();
         const currentLocal = parseFloat(String(balances.local || 0));
         if (currentLocal < amount) {
-          return res.status(400).json({ error: "Insufficient wallet balance" });
+          return res.status(400).json({ 
+            error: "Insufficient balance",
+            message: `You need ${amount} but only have ${currentLocal} available`,
+            available: currentLocal,
+            required: amount
+          });
         }
         await storage.updateBalances({ local: String(currentLocal - amount) });
       } else {
