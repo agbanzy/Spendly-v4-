@@ -3914,7 +3914,8 @@ export async function registerRoutes(
         'emailNotifications', 'pushNotifications', 'smsNotifications',
         'expenseAlerts', 'budgetWarnings', 'paymentReminders', 'weeklyDigest',
         'preferredCurrency', 'preferredLanguage', 'preferredTimezone', 
-        'preferredDateFormat', 'darkMode', 'sessionTimeout'
+        'preferredDateFormat', 'darkMode', 'sessionTimeout',
+        'transactionPinEnabled', 'twoFactorEnabled'
       ];
       
       // Filter to only allowed settings fields
@@ -5765,10 +5766,11 @@ export async function registerRoutes(
       await storage.createAuditLog({
         action: 'database_purge',
         userId: 'system',
-        resourceType: 'database',
-        resourceId: 'all',
+        userName: 'System',
+        entityType: 'database',
+        entityId: 'all',
         details: { purgedTables: result.purgedTables },
-        ipAddress: req.ip,
+        ipAddress: req.ip || '',
         userAgent: req.headers['user-agent'] || '',
         createdAt: new Date().toISOString(),
       } as any);

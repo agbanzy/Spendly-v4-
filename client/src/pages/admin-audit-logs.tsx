@@ -38,8 +38,8 @@ import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import type { AuditLog } from "@shared/schema";
 
-const entityTypes = ['expense', 'user', 'team', 'budget', 'card', 'invoice', 'vendor', 'report', 'settings'];
-const actionTypes = ['CREATE', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'LOGIN', 'LOGOUT', 'EXPORT'];
+const entityTypes = ['expense', 'user', 'team', 'budget', 'card', 'invoice', 'vendor', 'report', 'settings', 'wallet', 'transfer', 'payout', 'bill', 'utility', 'database'];
+const actionTypes = ['CREATE', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'LOGIN', 'LOGOUT', 'EXPORT', 'wallet_funding', 'wallet_withdrawal', 'transfer_initiated', 'payout_processed', 'utility_payment', 'bill_payment', 'database_purge'];
 
 export default function AdminAuditLogs() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -72,21 +72,33 @@ export default function AdminAuditLogs() {
       case 'team': return <Users className="h-4 w-4" />;
       case 'card': return <CreditCard className="h-4 w-4" />;
       case 'settings': return <Settings className="h-4 w-4" />;
+      case 'wallet': return <CreditCard className="h-4 w-4" />;
+      case 'transfer': return <Activity className="h-4 w-4" />;
+      case 'payout': return <Activity className="h-4 w-4" />;
+      case 'bill': return <FileText className="h-4 w-4" />;
+      case 'utility': return <FileText className="h-4 w-4" />;
+      case 'database': return <Settings className="h-4 w-4" />;
       default: return <Activity className="h-4 w-4" />;
     }
   };
 
   const getActionColor = (action: string) => {
-    switch (action.toUpperCase()) {
-      case 'CREATE': return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400';
-      case 'UPDATE': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
-      case 'DELETE': return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
-      case 'APPROVE': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
-      case 'REJECT': return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400';
-      case 'LOGIN': return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400';
-      case 'LOGOUT': return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400';
-      default: return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400';
-    }
+    const a = action.toLowerCase();
+    if (a === 'create' || a === 'wallet_funding') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400';
+    if (a === 'update') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+    if (a === 'delete' || a === 'database_purge') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+    if (a === 'approve') return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+    if (a === 'reject') return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400';
+    if (a === 'login') return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400';
+    if (a === 'logout') return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400';
+    if (a === 'wallet_withdrawal' || a === 'payout_processed') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400';
+    if (a === 'transfer_initiated') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+    if (a === 'utility_payment' || a === 'bill_payment') return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400';
+    return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400';
+  };
+
+  const formatActionLabel = (action: string) => {
+    return action.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   };
 
   const exportLogs = () => {
@@ -195,7 +207,7 @@ export default function AdminAuditLogs() {
               <SelectContent>
                 <SelectItem value="all">All Actions</SelectItem>
                 {actionTypes.map((action) => (
-                  <SelectItem key={action} value={action}>{action}</SelectItem>
+                  <SelectItem key={action} value={action}>{formatActionLabel(action)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -242,7 +254,7 @@ export default function AdminAuditLogs() {
                       <div className="flex items-center gap-2">
                         <span className="font-bold">{log.userName}</span>
                         <Badge className={getActionColor(log.action)}>
-                          {log.action}
+                          {formatActionLabel(log.action)}
                         </Badge>
                       </div>
                       <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
@@ -305,7 +317,7 @@ export default function AdminAuditLogs() {
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground uppercase font-bold">Action</p>
-                  <Badge className={getActionColor(selectedLog.action)}>{selectedLog.action}</Badge>
+                  <Badge className={getActionColor(selectedLog.action)}>{formatActionLabel(selectedLog.action)}</Badge>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground uppercase font-bold">Entity Type</p>
