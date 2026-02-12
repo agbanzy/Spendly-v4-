@@ -5033,6 +5033,30 @@ export async function registerRoutes(
         currency: wallet.currency,
       });
 
+      // Send bill payment confirmation email
+      try {
+        const userId = (req as any).user?.uid;
+        if (userId) {
+          const userSettings = await storage.getNotificationSettings(userId);
+          const userProfile = await storage.getUser(userId);
+          const userName = userProfile?.displayName || userProfile?.email?.split('@')[0] || 'User';
+          if (userSettings?.email) {
+            await notificationService.sendBillPaymentEmail({
+              email: userSettings.email,
+              name: userName,
+              billName: bill.name,
+              amount: billAmount,
+              currency: wallet.currency,
+              provider: bill.provider || 'Direct',
+              paymentDate: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+              reference: `BILL-${bill.id}`,
+            });
+          }
+        }
+      } catch (emailErr) {
+        console.error('Failed to send bill payment email:', emailErr);
+      }
+
       res.json({ bill: updatedBill, walletTransaction: transaction });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to pay bill" });
