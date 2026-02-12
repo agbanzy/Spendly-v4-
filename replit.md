@@ -54,6 +54,30 @@ Spendly is a comprehensive financial operating system for high-growth teams, off
 - **Settings**: Company and user preferences.
 - **Audit Logs**: Activity tracking with filters, CSV export.
 
+## Required Environment Variables / API Keys
+
+### Present and Configured
+- **STRIPE_SECRET_KEY** (secret) - Stripe payment processing
+- **PAYSTACK_SECRET_KEY** (secret) - Paystack payment processing (Africa)
+- **AWS_ACCESS_KEY_ID** (secret) - AWS services authentication
+- **AWS_SECRET_ACCESS_KEY** (secret) - AWS services authentication
+- **AWS_REGION** (secret) - AWS region (US-EAST-1)
+- **AWS_SES_FROM_EMAIL** (secret) - Verified sender email for SES
+- **AWS_SES_FROM_NAME** (env) - Sender display name ("Spendly")
+- **SESSION_SECRET** (secret) - Express session encryption
+- **VITE_STRIPE_PUBLISHABLE_KEY** (env) - Stripe frontend key (pk_live_*)
+- **VITE_PAYSTACK_PUBLIC_KEY** (env) - Paystack frontend key (pk_live_*)
+- **VITE_FIREBASE_*** (env) - Firebase client-side config (API key, auth domain, project ID, etc.)
+
+### Missing - Required for Production Auth
+- **FIREBASE_PROJECT_ID** - Firebase project ID (get from Firebase Console > Project Settings)
+- **FIREBASE_CLIENT_EMAIL** - Service account email (Firebase Console > Project Settings > Service Accounts)
+- **FIREBASE_PRIVATE_KEY** - Service account private key (generate new private key from Firebase Console)
+Without these, the auth middleware bypasses token verification in development. In production, it fails closed (rejects all requests).
+
+### AWS SES Note
+SES is currently in **sandbox mode**. Only verified email addresses can receive emails. To send to any address, request production access in the AWS SES console.
+
 ## External Dependencies
 - **Firebase**: Authentication (email/password, Google Sign-in) and Firebase Admin SDK.
 - **Stripe**: Payment gateway for virtual cards and Stripe Identity for KYC.

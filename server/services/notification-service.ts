@@ -355,6 +355,15 @@ class NotificationService {
     }
   }
 
+  private getCurrencySymbol(currency: string): string {
+    const symbols: Record<string, string> = {
+      USD: '$', EUR: '\u20AC', GBP: '\u00A3', NGN: '\u20A6', 
+      KES: 'KSh', GHS: '\u20B5', ZAR: 'R', EGP: 'E\u00A3',
+      RWF: 'RF', XOF: 'CFA', CAD: 'C$', AUD: 'A$',
+    };
+    return symbols[currency] || currency + ' ';
+  }
+
   // HTML escape function to prevent XSS in email templates
   private escapeHtml(unsafe: string): string {
     if (!unsafe) return '';
@@ -398,67 +407,79 @@ class NotificationService {
     `;
   }
 
-  async notifyExpenseSubmitted(userId: string, expense: { id: string; merchant: string; amount: number }): Promise<void> {
+  async notifyExpenseSubmitted(userId: string, expense: { id: string; merchant: string; amount: number; currency?: string }): Promise<void> {
+    const cur = expense.currency || 'USD';
+    const sym = this.getCurrencySymbol(cur);
     await this.send({
       userId,
       type: 'expense_submitted',
       title: 'Expense Submitted',
-      message: `Your expense of $${expense.amount} at ${expense.merchant} has been submitted for approval.`,
+      message: `Your expense of ${sym}${expense.amount.toLocaleString()} at ${expense.merchant} has been submitted for approval.`,
       data: { expenseId: expense.id, actionUrl: '/expenses' },
       channels: ['in_app', 'push'],
     });
   }
 
-  async notifyExpenseApproved(userId: string, expense: { id: string; merchant: string; amount: number }): Promise<void> {
+  async notifyExpenseApproved(userId: string, expense: { id: string; merchant: string; amount: number; currency?: string }): Promise<void> {
+    const cur = expense.currency || 'USD';
+    const sym = this.getCurrencySymbol(cur);
     await this.send({
       userId,
       type: 'expense_approved',
       title: 'Expense Approved',
-      message: `Your expense of $${expense.amount} at ${expense.merchant} has been approved.`,
+      message: `Your expense of ${sym}${expense.amount.toLocaleString()} at ${expense.merchant} has been approved.`,
       data: { expenseId: expense.id, actionUrl: '/expenses' },
       channels: ['in_app', 'email', 'push'],
     });
   }
 
-  async notifyExpenseRejected(userId: string, expense: { id: string; merchant: string; amount: number; reason?: string }): Promise<void> {
+  async notifyExpenseRejected(userId: string, expense: { id: string; merchant: string; amount: number; currency?: string; reason?: string }): Promise<void> {
+    const cur = expense.currency || 'USD';
+    const sym = this.getCurrencySymbol(cur);
     await this.send({
       userId,
       type: 'expense_rejected',
       title: 'Expense Rejected',
-      message: `Your expense of $${expense.amount} at ${expense.merchant} was rejected. ${expense.reason ? `Reason: ${expense.reason}` : ''}`,
+      message: `Your expense of ${sym}${expense.amount.toLocaleString()} at ${expense.merchant} was rejected. ${expense.reason ? `Reason: ${expense.reason}` : ''}`,
       data: { expenseId: expense.id, actionUrl: '/expenses' },
       channels: ['in_app', 'email', 'push'],
     });
   }
 
   async notifyPaymentReceived(userId: string, payment: { amount: number; from: string; currency?: string }): Promise<void> {
+    const cur = payment.currency || 'USD';
+    const sym = this.getCurrencySymbol(cur);
     await this.send({
       userId,
       type: 'payment_received',
       title: 'Payment Received',
-      message: `You received ${payment.currency || 'USD'} ${payment.amount} from ${payment.from}.`,
+      message: `You received ${sym}${payment.amount.toLocaleString()} from ${payment.from}.`,
       data: { actionUrl: '/transactions' },
       channels: ['in_app', 'email', 'sms', 'push'],
     });
   }
 
-  async notifyBillDue(userId: string, bill: { id: string; name: string; amount: number; dueDate: string }): Promise<void> {
+  async notifyBillDue(userId: string, bill: { id: string; name: string; amount: number; dueDate: string; currency?: string }): Promise<void> {
+    const cur = bill.currency || 'USD';
+    const sym = this.getCurrencySymbol(cur);
     await this.send({
       userId,
       type: 'bill_due',
       title: 'Bill Due Soon',
-      message: `Your ${bill.name} bill of $${bill.amount} is due on ${bill.dueDate}.`,
+      message: `Your ${bill.name} bill of ${sym}${bill.amount.toLocaleString()} is due on ${bill.dueDate}.`,
       data: { billId: bill.id, actionUrl: '/bills' },
       channels: ['in_app', 'email', 'push'],
     });
   }
 
-  async notifyBudgetWarning(userId: string, budget: { category: string; spent: number; limit: number; percentage: number }): Promise<void> {
+  async notifyBudgetWarning(userId: string, budget: { category: string; spent: number; limit: number; percentage: number; currency?: string }): Promise<void> {
+    const cur = budget.currency || 'USD';
+    const sym = this.getCurrencySymbol(cur);
     await this.send({
       userId,
       type: 'budget_warning',
       title: 'Budget Warning',
-      message: `You've used ${budget.percentage}% of your ${budget.category} budget ($${budget.spent} of $${budget.limit}).`,
+      message: `You've used ${budget.percentage}% of your ${budget.category} budget (${sym}${budget.spent.toLocaleString()} of ${sym}${budget.limit.toLocaleString()}).`,
       data: { actionUrl: '/budget' },
       channels: ['in_app', 'push'],
     });
@@ -486,12 +507,14 @@ class NotificationService {
     });
   }
 
-  async notifyCardTransaction(userId: string, transaction: { cardLast4: string; amount: number; merchant: string }): Promise<void> {
+  async notifyCardTransaction(userId: string, transaction: { cardLast4: string; amount: number; merchant: string; currency?: string }): Promise<void> {
+    const cur = transaction.currency || 'USD';
+    const sym = this.getCurrencySymbol(cur);
     await this.send({
       userId,
       type: 'card_transaction',
       title: 'Card Transaction',
-      message: `$${transaction.amount} spent at ${transaction.merchant} using card ending in ${transaction.cardLast4}.`,
+      message: `${sym}${transaction.amount.toLocaleString()} spent at ${transaction.merchant} using card ending in ${transaction.cardLast4}.`,
       data: { actionUrl: '/cards' },
       channels: ['in_app', 'push'],
     });

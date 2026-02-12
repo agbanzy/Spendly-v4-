@@ -4122,6 +4122,39 @@ export async function registerRoutes(
     }
   });
 
+  // Test email delivery - sends a test email via AWS SES
+  app.post("/api/notifications/test-email", async (req, res) => {
+    try {
+      const { email } = req.body;
+      // Default to the verified SES sender email for self-test
+      const targetEmail = email || process.env.AWS_SES_FROM_EMAIL;
+      if (!targetEmail) {
+        return res.status(400).json({ error: "Email address is required (or set AWS_SES_FROM_EMAIL)" });
+      }
+      
+      const result = await notificationService.sendWelcomeEmail({
+        email: targetEmail,
+        name: 'Test User',
+      });
+      
+      if (result.success) {
+        res.json({ success: true, message: `Test email sent to ${targetEmail}` });
+      } else {
+        // Check for SES sandbox error and provide helpful guidance
+        const isSandboxError = result.error?.includes('not verified');
+        res.status(isSandboxError ? 400 : 500).json({ 
+          success: false, 
+          error: result.error || 'Failed to send test email',
+          hint: isSandboxError 
+            ? 'AWS SES is in sandbox mode. Only verified email addresses can receive emails. Verify the recipient in the AWS SES console, or request production access.'
+            : undefined
+        });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to send test email" });
+    }
+  });
+
   // Send test notification
   app.post("/api/notifications/send", async (req, res) => {
     try {
