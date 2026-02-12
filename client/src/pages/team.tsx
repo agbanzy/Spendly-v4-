@@ -101,7 +101,7 @@ export default function Team() {
   const [searchQuery, setSearchQuery] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("all");
   const [isInviteOpen, setIsInviteOpen] = useState(false);
-  const [inviteForm, setInviteForm] = useState({ email: "", role: "EMPLOYEE", department: "" });
+  const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "EMPLOYEE", department: "" });
 
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
@@ -154,15 +154,24 @@ export default function Team() {
   });
 
   const sendInviteMutation = useMutation({
-    mutationFn: async (data: { email: string; role: string; department?: string }) => {
-      if (!currentCompany?.id) throw new Error("No company found. Please create a company first.");
-      return apiRequest("POST", `/api/companies/${currentCompany.id}/invitations`, data);
+    mutationFn: async (data: { name: string; email: string; role: string; department?: string }) => {
+      let companyId = currentCompany?.id;
+      if (!companyId) {
+        const newCompany = await apiRequest("POST", "/api/companies", {
+          name: settings?.companyName || "My Company",
+          currency: settings?.currency || "USD",
+          country: settings?.country || "US",
+        });
+        companyId = (newCompany as any).id;
+        queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
+      }
+      return apiRequest("POST", `/api/companies/${companyId}/invitations`, data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/companies", currentCompany?.id, "invitations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
       toast({ title: "Invitation sent", description: "An email invitation has been sent to the team member." });
       setIsInviteOpen(false);
-      setInviteForm({ email: "", role: "EMPLOYEE", department: "" });
+      setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "" });
     },
     onError: (error: any) => {
       toast({ title: "Failed to send invitation", description: error.message, variant: "destructive" });
@@ -174,7 +183,7 @@ export default function Team() {
       return apiRequest("DELETE", `/api/companies/${currentCompany?.id}/invitations/${invitationId}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/companies", currentCompany?.id, "invitations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
       toast({ title: "Invitation revoked" });
     },
     onError: () => {
@@ -403,9 +412,6 @@ export default function Team() {
         <div className="flex gap-2 flex-wrap">
           <Button variant="outline" onClick={() => { resetDeptForm(); setEditingDept(null); setIsDeptOpen(true); }} data-testid="button-add-department">
             <FolderPlus className="h-4 w-4 mr-2" />Add Department
-          </Button>
-          <Button variant="outline" onClick={() => { setInviteForm({ email: "", role: "EMPLOYEE", department: "" }); setIsInviteOpen(true); }} data-testid="button-send-invite">
-            <Send className="h-4 w-4 mr-2" />Send Invite
           </Button>
           <Button onClick={() => { resetMemberForm(); setEditingMember(null); setIsMemberOpen(true); }} data-testid="button-add-member">
             <UserPlus className="h-4 w-4 mr-2" />Add Member
@@ -650,7 +656,7 @@ export default function Team() {
                 <CardTitle className="text-sm font-bold uppercase tracking-widest">Pending Invitations</CardTitle>
                 <CardDescription>Track and manage team invitations</CardDescription>
               </div>
-              <Button onClick={() => { setInviteForm({ email: "", role: "EMPLOYEE", department: "" }); setIsInviteOpen(true); }} data-testid="button-new-invite">
+              <Button onClick={() => { setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "" }); setIsInviteOpen(true); }} data-testid="button-new-invite">
                 <Send className="h-4 w-4 mr-2" />New Invite
               </Button>
             </CardHeader>
@@ -732,7 +738,7 @@ export default function Team() {
                   </div>
                   <h3 className="text-lg font-bold mb-1">No invitations sent</h3>
                   <p className="text-sm text-muted-foreground mb-4">Send invitations to add team members to your company.</p>
-                  <Button onClick={() => { setInviteForm({ email: "", role: "EMPLOYEE", department: "" }); setIsInviteOpen(true); }} data-testid="button-send-first-invite">
+                  <Button onClick={() => { setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "" }); setIsInviteOpen(true); }} data-testid="button-send-first-invite">
                     <Send className="h-4 w-4 mr-2" />Send First Invite
                   </Button>
                 </div>
@@ -882,6 +888,10 @@ export default function Team() {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
+              <Label htmlFor="inviteName">Full Name *</Label>
+              <Input id="inviteName" value={inviteForm.name} onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })} placeholder="Jane Doe" data-testid="input-invite-name" />
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="inviteEmail">Email Address *</Label>
               <Input id="inviteEmail" type="email" value={inviteForm.email} onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })} placeholder="colleague@company.com" data-testid="input-invite-email" />
             </div>
@@ -925,11 +935,12 @@ export default function Team() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsInviteOpen(false)} data-testid="button-cancel-invite">Cancel</Button>
             <Button onClick={() => {
-              if (!inviteForm.email) {
-                toast({ title: "Email is required", variant: "destructive" });
+              if (!inviteForm.name || !inviteForm.email) {
+                toast({ title: "Name and email are required", variant: "destructive" });
                 return;
               }
               sendInviteMutation.mutate({
+                name: inviteForm.name,
                 email: inviteForm.email,
                 role: inviteForm.role,
                 department: inviteForm.department && inviteForm.department !== "none" ? inviteForm.department : undefined,
