@@ -233,6 +233,21 @@ export async function registerRoutes(
       });
       
       const updatedBalances = await storage.updateBalances({ local: String(newLocal) });
+
+      try {
+        await storage.createAuditLog({
+          action: 'wallet_funding',
+          userId: (req as any).user?.uid || 'system',
+          userName: (req as any).user?.email || 'System',
+          entityType: 'wallet',
+          entityId: 'company-balance',
+          details: { amount: parsedAmount, currency: 'USD', newBalance: newLocal },
+          ipAddress: req.ip || '',
+          userAgent: req.headers['user-agent'] || '',
+          createdAt: new Date().toISOString(),
+        } as any);
+      } catch (e) { /* audit log failure should not block operation */ }
+
       res.json(updatedBalances);
     } catch (error) {
       res.status(500).json({ error: "Failed to fund wallet" });
@@ -268,6 +283,21 @@ export async function registerRoutes(
       });
       
       const updatedBalances = await storage.updateBalances({ local: String(newLocal) });
+
+      try {
+        await storage.createAuditLog({
+          action: 'wallet_withdrawal',
+          userId: (req as any).user?.uid || 'system',
+          userName: (req as any).user?.email || 'System',
+          entityType: 'wallet',
+          entityId: 'company-balance',
+          details: { amount: parsedAmount, currency: 'USD', newBalance: newLocal },
+          ipAddress: req.ip || '',
+          userAgent: req.headers['user-agent'] || '',
+          createdAt: new Date().toISOString(),
+        } as any);
+      } catch (e) { /* audit log failure should not block operation */ }
+
       res.json(updatedBalances);
     } catch (error) {
       res.status(500).json({ error: "Failed to withdraw" });
@@ -587,6 +617,23 @@ export async function registerRoutes(
       if (!bill) {
         return res.status(404).json({ error: "Bill not found" });
       }
+
+      if (result.data.status === 'Paid') {
+        try {
+          await storage.createAuditLog({
+            action: 'bill_payment',
+            userId: (req as any).user?.uid || 'system',
+            userName: (req as any).user?.email || 'System',
+            entityType: 'bill',
+            entityId: req.params.id,
+            details: { billName: bill.name, amount: bill.amount, provider: bill.provider, category: bill.category },
+            ipAddress: req.ip || '',
+            userAgent: req.headers['user-agent'] || '',
+            createdAt: new Date().toISOString(),
+          } as any);
+        } catch (e) { /* audit log failure should not block operation */ }
+      }
+
       res.json(bill);
     } catch (error) {
       res.status(500).json({ error: "Failed to update bill" });
@@ -2433,6 +2480,20 @@ export async function registerRoutes(
         console.warn('Transfer notification failed:', notifError);
       }
       
+      try {
+        await storage.createAuditLog({
+          action: 'transfer_initiated',
+          userId: userId || 'system',
+          userName: (req as any).user?.email || 'System',
+          entityType: 'transfer',
+          entityId: providerRef,
+          details: { amount, currency, reason, recipient: recipientDetails.accountName, countryCode },
+          ipAddress: req.ip || '',
+          userAgent: req.headers['user-agent'] || '',
+          createdAt: new Date().toISOString(),
+        } as any);
+      } catch (e) { /* audit log failure should not block operation */ }
+
       res.json({ ...transferResult, reference: providerRef });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to initiate transfer" });
@@ -2444,6 +2505,7 @@ export async function registerRoutes(
     firstName: z.string().min(1),
     lastName: z.string().min(1),
     countryCode: z.string().min(2).max(2),
+    phone: z.string().optional(),
   });
 
   app.post("/api/payment/virtual-account", requireAuth, async (req, res) => {
@@ -2453,12 +2515,13 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid account data", details: result.error.issues });
       }
 
-      const { email, firstName, lastName, countryCode } = result.data;
+      const { email, firstName, lastName, countryCode, phone } = result.data;
       const accountResult = await paymentService.createVirtualAccount(
         email,
         firstName,
         lastName,
-        countryCode
+        countryCode,
+        phone
       );
       
       res.json(accountResult);
@@ -2668,6 +2731,20 @@ export async function registerRoutes(
         currency,
       });
 
+      try {
+        await storage.createAuditLog({
+          action: 'payout_processed',
+          userId: (req as any).user?.uid || 'system',
+          userName: (req as any).user?.email || 'System',
+          entityType: 'payout',
+          entityId: transferResult?.reference || `PAY-${Date.now()}`,
+          details: { amount, currency, reason, recipient: recipientDetails.accountName, countryCode },
+          ipAddress: req.ip || '',
+          userAgent: req.headers['user-agent'] || '',
+          createdAt: new Date().toISOString(),
+        } as any);
+      } catch (e) { /* audit log failure should not block operation */ }
+
       res.json({
         success: true,
         transferDetails: transferResult,
@@ -2850,10 +2927,26 @@ export async function registerRoutes(
         currency: wallet?.currency || 'USD',
       });
       
+      const utilityRef = `UTL-${Date.now()}`;
+
+      try {
+        await storage.createAuditLog({
+          action: 'utility_payment',
+          userId: effectiveUserId || 'system',
+          userName: (req as any).user?.email || 'System',
+          entityType: 'utility',
+          entityId: utilityRef,
+          details: { type, provider, amount, reference, countryCode, paymentProvider },
+          ipAddress: req.ip || '',
+          userAgent: req.headers['user-agent'] || '',
+          createdAt: new Date().toISOString(),
+        } as any);
+      } catch (e) { /* audit log failure should not block operation */ }
+
       res.json({
         success: true,
         message: `${type.charAt(0).toUpperCase() + type.slice(1)} payment successful`,
-        reference: `UTL-${Date.now()}`,
+        reference: utilityRef,
         paymentProvider,
         amount,
         type,
@@ -5566,7 +5659,7 @@ export async function registerRoutes(
   
   app.post("/api/virtual-accounts/create", async (req, res) => {
     try {
-      const { userId, email, firstName, lastName, countryCode } = req.body;
+      const { userId, email, firstName, lastName, countryCode, phone } = req.body;
 
       // Check if user already has a virtual account
       const existingAccounts = await storage.getVirtualAccounts();
@@ -5580,7 +5673,8 @@ export async function registerRoutes(
         email,
         firstName,
         lastName,
-        countryCode
+        countryCode,
+        phone
       );
 
       // Store in database

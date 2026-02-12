@@ -171,11 +171,11 @@ export const paymentService = {
     }
   },
 
-  async createVirtualAccount(customerEmail: string, firstName: string, lastName: string, countryCode: string) {
+  async createVirtualAccount(customerEmail: string, firstName: string, lastName: string, countryCode: string, phone?: string) {
     const provider = getPaymentProvider(countryCode);
     
     if (provider === 'paystack') {
-      const customer = await paystackClient.createCustomer(customerEmail, firstName, lastName);
+      const customer = await paystackClient.createCustomer(customerEmail, firstName, lastName, phone);
       const account = await paystackClient.createVirtualAccount(customer.data.customer_code);
       return {
         provider: 'paystack',

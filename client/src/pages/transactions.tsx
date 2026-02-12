@@ -170,6 +170,7 @@ export default function Transactions() {
                 <SelectItem value="payout">Payout</SelectItem>
                 <SelectItem value="bill">Bill</SelectItem>
                 <SelectItem value="funding">Funding</SelectItem>
+                <SelectItem value="transfer">Transfer</SelectItem>
                 <SelectItem value="withdrawal">Withdrawal</SelectItem>
               </SelectContent>
             </Select>
@@ -275,6 +276,8 @@ export default function Transactions() {
                   <SelectItem value="Withdrawal"><div className="flex items-center gap-2"><Send className="h-4 w-4" />Withdrawal</div></SelectItem>
                   <SelectItem value="Payout"><div className="flex items-center gap-2"><ArrowUpRight className="h-4 w-4" />Payout</div></SelectItem>
                   <SelectItem value="Funding"><div className="flex items-center gap-2"><ArrowDownRight className="h-4 w-4" />Funding</div></SelectItem>
+                  <SelectItem value="Transfer"><div className="flex items-center gap-2"><ArrowUpRight className="h-4 w-4" />Transfer</div></SelectItem>
+                  <SelectItem value="Bill"><div className="flex items-center gap-2"><Wallet className="h-4 w-4" />Bill Payment</div></SelectItem>
                 </SelectContent>
               </Select>
             </div>

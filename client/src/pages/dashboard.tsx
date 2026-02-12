@@ -330,6 +330,10 @@ export default function Dashboard() {
       if (!user?.id || !userProfile) {
         throw new Error("User profile not found. Please complete onboarding first.");
       }
+
+      if (!userProfile.phoneNumber && !userProfile.phone) {
+        throw new Error("Phone number is required. Please update your phone number in Settings before generating a virtual account.");
+      }
       
       // Parse name from displayName
       const displayName = userProfile.displayName || user.email?.split('@')[0] || "User";
@@ -343,6 +347,7 @@ export default function Dashboard() {
         firstName,
         lastName,
         countryCode: userProfile.country || countryCode,
+        phone: userProfile.phoneNumber || userProfile.phone || "",
       });
       
       return res.json();
@@ -949,7 +954,7 @@ export default function Dashboard() {
             <Button variant="outline" onClick={() => setIsFundingOpen(false)}>Cancel</Button>
             <Button onClick={() => fundWalletMutation.mutate(fundingAmount)} disabled={!fundingAmount || fundWalletMutation.isPending} data-testid="button-confirm-funding">
               {fundWalletMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              Add ${fundingAmount || '0'}
+              Add {currencySymbol}{fundingAmount || '0'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1026,7 +1031,7 @@ export default function Dashboard() {
             )}
             
             <div className="space-y-2">
-              <Label htmlFor="withdrawal-amount">Amount to Withdraw ($)</Label>
+              <Label htmlFor="withdrawal-amount">Amount to Withdraw ({currencySymbol})</Label>
               <Input 
                 id="withdrawal-amount" 
                 type="number" 
@@ -1058,7 +1063,7 @@ export default function Dashboard() {
               data-testid="button-confirm-withdrawal"
             >
               {withdrawMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              Withdraw ${withdrawalAmount || '0'}
+              Withdraw {currencySymbol}{withdrawalAmount || '0'}
             </Button>
           </DialogFooter>
         </DialogContent>
