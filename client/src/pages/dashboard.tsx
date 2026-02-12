@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { getCurrencySymbol, formatCurrencyAmount, PAYMENT_LIMITS } from "@/lib/constants";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +53,7 @@ import { Link } from "wouter";
 import type { Expense, Transaction, CompanyBalances, AIInsight, CompanySettings, UserProfile, VirtualAccount } from "@shared/schema";
 import { isPaystackRegion } from "@/lib/constants";
 import { useAuth } from "@/lib/auth";
+import { PinVerificationDialog, usePinVerification } from "@/components/pin-verification-dialog";
 
 interface Bank {
   code: string;
@@ -76,6 +78,7 @@ export default function Dashboard() {
   const [isValidating, setIsValidating] = useState(false);
   const [showBalance, setShowBalance] = useState(true);
   const [fundingMethod, setFundingMethod] = useState<"card" | "bank">("card");
+  const { isPinRequired, isPinDialogOpen, setIsPinDialogOpen, requirePin, handlePinVerified } = usePinVerification();
 
   // Handle quick action to open funding dialog (runs once on mount)
   useEffect(() => {
@@ -163,16 +166,8 @@ export default function Dashboard() {
   const isPaystack = isPaystackRegion(countryCode);
 
   // Currency formatting
-  const currencySymbols: Record<string, string> = {
-    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
-  };
   const currency = settings?.currency || "USD";
-  const currencySymbol = currencySymbols[currency] || "$";
-  
-  const formatCurrency = (amount: number | string) => {
-    const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
-    return `${currencySymbol}${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  };
+  const currencySymbol = getCurrencySymbol(currency);
 
   const { data: banks } = useQuery<Bank[]>({
     queryKey: ["/api/payment/banks", countryCode],
@@ -197,15 +192,21 @@ export default function Dashboard() {
   const fundWalletMutation = useMutation({
     mutationFn: async (amount: string) => {
       const numAmount = parseFloat(amount);
-      const currency = settings?.currency || 'USD';
+      const fundingCurrency = settings?.currency || 'USD';
+      
+      // Validate amount
+      const limits = PAYMENT_LIMITS[fundingCurrency];
+      if (limits && (numAmount < limits.min || numAmount > limits.max)) {
+        throw new Error(`Amount must be between ${formatCurrencyAmount(limits.min, fundingCurrency)} and ${formatCurrencyAmount(limits.max, fundingCurrency)}`);
+      }
       
       if (fundingMethod === 'card') {
         if (isPaystack) {
           const res = await apiRequest("POST", "/api/payment/create-intent", {
             amount: numAmount,
-            currency,
+            currency: fundingCurrency,
             countryCode,
-            email: "user@example.com",
+            email: user?.email || userProfile?.email || "",
             metadata: { type: 'wallet_funding' }
           });
           const data = await res.json();
@@ -216,7 +217,7 @@ export default function Dashboard() {
         } else {
           const res = await apiRequest("POST", "/api/stripe/checkout-session", {
             amount: numAmount,
-            currency,
+            currency: fundingCurrency,
             countryCode,
             successUrl: `${window.location.origin}/dashboard?payment=success&session_id={CHECKOUT_SESSION_ID}`,
             cancelUrl: `${window.location.origin}/dashboard?payment=cancelled`,
@@ -241,17 +242,26 @@ export default function Dashboard() {
         setFundingAmount("");
       }
     },
-    onError: () => {
-      toast({ title: "Failed to fund wallet", variant: "destructive" });
+    onError: (error: any) => {
+      toast({ title: "Failed to fund wallet", description: error.message, variant: "destructive" });
     },
   });
 
   const withdrawMutation = useMutation({
     mutationFn: async (amount: string) => {
       const numAmount = parseFloat(amount);
+      
+      // Validate bank account
       if (!withdrawalValidation?.validated || !withdrawalData.accountNumber || !withdrawalData.bankCode) {
         throw new Error("Please validate your bank account first");
       }
+      
+      // Validate amount
+      const limits = PAYMENT_LIMITS[currency];
+      if (limits && (numAmount < limits.min || numAmount > limits.max)) {
+        throw new Error(`Amount must be between ${formatCurrencyAmount(limits.min, currency)} and ${formatCurrencyAmount(limits.max, currency)}`);
+      }
+      
       return apiRequest("POST", "/api/wallet/payout", { 
         amount: numAmount,
         countryCode,
@@ -272,14 +282,22 @@ export default function Dashboard() {
       setWithdrawalData({ accountNumber: "", bankCode: "", accountName: "" });
       setWithdrawalValidation(null);
     },
-    onError: () => {
-      toast({ title: "Failed to withdraw", variant: "destructive" });
+    onError: (error: any) => {
+      toast({ title: "Failed to withdraw", description: error.message, variant: "destructive" });
     },
   });
 
   const sendMoneyMutation = useMutation({
     mutationFn: async (data: typeof sendMoneyData) => {
       const numAmount = parseFloat(data.amount);
+      const sendCurrency = settings?.currency || 'USD';
+      
+      // Validate amount
+      const limits = PAYMENT_LIMITS[sendCurrency];
+      if (limits && (numAmount < limits.min || numAmount > limits.max)) {
+        throw new Error(`Amount must be between ${formatCurrencyAmount(limits.min, sendCurrency)} and ${formatCurrencyAmount(limits.max, sendCurrency)}`);
+      }
+      
       return apiRequest("POST", "/api/payment/transfer", { 
         amount: numAmount,
         countryCode,
@@ -288,7 +306,7 @@ export default function Dashboard() {
           accountNumber: data.recipient,
           bankCode: data.bankCode,
           accountName: accountValidation?.name || "Recipient",
-          currency: settings?.currency || 'USD',
+          currency: sendCurrency,
         }
       });
     },
@@ -300,8 +318,8 @@ export default function Dashboard() {
       setSendMoneyData({ recipient: "", amount: "", note: "", bankCode: "" });
       setAccountValidation(null);
     },
-    onError: () => {
-      toast({ title: "Failed to send money", variant: "destructive" });
+    onError: (error: any) => {
+      toast({ title: "Failed to send money", description: error.message, variant: "destructive" });
     },
   });
 
@@ -559,7 +577,7 @@ export default function Dashboard() {
               {balancesLoading ? <Skeleton className="h-14 w-64 bg-slate-800" /> : (
                 <h2 className="text-4xl md:text-6xl font-black tracking-tight" data-testid="text-total-balance">
                   {showBalance 
-                    ? `${currencySymbol}${totalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    ? formatCurrencyAmount(totalBalance, currency)
                     : "••••••••"
                   }
                 </h2>
@@ -594,7 +612,7 @@ export default function Dashboard() {
             </div>
             {balancesLoading ? <Skeleton className="h-8 w-32" /> : (
               <p className="text-2xl font-black" data-testid="text-local-balance">
-                {showBalance ? formatCurrency(balances?.local || 0) : "••••"}
+                {showBalance ? formatCurrencyAmount(balances?.local || 0, currency) : "••••"}
               </p>
             )}
             <p className="text-xs text-muted-foreground mt-1">{balances?.localCurrency || 'USD'}</p>
@@ -611,7 +629,7 @@ export default function Dashboard() {
             </div>
             {balancesLoading ? <Skeleton className="h-8 w-32" /> : (
               <p className="text-2xl font-black" data-testid="text-usd-balance">
-                {showBalance ? formatCurrency(balances?.usd || 0) : "••••"}
+                {showBalance ? formatCurrencyAmount(balances?.usd || 0, 'USD') : "••••"}
               </p>
             )}
             <p className="text-xs text-muted-foreground mt-1">Global Treasury</p>
@@ -628,7 +646,7 @@ export default function Dashboard() {
             </div>
             {balancesLoading ? <Skeleton className="h-8 w-32" /> : (
               <p className="text-2xl font-black" data-testid="text-escrow-balance">
-                {showBalance ? formatCurrency(balances?.escrow || 0) : "••••"}
+                {showBalance ? formatCurrencyAmount(balances?.escrow || 0, currency) : "••••"}
               </p>
             )}
             <p className="text-xs text-muted-foreground mt-1">Pending settlements</p>
@@ -825,7 +843,7 @@ export default function Dashboard() {
           <div className="space-y-4 py-4">
             <div className="p-4 bg-gradient-to-br from-primary/10 to-primary/5 rounded-xl border border-primary/20">
               <p className="text-xs text-muted-foreground mb-1">Current Balance</p>
-              <p className="text-2xl font-bold">{formatCurrency(balances?.local || 0)}</p>
+              <p className="text-2xl font-bold">{formatCurrencyAmount(balances?.local || 0, currency)}</p>
             </div>
             
             <div className="space-y-2">
@@ -949,7 +967,7 @@ export default function Dashboard() {
           <div className="space-y-4 py-4">
             <div className="p-4 bg-gradient-to-br from-primary/10 to-primary/5 rounded-xl border border-primary/20">
               <p className="text-xs text-muted-foreground mb-1">Available Balance</p>
-              <p className="text-2xl font-bold">{formatCurrency(balances?.local || 0)}</p>
+              <p className="text-2xl font-bold">{formatCurrencyAmount(balances?.local || 0, currency)}</p>
             </div>
             
             <div className="space-y-2">
@@ -1035,7 +1053,7 @@ export default function Dashboard() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsWithdrawalOpen(false)}>Cancel</Button>
             <Button 
-              onClick={() => withdrawMutation.mutate(withdrawalAmount)} 
+              onClick={() => requirePin(() => withdrawMutation.mutate(withdrawalAmount))} 
               disabled={!withdrawalAmount || !withdrawalValidation?.validated || withdrawMutation.isPending || parseFloat(withdrawalAmount) > parseFloat(String(balances?.local || 0))} 
               data-testid="button-confirm-withdrawal"
             >
@@ -1058,7 +1076,7 @@ export default function Dashboard() {
           <div className="space-y-4 py-4">
             <div className="p-4 bg-gradient-to-br from-primary/10 to-primary/5 rounded-xl border border-primary/20">
               <p className="text-xs text-muted-foreground mb-1">Available Balance</p>
-              <p className="text-2xl font-bold">{formatCurrency(balances?.local || 0)}</p>
+              <p className="text-2xl font-bold">{formatCurrencyAmount(balances?.local || 0, currency)}</p>
             </div>
             
             <div className="space-y-2">
@@ -1169,7 +1187,7 @@ export default function Dashboard() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsSendMoneyOpen(false)}>Cancel</Button>
             <Button 
-              onClick={() => sendMoneyMutation.mutate(sendMoneyData)} 
+              onClick={() => requirePin(() => sendMoneyMutation.mutate(sendMoneyData))} 
               disabled={!sendMoneyData.recipient || !sendMoneyData.amount || sendMoneyMutation.isPending} 
               data-testid="button-confirm-send"
             >
@@ -1179,6 +1197,12 @@ export default function Dashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PinVerificationDialog
+        open={isPinDialogOpen}
+        onOpenChange={setIsPinDialogOpen}
+        onVerified={handlePinVerified}
+      />
     </div>
   );
 }

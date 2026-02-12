@@ -59,6 +59,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { Bill, CompanySettings, Wallet } from "@shared/schema";
+import { getCurrencySymbol, formatCurrencyAmount, PAYMENT_LIMITS } from "@/lib/constants";
+import { PinVerificationDialog, usePinVerification } from "@/components/pin-verification-dialog";
 
 // Country-specific utility providers
 const utilityProvidersByRegion = {
@@ -218,17 +220,15 @@ export default function Bills() {
     queryKey: ["/api/settings"],
   });
 
-  // Currency and region configuration
-  const currencySymbols: Record<string, string> = {
-    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
-  };
+  const { isPinRequired, isPinDialogOpen, setIsPinDialogOpen, requirePin, handlePinVerified } = usePinVerification();
+
   const currency = settings?.currency || "USD";
-  const currencySymbol = currencySymbols[currency] || "$";
+  const currencySymbol = getCurrencySymbol(currency);
   const region = settings?.region === "Africa" ? "Africa" : "US/Europe";
   const placeholders = currencyPlaceholders[currency] || currencyPlaceholders["USD"];
   
   const formatCurrency = (amount: number) => {
-    return `${currencySymbol}${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return formatCurrencyAmount(amount, currency);
   };
 
   // Get region-specific utility providers
@@ -531,7 +531,7 @@ export default function Bills() {
       ? utilityForm.smartCardNumber 
       : utilityForm.phoneNumber;
     
-    payUtilityMutation.mutate({
+    requirePin(() => payUtilityMutation.mutate({
       type: utilityType,
       provider: utilityForm.provider,
       amount,
@@ -541,7 +541,7 @@ export default function Bills() {
       phoneNumber: utilityForm.phoneNumber || undefined,
       meterNumber: utilityForm.meterNumber || undefined,
       smartCardNumber: utilityForm.smartCardNumber || undefined,
-    });
+    }));
   };
 
   const openUtilityDialog = (type: typeof utilityType) => {
@@ -1174,6 +1174,12 @@ export default function Bills() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PinVerificationDialog
+        open={isPinDialogOpen}
+        onOpenChange={setIsPinDialogOpen}
+        onVerified={handlePinVerified}
+      />
     </div>
   );
 }
