@@ -125,6 +125,7 @@ export interface IStorage {
   
   // KYC & User Profiles
   getUserProfile(firebaseUid: string): Promise<UserProfile | undefined>;
+  getUserProfileByEmail(email: string): Promise<UserProfile | undefined>;
   createUserProfile(profile: InsertUserProfile): Promise<UserProfile>;
   updateUserProfile(firebaseUid: string, profile: Partial<UserProfile>): Promise<UserProfile | undefined>;
   
@@ -748,6 +749,11 @@ export class DatabaseStorage implements IStorage {
   // ==================== USER PROFILES (KYC) ====================
   async getUserProfile(firebaseUid: string): Promise<UserProfile | undefined> {
     const result = await db.select().from(userProfiles).where(eq(userProfiles.firebaseUid, firebaseUid)).limit(1);
+    return result[0];
+  }
+
+  async getUserProfileByEmail(email: string): Promise<UserProfile | undefined> {
+    const result = await db.select().from(userProfiles).where(eq(userProfiles.email, email)).limit(1);
     return result[0];
   }
 

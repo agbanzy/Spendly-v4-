@@ -5936,6 +5936,28 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/auth/request-password-reset", async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email) {
+        return res.status(400).json({ error: "Email is required" });
+      }
+
+      const profile = await storage.getUserProfileByEmail(email);
+      if (!profile) {
+        return res.status(404).json({ error: "No account found with this email address. Please check the email or sign up for a new account." });
+      }
+
+      res.json({
+        success: true,
+        userName: profile.displayName || email.split('@')[0],
+        message: "User verified. Proceed with password reset."
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to verify account" });
+    }
+  });
+
   // Send password reset confirmation (called after successful reset)
   app.post("/api/auth/password-reset-success", async (req, res) => {
     try {
