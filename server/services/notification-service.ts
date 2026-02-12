@@ -576,15 +576,22 @@ class NotificationService {
     role: string;
     department?: string;
     invitedBy?: string;
+    companyName?: string;
+    inviteToken?: string;
   }): Promise<{ success: boolean; error?: string }> {
     const appUrl = this.getAppUrl();
     const safeName = this.escapeHtml(config.name);
     const safeRole = this.escapeHtml(config.role);
     const safeDepartment = config.department ? this.escapeHtml(config.department) : '';
+    const safeCompanyName = config.companyName ? this.escapeHtml(config.companyName) : 'your team';
+    const inviteUrl = config.inviteToken 
+      ? `${appUrl}/invite/${config.inviteToken}` 
+      : `${appUrl}/login`;
 
     const bodyHtml = `
       <p style="font-size: 16px; color: #1f2937;">Hi <strong>${safeName}</strong>,</p>
-      <p style="font-size: 16px; color: #4b5563;">You have been invited to join your team on Spendly as a <strong>${safeRole}</strong>${safeDepartment ? ` in the ${safeDepartment} department` : ''}.</p>
+      <p style="font-size: 16px; color: #4b5563;">You have been invited to join <strong>${safeCompanyName}</strong> on Spendly as a <strong>${safeRole}</strong>${safeDepartment ? ` in the ${safeDepartment} department` : ''}.</p>
+      ${config.invitedBy ? `<p style="font-size: 14px; color: #6b7280;">Invited by: ${this.escapeHtml(config.invitedBy)}</p>` : ''}
       <p style="font-size: 16px; color: #4b5563;">With Spendly you can:</p>
       <ul style="font-size: 15px; color: #555;">
         <li>Submit and track expenses</li>
@@ -593,24 +600,28 @@ class NotificationService {
         <li>View real-time financial insights</li>
       </ul>
       <div style="text-align: center; margin: 30px 0;">
-        <a href="${appUrl}/login" style="background: #6366f1; color: white; padding: 14px 40px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Get Started</a>
+        <a href="${inviteUrl}" style="background: #6366f1; color: white; padding: 14px 40px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Accept Invitation</a>
       </div>
+      ${config.inviteToken ? `<p style="font-size: 13px; color: #999;">This invitation expires in 7 days. If the button above does not work, copy and paste this link in your browser: ${inviteUrl}</p>` : ''}
       <p style="font-size: 14px; color: #666;">If you have any questions, please contact your team administrator${config.invitedBy ? ` or reply to this email` : ''}.</p>
       <p style="font-size: 12px; color: #999;">If you did not expect this invitation, you can safely ignore this email.</p>
     `;
 
     const plainText = `Hi ${config.name},
 
-You have been invited to join your team on Spendly as a ${config.role}${config.department ? ` in the ${config.department} department` : ''}.
+You have been invited to join ${config.companyName || 'your team'} on Spendly as a ${config.role}${config.department ? ` in the ${config.department} department` : ''}.
+${config.invitedBy ? `Invited by: ${config.invitedBy}` : ''}
 
-Get started at: ${appUrl}/login
+Accept your invitation: ${inviteUrl}
+
+${config.inviteToken ? 'This invitation expires in 7 days.' : ''}
 
 If you have any questions, please contact your team administrator.
 
 - The Spendly Team`;
 
     const { html, text } = this.buildEmailTemplate({
-      preheader: `You have been invited to join Spendly as a ${config.role}`,
+      preheader: `You have been invited to join ${config.companyName || 'Spendly'} as a ${config.role}`,
       headerTitle: 'Team Invitation',
       bodyHtml,
       plainText,
@@ -619,7 +630,7 @@ If you have any questions, please contact your team administrator.
     try {
       await this.sendEmail({
         to: config.email,
-        subject: `You are invited to join Spendly`,
+        subject: `You are invited to join ${config.companyName || 'Spendly'}`,
         html,
         text,
       });

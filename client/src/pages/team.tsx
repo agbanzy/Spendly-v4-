@@ -60,6 +60,12 @@ import {
   Palette,
   DollarSign,
   FolderPlus,
+  Send,
+  Clock,
+  XCircle,
+  CheckCircle,
+  Link2,
+  Copy,
 } from "lucide-react";
 import type { TeamMember, Department, CompanySettings } from "@shared/schema";
 
@@ -94,6 +100,8 @@ export default function Team() {
   const [editingDept, setEditingDept] = useState<Department | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("all");
+  const [isInviteOpen, setIsInviteOpen] = useState(false);
+  const [inviteForm, setInviteForm] = useState({ email: "", role: "EMPLOYEE", department: "" });
 
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
@@ -132,6 +140,46 @@ export default function Team() {
 
   const { data: departments, isLoading: deptsLoading } = useQuery<Department[]>({
     queryKey: ["/api/departments"],
+  });
+
+  const { data: myCompanies } = useQuery<any[]>({
+    queryKey: ["/api/companies"],
+  });
+
+  const currentCompany = myCompanies?.[0];
+
+  const { data: invitations, isLoading: invitationsLoading } = useQuery<any[]>({
+    queryKey: [`/api/companies/${currentCompany?.id}/invitations`],
+    enabled: !!currentCompany?.id,
+  });
+
+  const sendInviteMutation = useMutation({
+    mutationFn: async (data: { email: string; role: string; department?: string }) => {
+      if (!currentCompany?.id) throw new Error("No company found. Please create a company first.");
+      return apiRequest("POST", `/api/companies/${currentCompany.id}/invitations`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/companies", currentCompany?.id, "invitations"] });
+      toast({ title: "Invitation sent", description: "An email invitation has been sent to the team member." });
+      setIsInviteOpen(false);
+      setInviteForm({ email: "", role: "EMPLOYEE", department: "" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to send invitation", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const revokeInviteMutation = useMutation({
+    mutationFn: async (invitationId: string) => {
+      return apiRequest("DELETE", `/api/companies/${currentCompany?.id}/invitations/${invitationId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/companies", currentCompany?.id, "invitations"] });
+      toast({ title: "Invitation revoked" });
+    },
+    onError: () => {
+      toast({ title: "Failed to revoke invitation", variant: "destructive" });
+    },
   });
 
   const createMemberMutation = useMutation({
@@ -352,9 +400,12 @@ export default function Team() {
           <h1 className="text-3xl font-black tracking-tight" data-testid="text-team-title">Team Management</h1>
           <p className="text-muted-foreground mt-1">Manage team members and departments</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button variant="outline" onClick={() => { resetDeptForm(); setEditingDept(null); setIsDeptOpen(true); }} data-testid="button-add-department">
             <FolderPlus className="h-4 w-4 mr-2" />Add Department
+          </Button>
+          <Button variant="outline" onClick={() => { setInviteForm({ email: "", role: "EMPLOYEE", department: "" }); setIsInviteOpen(true); }} data-testid="button-send-invite">
+            <Send className="h-4 w-4 mr-2" />Send Invite
           </Button>
           <Button onClick={() => { resetMemberForm(); setEditingMember(null); setIsMemberOpen(true); }} data-testid="button-add-member">
             <UserPlus className="h-4 w-4 mr-2" />Add Member
@@ -417,6 +468,12 @@ export default function Team() {
             </TabsTrigger>
             <TabsTrigger value="departments" data-testid="tab-departments">
               <Building2 className="h-4 w-4 mr-2" />Departments
+            </TabsTrigger>
+            <TabsTrigger value="invitations" data-testid="tab-invitations">
+              <Send className="h-4 w-4 mr-2" />Invitations
+              {invitations && invitations.filter(i => i.status === 'pending').length > 0 && (
+                <Badge variant="secondary" className="ml-1.5 text-xs">{invitations.filter(i => i.status === 'pending').length}</Badge>
+              )}
             </TabsTrigger>
           </TabsList>
 
@@ -585,6 +642,104 @@ export default function Team() {
             )}
           </div>
         </TabsContent>
+
+        <TabsContent value="invitations">
+          <Card>
+            <CardHeader className="border-b flex flex-row items-center justify-between gap-4">
+              <div>
+                <CardTitle className="text-sm font-bold uppercase tracking-widest">Pending Invitations</CardTitle>
+                <CardDescription>Track and manage team invitations</CardDescription>
+              </div>
+              <Button onClick={() => { setInviteForm({ email: "", role: "EMPLOYEE", department: "" }); setIsInviteOpen(true); }} data-testid="button-new-invite">
+                <Send className="h-4 w-4 mr-2" />New Invite
+              </Button>
+            </CardHeader>
+            <CardContent className="p-0">
+              {invitationsLoading ? (
+                <div className="p-6 space-y-4">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="flex items-center justify-between py-2">
+                      <Skeleton className="h-4 w-48" />
+                      <Skeleton className="h-6 w-20" />
+                    </div>
+                  ))}
+                </div>
+              ) : !currentCompany ? (
+                <div className="p-12 text-center">
+                  <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
+                    <Building2 className="h-8 w-8 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-lg font-bold mb-1">No company set up</h3>
+                  <p className="text-sm text-muted-foreground mb-4">Company invitations require a company to be configured. Contact your admin.</p>
+                </div>
+              ) : invitations && invitations.length > 0 ? (
+                <div className="divide-y divide-border">
+                  {invitations.map((inv: any) => (
+                    <div key={inv.id} className="flex items-center justify-between p-4 hover:bg-muted/50 transition-colors" data-testid={`invitation-${inv.id}`}>
+                      <div className="flex items-center gap-4">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${inv.status === 'pending' ? 'bg-amber-100 dark:bg-amber-900/30' : inv.status === 'accepted' ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>
+                          {inv.status === 'pending' ? <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400" /> :
+                           inv.status === 'accepted' ? <CheckCircle className="h-5 w-5 text-emerald-600 dark:text-emerald-400" /> :
+                           <XCircle className="h-5 w-5 text-red-600 dark:text-red-400" />}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium truncate" data-testid={`text-invite-email-${inv.id}`}>{inv.email}</p>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant="secondary" className={`text-xs ${roleColors[inv.role] || ""}`}>{inv.role}</Badge>
+                            {inv.department && <Badge variant="outline" className="text-xs">{inv.department}</Badge>}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={inv.status === 'pending' ? 'secondary' : inv.status === 'accepted' ? 'default' : 'destructive'} className="text-xs capitalize">
+                          {inv.status}
+                        </Badge>
+                        {inv.status === 'pending' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                              const url = `${window.location.origin}/invite/${inv.token}`;
+                              navigator.clipboard.writeText(url);
+                              toast({ title: "Invite link copied to clipboard" });
+                            }}
+                            data-testid={`button-copy-invite-${inv.id}`}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {inv.status === 'pending' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => revokeInviteMutation.mutate(inv.id)}
+                            disabled={revokeInviteMutation.isPending}
+                            data-testid={`button-revoke-invite-${inv.id}`}
+                          >
+                            <XCircle className="h-4 w-4 text-red-500" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-12 text-center">
+                  <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
+                    <Send className="h-8 w-8 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-lg font-bold mb-1">No invitations sent</h3>
+                  <p className="text-sm text-muted-foreground mb-4">Send invitations to add team members to your company.</p>
+                  <Button onClick={() => { setInviteForm({ email: "", role: "EMPLOYEE", department: "" }); setIsInviteOpen(true); }} data-testid="button-send-first-invite">
+                    <Send className="h-4 w-4 mr-2" />Send First Invite
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       <Dialog open={isMemberOpen} onOpenChange={setIsMemberOpen}>
@@ -710,6 +865,78 @@ export default function Team() {
             <Button onClick={handleDeptSubmit} disabled={createDeptMutation.isPending || updateDeptMutation.isPending} data-testid="button-submit-dept">
               {(createDeptMutation.isPending || updateDeptMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {editingDept ? "Update Department" : "Create Department"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isInviteOpen} onOpenChange={setIsInviteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send Team Invitation</DialogTitle>
+            <DialogDescription>
+              {currentCompany
+                ? `Invite a new member to ${currentCompany.name}. They will receive an email with a link to join.`
+                : "Send an invitation to join your team."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="inviteEmail">Email Address *</Label>
+              <Input id="inviteEmail" type="email" value={inviteForm.email} onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })} placeholder="colleague@company.com" data-testid="input-invite-email" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="inviteRole">Role</Label>
+                <Select value={inviteForm.role} onValueChange={(value) => setInviteForm({ ...inviteForm, role: value })}>
+                  <SelectTrigger data-testid="select-invite-role"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ADMIN">Admin</SelectItem>
+                    <SelectItem value="MANAGER">Manager</SelectItem>
+                    <SelectItem value="EMPLOYEE">Employee</SelectItem>
+                    <SelectItem value="VIEWER">Viewer</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="inviteDept">Department</Label>
+                <Select value={inviteForm.department} onValueChange={(value) => setInviteForm({ ...inviteForm, department: value })}>
+                  <SelectTrigger data-testid="select-invite-department"><SelectValue placeholder="Optional" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No department</SelectItem>
+                    {departmentList.length > 0 ? (
+                      departmentList.map((dept) => (
+                        <SelectItem key={dept.id} value={dept.name}>{dept.name}</SelectItem>
+                      ))
+                    ) : (
+                      <>
+                        <SelectItem value="Engineering">Engineering</SelectItem>
+                        <SelectItem value="Marketing">Marketing</SelectItem>
+                        <SelectItem value="Sales">Sales</SelectItem>
+                        <SelectItem value="Finance">Finance</SelectItem>
+                        <SelectItem value="Operations">Operations</SelectItem>
+                      </>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsInviteOpen(false)} data-testid="button-cancel-invite">Cancel</Button>
+            <Button onClick={() => {
+              if (!inviteForm.email) {
+                toast({ title: "Email is required", variant: "destructive" });
+                return;
+              }
+              sendInviteMutation.mutate({
+                email: inviteForm.email,
+                role: inviteForm.role,
+                department: inviteForm.department && inviteForm.department !== "none" ? inviteForm.department : undefined,
+              });
+            }} disabled={sendInviteMutation.isPending} data-testid="button-confirm-invite">
+              {sendInviteMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Send Invitation
             </Button>
           </DialogFooter>
         </DialogContent>

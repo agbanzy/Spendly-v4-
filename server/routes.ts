@@ -1208,6 +1208,337 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== COMPANIES ====================
+  
+  const createCompanySchema = z.object({
+    name: z.string().min(1).max(100),
+    industry: z.string().optional(),
+    size: z.string().optional(),
+    website: z.string().optional(),
+    country: z.string().optional().default('US'),
+    currency: z.string().optional().default('USD'),
+  });
+
+  app.post("/api/companies", requireAuth, async (req, res) => {
+    try {
+      const result = createCompanySchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid company data", details: result.error.issues });
+      }
+
+      const { name, industry, size, website, country, currency } = result.data;
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      
+      const existing = await storage.getCompanyBySlug(slug);
+      if (existing) {
+        return res.status(400).json({ error: "A company with a similar name already exists" });
+      }
+
+      const userId = (req as any).user?.uid || (req as any).user?.id;
+      const company = await storage.createCompany({
+        name,
+        slug,
+        ownerId: userId,
+        industry: industry || null,
+        size: size || null,
+        website: website || null,
+        country: country || 'US',
+        currency: currency || 'USD',
+        status: 'active',
+      });
+
+      await storage.createCompanyMember({
+        companyId: company.id,
+        userId,
+        email: (req as any).user?.email || '',
+        role: 'OWNER',
+        status: 'active',
+        invitedAt: new Date().toISOString(),
+        joinedAt: new Date().toISOString(),
+      });
+
+      res.status(201).json(company);
+    } catch (error) {
+      console.error('Create company error:', error);
+      res.status(500).json({ error: "Failed to create company" });
+    }
+  });
+
+  app.get("/api/companies", requireAuth, async (req, res) => {
+    try {
+      const userId = (req as any).user?.uid || (req as any).user?.id;
+      const memberships = await storage.getUserCompanies(userId);
+      const companiesResult = [];
+      for (const membership of memberships) {
+        const company = await storage.getCompany(membership.companyId);
+        if (company) {
+          companiesResult.push({ ...company, role: membership.role, membershipId: membership.id });
+        }
+      }
+      res.json(companiesResult);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch companies" });
+    }
+  });
+
+  app.get("/api/companies/:id", requireAuth, async (req, res) => {
+    try {
+      const company = await storage.getCompany(req.params.id);
+      if (!company) {
+        return res.status(404).json({ error: "Company not found" });
+      }
+      res.json(company);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch company" });
+    }
+  });
+
+  app.get("/api/companies/:id/members", requireAuth, async (req, res) => {
+    try {
+      const members = await storage.getCompanyMembers(req.params.id);
+      res.json(members);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch company members" });
+    }
+  });
+
+  // ==================== COMPANY INVITATIONS ====================
+  
+  const inviteSchema = z.object({
+    email: z.string().email(),
+    name: z.string().min(1),
+    role: z.string().optional().default('EMPLOYEE'),
+    department: z.string().optional(),
+  });
+
+  app.post("/api/companies/:id/invitations", requireAuth, async (req, res) => {
+    try {
+      const companyId = req.params.id;
+      const company = await storage.getCompany(companyId);
+      if (!company) {
+        return res.status(404).json({ error: "Company not found" });
+      }
+
+      const userId = (req as any).user?.uid || (req as any).user?.id;
+      const membership = await storage.getCompanyMember(companyId, userId);
+      if (!membership || !['OWNER', 'ADMIN', 'MANAGER'].includes(membership.role)) {
+        return res.status(403).json({ error: "You do not have permission to invite members" });
+      }
+
+      const result = inviteSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid invitation data", details: result.error.issues });
+      }
+
+      const { email, name, role, department } = result.data;
+
+      const existingMember = await storage.getCompanyMemberByEmail(companyId, email);
+      if (existingMember) {
+        return res.status(400).json({ error: "This person is already a member of this company" });
+      }
+
+      const existingInvite = await storage.getCompanyInvitationByEmail(companyId, email);
+      if (existingInvite) {
+        return res.status(400).json({ error: "An invitation has already been sent to this email" });
+      }
+
+      const crypto = await import('crypto');
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+      const userProfile = await storage.getUserProfile(userId);
+      const inviterName = userProfile?.displayName || 'A team member';
+
+      const invitation = await storage.createCompanyInvitation({
+        companyId,
+        email,
+        role: role || 'EMPLOYEE',
+        department: department || null,
+        token,
+        invitedBy: userId,
+        invitedByName: inviterName,
+        status: 'pending',
+        expiresAt,
+      });
+
+      await storage.createTeamMember({
+        name,
+        email,
+        role: (role || 'EMPLOYEE') as any,
+        department: (department || 'General') as any,
+        departmentId: null,
+        avatar: null,
+        status: 'Invited',
+        companyId,
+        userId: null,
+        joinedAt: new Date().toISOString().split('T')[0],
+        permissions: ['CREATE_EXPENSE'],
+      });
+
+      const emailResult = await notificationService.sendTeamInvite({
+        email,
+        name,
+        role: role || 'Employee',
+        department: department || undefined,
+        invitedBy: inviterName,
+        companyName: company.name,
+        inviteToken: token,
+      });
+
+      res.status(201).json({
+        ...invitation,
+        inviteEmailSent: emailResult.success,
+        inviteEmailError: emailResult.success ? undefined : emailResult.error,
+      });
+    } catch (error) {
+      console.error('Create invitation error:', error);
+      res.status(500).json({ error: "Failed to create invitation" });
+    }
+  });
+
+  app.get("/api/companies/:id/invitations", requireAuth, async (req, res) => {
+    try {
+      const invitations = await storage.getCompanyInvitations(req.params.id);
+      res.json(invitations);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch invitations" });
+    }
+  });
+
+  app.get("/api/invitations/:token", async (req, res) => {
+    try {
+      const invitation = await storage.getCompanyInvitationByToken(req.params.token);
+      if (!invitation) {
+        return res.status(404).json({ error: "Invitation not found" });
+      }
+
+      if (invitation.status !== 'pending') {
+        return res.status(400).json({ error: `This invitation has been ${invitation.status}` });
+      }
+
+      if (new Date(invitation.expiresAt) < new Date()) {
+        await storage.updateCompanyInvitation(invitation.id, { status: 'expired' });
+        return res.status(400).json({ error: "This invitation has expired" });
+      }
+
+      const company = await storage.getCompany(invitation.companyId);
+
+      res.json({
+        email: invitation.email,
+        role: invitation.role,
+        department: invitation.department,
+        companyName: company?.name || 'Unknown Company',
+        companyLogo: company?.logo,
+        invitedByName: invitation.invitedByName,
+        expiresAt: invitation.expiresAt,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to validate invitation" });
+    }
+  });
+
+  app.post("/api/invitations/:token/accept", requireAuth, async (req, res) => {
+    try {
+      const invitation = await storage.getCompanyInvitationByToken(req.params.token);
+      if (!invitation) {
+        return res.status(404).json({ error: "Invitation not found" });
+      }
+
+      if (invitation.status !== 'pending') {
+        return res.status(400).json({ error: `This invitation has already been ${invitation.status}` });
+      }
+
+      if (new Date(invitation.expiresAt) < new Date()) {
+        await storage.updateCompanyInvitation(invitation.id, { status: 'expired' });
+        return res.status(400).json({ error: "This invitation has expired" });
+      }
+
+      const userId = (req as any).user?.uid || (req as any).user?.id;
+      const userEmail = (req as any).user?.email;
+
+      if (invitation.email.toLowerCase() !== userEmail?.toLowerCase()) {
+        return res.status(403).json({ error: "This invitation was sent to a different email address" });
+      }
+
+      await storage.updateCompanyInvitation(invitation.id, {
+        status: 'accepted',
+        acceptedAt: new Date().toISOString(),
+      });
+
+      const existingMember = await storage.getCompanyMember(invitation.companyId, userId);
+      if (!existingMember) {
+        await storage.createCompanyMember({
+          companyId: invitation.companyId,
+          userId,
+          email: invitation.email,
+          role: invitation.role,
+          status: 'active',
+          invitedAt: invitation.createdAt,
+          joinedAt: new Date().toISOString(),
+        });
+      }
+
+      const teamMember = await storage.getTeamMemberByEmail(invitation.email);
+      if (teamMember) {
+        await storage.updateTeamMember(teamMember.id, {
+          status: 'Active',
+          userId,
+          companyId: invitation.companyId,
+        });
+      }
+
+      await storage.updateUserProfile(userId, { companyId: invitation.companyId });
+
+      let wallet = await storage.getWalletByUserId(userId);
+      if (!wallet) {
+        const company = await storage.getCompany(invitation.companyId);
+        wallet = await storage.createWallet({
+          userId,
+          companyId: invitation.companyId,
+          type: 'personal',
+          currency: company?.currency || 'USD',
+          balance: '0',
+          availableBalance: '0',
+          pendingBalance: '0',
+          status: 'active',
+        });
+      } else if (!wallet.companyId) {
+        await storage.updateWallet(wallet.id, { companyId: invitation.companyId });
+      }
+
+      const company = await storage.getCompany(invitation.companyId);
+
+      res.json({
+        message: "Invitation accepted successfully",
+        companyId: invitation.companyId,
+        companyName: company?.name,
+        role: invitation.role,
+        walletId: wallet?.id,
+      });
+    } catch (error) {
+      console.error('Accept invitation error:', error);
+      res.status(500).json({ error: "Failed to accept invitation" });
+    }
+  });
+
+  app.delete("/api/companies/:companyId/invitations/:invitationId", requireAuth, async (req, res) => {
+    try {
+      const userId = (req as any).user?.uid || (req as any).user?.id;
+      const membership = await storage.getCompanyMember(req.params.companyId, userId);
+      if (!membership || !['OWNER', 'ADMIN'].includes(membership.role)) {
+        return res.status(403).json({ error: "Only admins can revoke invitations" });
+      }
+
+      const success = await storage.revokeCompanyInvitation(req.params.invitationId);
+      if (!success) {
+        return res.status(404).json({ error: "Invitation not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to revoke invitation" });
+    }
+  });
+
   // ==================== TEAM ====================
   app.get("/api/team", async (req, res) => {
     try {

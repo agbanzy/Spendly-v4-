@@ -7,6 +7,7 @@ import {
   userProfiles, kycSubmissions, notifications, notificationSettings, pushTokens,
   departments, auditLogs, organizationSettings, systemSettings, rolePermissions,
   wallets, walletTransactions, exchangeRates, exchangeRateSettings, payoutDestinations, payouts, fundingSources, adminSettings,
+  companies, companyMembers, companyInvitations,
   type User, type InsertUser, type Expense, type Transaction, type Bill, 
   type Budget, type VirtualCard, type TeamMember, type PayrollEntry, 
   type Invoice, type Vendor, type Report, type CardTransaction, 
@@ -19,7 +20,9 @@ import {
   type ExchangeRate, type InsertExchangeRate, type ExchangeRateSettings,
   type PayoutDestination, type InsertPayoutDestination,
   type Payout, type InsertPayout, type FundingSource, type InsertFundingSource,
-  type AdminSettings, type InsertAdminSettings
+  type AdminSettings, type InsertAdminSettings,
+  type Company, type InsertCompany, type CompanyMember, type InsertCompanyMember,
+  type CompanyInvitation, type InsertCompanyInvitation,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -210,6 +213,30 @@ export interface IStorage {
   getUsers(): Promise<User[]>;
   updateUser(id: string, data: Partial<User>): Promise<User | undefined>;
   deleteUser(id: string): Promise<boolean>;
+  
+  // Company methods
+  getCompany(id: string): Promise<Company | undefined>;
+  getCompanyBySlug(slug: string): Promise<Company | undefined>;
+  createCompany(company: InsertCompany): Promise<Company>;
+  updateCompany(id: string, data: Partial<Company>): Promise<Company | undefined>;
+  getCompanies(): Promise<Company[]>;
+  
+  // Company Members
+  getCompanyMembers(companyId: string): Promise<CompanyMember[]>;
+  getCompanyMember(companyId: string, userId: string): Promise<CompanyMember | undefined>;
+  getCompanyMemberByEmail(companyId: string, email: string): Promise<CompanyMember | undefined>;
+  createCompanyMember(member: InsertCompanyMember): Promise<CompanyMember>;
+  updateCompanyMember(id: string, data: Partial<CompanyMember>): Promise<CompanyMember | undefined>;
+  removeCompanyMember(id: string): Promise<boolean>;
+  getUserCompanies(userId: string): Promise<CompanyMember[]>;
+  
+  // Company Invitations
+  getCompanyInvitations(companyId: string): Promise<CompanyInvitation[]>;
+  getCompanyInvitationByToken(token: string): Promise<CompanyInvitation | undefined>;
+  getCompanyInvitationByEmail(companyId: string, email: string): Promise<CompanyInvitation | undefined>;
+  createCompanyInvitation(invitation: InsertCompanyInvitation): Promise<CompanyInvitation>;
+  updateCompanyInvitation(id: string, data: Partial<CompanyInvitation>): Promise<CompanyInvitation | undefined>;
+  revokeCompanyInvitation(id: string): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1302,6 +1329,128 @@ export class DatabaseStorage implements IStorage {
 
   async deleteUser(id: string): Promise<boolean> {
     const result = await db.delete(users).where(eq(users.id, id)).returning();
+    return result.length > 0;
+  }
+
+  // ==================== COMPANIES ====================
+  async getCompany(id: string): Promise<Company | undefined> {
+    const result = await db.select().from(companies).where(eq(companies.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getCompanyBySlug(slug: string): Promise<Company | undefined> {
+    const result = await db.select().from(companies).where(eq(companies.slug, slug)).limit(1);
+    return result[0];
+  }
+
+  async createCompany(company: InsertCompany): Promise<Company> {
+    const now = new Date().toISOString();
+    const result = await db.insert(companies).values({
+      ...company,
+      createdAt: now,
+      updatedAt: now,
+    } as any).returning();
+    return result[0];
+  }
+
+  async updateCompany(id: string, data: Partial<Company>): Promise<Company | undefined> {
+    const result = await db.update(companies)
+      .set({ ...data, updatedAt: new Date().toISOString() } as any)
+      .where(eq(companies.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async getCompanies(): Promise<Company[]> {
+    return await db.select().from(companies).orderBy(desc(companies.createdAt));
+  }
+
+  // ==================== COMPANY MEMBERS ====================
+  async getCompanyMembers(companyId: string): Promise<CompanyMember[]> {
+    return await db.select().from(companyMembers)
+      .where(eq(companyMembers.companyId, companyId));
+  }
+
+  async getCompanyMember(companyId: string, userId: string): Promise<CompanyMember | undefined> {
+    const result = await db.select().from(companyMembers)
+      .where(and(eq(companyMembers.companyId, companyId), eq(companyMembers.userId, userId)))
+      .limit(1);
+    return result[0];
+  }
+
+  async getCompanyMemberByEmail(companyId: string, email: string): Promise<CompanyMember | undefined> {
+    const result = await db.select().from(companyMembers)
+      .where(and(eq(companyMembers.companyId, companyId), eq(companyMembers.email, email)))
+      .limit(1);
+    return result[0];
+  }
+
+  async createCompanyMember(member: InsertCompanyMember): Promise<CompanyMember> {
+    const result = await db.insert(companyMembers).values(member as any).returning();
+    return result[0];
+  }
+
+  async updateCompanyMember(id: string, data: Partial<CompanyMember>): Promise<CompanyMember | undefined> {
+    const result = await db.update(companyMembers)
+      .set(data as any)
+      .where(eq(companyMembers.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async removeCompanyMember(id: string): Promise<boolean> {
+    const result = await db.delete(companyMembers).where(eq(companyMembers.id, id)).returning();
+    return result.length > 0;
+  }
+
+  async getUserCompanies(userId: string): Promise<CompanyMember[]> {
+    return await db.select().from(companyMembers)
+      .where(and(eq(companyMembers.userId, userId), eq(companyMembers.status, 'active')));
+  }
+
+  // ==================== COMPANY INVITATIONS ====================
+  async getCompanyInvitations(companyId: string): Promise<CompanyInvitation[]> {
+    return await db.select().from(companyInvitations)
+      .where(eq(companyInvitations.companyId, companyId))
+      .orderBy(desc(companyInvitations.createdAt));
+  }
+
+  async getCompanyInvitationByToken(token: string): Promise<CompanyInvitation | undefined> {
+    const result = await db.select().from(companyInvitations)
+      .where(eq(companyInvitations.token, token))
+      .limit(1);
+    return result[0];
+  }
+
+  async getCompanyInvitationByEmail(companyId: string, email: string): Promise<CompanyInvitation | undefined> {
+    const result = await db.select().from(companyInvitations)
+      .where(and(
+        eq(companyInvitations.companyId, companyId),
+        eq(companyInvitations.email, email),
+        eq(companyInvitations.status, 'pending')
+      ))
+      .limit(1);
+    return result[0];
+  }
+
+  async createCompanyInvitation(invitation: InsertCompanyInvitation): Promise<CompanyInvitation> {
+    const result = await db.insert(companyInvitations).values(invitation as any).returning();
+    return result[0];
+  }
+
+  async updateCompanyInvitation(id: string, data: Partial<CompanyInvitation>): Promise<CompanyInvitation | undefined> {
+    const result = await db.update(companyInvitations)
+      .set(data as any)
+      .where(eq(companyInvitations.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async revokeCompanyInvitation(id: string): Promise<boolean> {
+    const result = await db.update(companyInvitations)
+      .set({ status: 'revoked' } as any)
+      .where(eq(companyInvitations.id, id))
+      .returning();
     return result.length > 0;
   }
 }

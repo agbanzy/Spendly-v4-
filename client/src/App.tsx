@@ -41,6 +41,7 @@ import AdminPayouts from "@/pages/admin-payouts";
 import AdminExchangeRates from "@/pages/admin-exchange-rates";
 import AdminDatabase from "@/pages/admin-database";
 import AdminLogin from "@/pages/admin-login";
+import InvitePage from "@/pages/invite";
 
 function AuthLoading() {
   return (
@@ -166,9 +167,14 @@ function AppContent() {
   const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/terms", "/privacy", "/onboarding", "/admin-login"];
   const isPublicRoute = publicRoutes.includes(location);
   const isAdminRoute = location.startsWith("/admin");
+  const isInviteRoute = location.startsWith("/invite/");
 
   if (isLoading) {
     return <AuthLoading />;
+  }
+
+  if (isInviteRoute) {
+    return <InvitePage />;
   }
 
   if (isPublicRoute) {

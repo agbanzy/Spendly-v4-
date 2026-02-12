@@ -77,7 +77,67 @@ export const CardStatus = {
 } as const;
 export type CardStatus = typeof CardStatus[keyof typeof CardStatus];
 
+export const InvitationStatus = {
+  PENDING: 'pending',
+  ACCEPTED: 'accepted',
+  EXPIRED: 'expired',
+  REVOKED: 'revoked',
+} as const;
+export type InvitationStatus = typeof InvitationStatus[keyof typeof InvitationStatus];
+
+export const MembershipStatus = {
+  ACTIVE: 'active',
+  SUSPENDED: 'suspended',
+  REMOVED: 'removed',
+} as const;
+export type MembershipStatus = typeof MembershipStatus[keyof typeof MembershipStatus];
+
 // ==================== DATABASE TABLES ====================
+
+// Companies table
+export const companies = pgTable("companies", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  ownerId: text("owner_id"),
+  logo: text("logo"),
+  industry: text("industry"),
+  size: text("size"),
+  website: text("website"),
+  country: text("country").default('US'),
+  currency: text("currency").default('USD'),
+  status: text("status").notNull().default('active'),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+});
+
+// Company Members table - links users to companies with roles
+export const companyMembers = pgTable("company_members", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  companyId: text("company_id").notNull(),
+  userId: text("user_id"),
+  email: text("email").notNull(),
+  role: text("role").notNull().default('EMPLOYEE'),
+  status: text("status").notNull().default('active'),
+  invitedAt: text("invited_at").notNull().default(sql`now()`),
+  joinedAt: text("joined_at"),
+});
+
+// Company Invitations table - token-based invite system
+export const companyInvitations = pgTable("company_invitations", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  companyId: text("company_id").notNull(),
+  email: text("email").notNull(),
+  role: text("role").notNull().default('EMPLOYEE'),
+  department: text("department"),
+  token: text("token").notNull().unique(),
+  invitedBy: text("invited_by"),
+  invitedByName: text("invited_by_name"),
+  status: text("status").notNull().default('pending'),
+  expiresAt: text("expires_at").notNull(),
+  acceptedAt: text("accepted_at"),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+});
 
 // Users table
 export const users = pgTable("users", {
@@ -90,6 +150,7 @@ export const users = pgTable("users", {
   department: text("department").notNull().default('General'),
   avatar: text("avatar"),
   permissions: jsonb("permissions").$type<string[]>().default([]),
+  companyId: text("company_id"),
 });
 
 // Expenses table
@@ -103,6 +164,7 @@ export const expenses = pgTable("expenses", {
   status: text("status").notNull().default('PENDING'),
   user: text("user_name").notNull(),
   userId: text("user_id").notNull(),
+  companyId: text("company_id"),
   department: text("department").notNull().default('General'),
   note: text("note"),
   receiptUrl: text("receipt_url"),
@@ -138,6 +200,7 @@ export const bills = pgTable("bills", {
   currency: text("currency").notNull().default('USD'),
   logo: text("logo"),
   userId: varchar("user_id", { length: 36 }),
+  companyId: text("company_id"),
   recurring: boolean("recurring").default(false),
   frequency: text("frequency").default('monthly'),
   createdAt: timestamp("created_at").defaultNow(),
@@ -178,6 +241,7 @@ export const departments = pgTable("departments", {
   color: text("color").notNull().default('#6366f1'),
   memberCount: integer("member_count").notNull().default(0),
   status: text("status").notNull().default('Active'),
+  companyId: text("company_id"),
   createdAt: text("created_at").notNull(),
 });
 
@@ -191,6 +255,8 @@ export const teamMembers = pgTable("team_members", {
   departmentId: text("department_id"),
   avatar: text("avatar"),
   status: text("status").notNull().default('Active'),
+  companyId: text("company_id"),
+  userId: text("user_id"),
   joinedAt: text("joined_at").notNull(),
   permissions: jsonb("permissions").$type<string[]>().default([]),
 });
@@ -339,6 +405,7 @@ export const userProfiles = pgTable("user_profiles", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   firebaseUid: text("firebase_uid").notNull().unique(),
   email: text("email").notNull(),
+  companyId: text("company_id"),
   displayName: text("display_name"),
   photoUrl: text("photo_url"),
   phoneNumber: text("phone_number"),
@@ -498,6 +565,7 @@ export const rolePermissions = pgTable("role_permissions", {
 export const wallets = pgTable("wallets", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   userId: text("user_id").notNull(),
+  companyId: text("company_id"),
   type: text("type").notNull().default('personal'),
   currency: text("currency").notNull().default('USD'),
   balance: decimal("balance", { precision: 16, scale: 2 }).notNull().default('0'),
@@ -667,6 +735,9 @@ export const insertPayoutDestinationSchema = createInsertSchema(payoutDestinatio
 export const insertPayoutSchema = createInsertSchema(payouts).omit({ id: true });
 export const insertFundingSourceSchema = createInsertSchema(fundingSources).omit({ id: true });
 export const insertAdminSettingsSchema = createInsertSchema(adminSettings).omit({ id: true });
+export const insertCompanySchema = createInsertSchema(companies).omit({ id: true });
+export const insertCompanyMemberSchema = createInsertSchema(companyMembers).omit({ id: true });
+export const insertCompanyInvitationSchema = createInsertSchema(companyInvitations).omit({ id: true });
 
 // ==================== TYPES ====================
 
@@ -753,6 +824,15 @@ export type FundingSource = typeof fundingSources.$inferSelect;
 
 export type InsertAdminSettings = z.infer<typeof insertAdminSettingsSchema>;
 export type AdminSettings = typeof adminSettings.$inferSelect;
+
+export type InsertCompany = z.infer<typeof insertCompanySchema>;
+export type Company = typeof companies.$inferSelect;
+
+export type InsertCompanyMember = z.infer<typeof insertCompanyMemberSchema>;
+export type CompanyMember = typeof companyMembers.$inferSelect;
+
+export type InsertCompanyInvitation = z.infer<typeof insertCompanyInvitationSchema>;
+export type CompanyInvitation = typeof companyInvitations.$inferSelect;
 
 export type CompanyBalances = typeof companyBalances.$inferSelect;
 export type CompanySettings = typeof companySettings.$inferSelect;
