@@ -148,28 +148,28 @@ export default function AdminAuditLogs() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="glass card-hover">
+        <Card>
           <CardContent className="p-4">
             <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-1">Total Logs</p>
-            <p className="text-2xl font-black">{logs?.length || 0}</p>
+            <p className="text-2xl font-black" data-testid="text-total-logs">{logs?.length || 0}</p>
           </CardContent>
         </Card>
-        <Card className="glass card-hover">
+        <Card>
           <CardContent className="p-4">
-            <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">Creates</p>
-            <p className="text-2xl font-black text-emerald-600">{logs?.filter(l => l.action === 'CREATE').length || 0}</p>
+            <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">Financial</p>
+            <p className="text-2xl font-black text-emerald-600" data-testid="text-financial-logs">{logs?.filter(l => ['wallet_funding', 'wallet_withdrawal', 'transfer_initiated', 'payout_processed', 'bill_payment', 'utility_payment'].includes(l.action)).length || 0}</p>
           </CardContent>
         </Card>
-        <Card className="glass card-hover">
+        <Card>
           <CardContent className="p-4">
             <p className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest mb-1">Updates</p>
-            <p className="text-2xl font-black text-blue-600">{logs?.filter(l => l.action === 'UPDATE').length || 0}</p>
+            <p className="text-2xl font-black text-blue-600" data-testid="text-update-logs">{logs?.filter(l => l.action === 'UPDATE').length || 0}</p>
           </CardContent>
         </Card>
-        <Card className="glass card-hover">
+        <Card>
           <CardContent className="p-4">
-            <p className="text-xs font-bold text-red-600 dark:text-red-400 uppercase tracking-widest mb-1">Deletes</p>
-            <p className="text-2xl font-black text-red-600">{logs?.filter(l => l.action === 'DELETE').length || 0}</p>
+            <p className="text-xs font-bold text-purple-600 dark:text-purple-400 uppercase tracking-widest mb-1">Other</p>
+            <p className="text-2xl font-black text-purple-600" data-testid="text-other-logs">{logs?.filter(l => !['wallet_funding', 'wallet_withdrawal', 'transfer_initiated', 'payout_processed', 'bill_payment', 'utility_payment', 'UPDATE'].includes(l.action)).length || 0}</p>
           </CardContent>
         </Card>
       </div>

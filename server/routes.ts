@@ -46,6 +46,20 @@ const upload = multer({
   }
 });
 
+async function getAuditUserName(req: any): Promise<string> {
+  try {
+    const uid = req.user?.uid;
+    if (uid) {
+      const profile = await storage.getUserProfile(uid);
+      if (profile?.displayName) return profile.displayName;
+      if (profile?.email) return profile.email;
+    }
+    return req.user?.email || 'System';
+  } catch {
+    return req.user?.email || 'System';
+  }
+}
+
 const expenseSchema = z.object({
   merchant: z.string().min(1),
   amount: z.union([z.string(), z.number()]).transform(val => String(val)),
@@ -235,10 +249,11 @@ export async function registerRoutes(
       const updatedBalances = await storage.updateBalances({ local: String(newLocal) });
 
       try {
+        const auditName = await getAuditUserName(req);
         await storage.createAuditLog({
           action: 'wallet_funding',
           userId: (req as any).user?.uid || 'system',
-          userName: (req as any).user?.email || 'System',
+          userName: auditName,
           entityType: 'wallet',
           entityId: 'company-balance',
           details: { amount: parsedAmount, currency: 'USD', newBalance: newLocal },
@@ -285,10 +300,11 @@ export async function registerRoutes(
       const updatedBalances = await storage.updateBalances({ local: String(newLocal) });
 
       try {
+        const auditName = await getAuditUserName(req);
         await storage.createAuditLog({
           action: 'wallet_withdrawal',
           userId: (req as any).user?.uid || 'system',
-          userName: (req as any).user?.email || 'System',
+          userName: auditName,
           entityType: 'wallet',
           entityId: 'company-balance',
           details: { amount: parsedAmount, currency: 'USD', newBalance: newLocal },
@@ -620,10 +636,11 @@ export async function registerRoutes(
 
       if (result.data.status === 'Paid') {
         try {
+          const auditName = await getAuditUserName(req);
           await storage.createAuditLog({
             action: 'bill_payment',
             userId: (req as any).user?.uid || 'system',
-            userName: (req as any).user?.email || 'System',
+            userName: auditName,
             entityType: 'bill',
             entityId: req.params.id,
             details: { billName: bill.name, amount: bill.amount, provider: bill.provider, category: bill.category },
@@ -2175,6 +2192,22 @@ export async function registerRoutes(
   app.patch("/api/settings", async (req, res) => {
     try {
       const settings = await storage.updateSettings(req.body);
+      
+      try {
+        const auditName = await getAuditUserName(req);
+        await storage.createAuditLog({
+          action: 'UPDATE',
+          userId: (req as any).user?.uid || 'system',
+          userName: auditName,
+          entityType: 'settings',
+          entityId: 'company-settings',
+          details: { updatedFields: Object.keys(req.body) },
+          ipAddress: req.ip || '',
+          userAgent: req.headers['user-agent'] || '',
+          createdAt: new Date().toISOString(),
+        } as any);
+      } catch (e) { /* audit log failure should not block operation */ }
+      
       res.json(settings);
     } catch (error) {
       res.status(500).json({ error: "Failed to update settings" });
@@ -2481,10 +2514,11 @@ export async function registerRoutes(
       }
       
       try {
+        const auditName = await getAuditUserName(req);
         await storage.createAuditLog({
           action: 'transfer_initiated',
           userId: userId || 'system',
-          userName: (req as any).user?.email || 'System',
+          userName: auditName,
           entityType: 'transfer',
           entityId: providerRef,
           details: { amount, currency, reason, recipient: recipientDetails.accountName, countryCode },
@@ -2732,10 +2766,11 @@ export async function registerRoutes(
       });
 
       try {
+        const auditName = await getAuditUserName(req);
         await storage.createAuditLog({
           action: 'payout_processed',
           userId: (req as any).user?.uid || 'system',
-          userName: (req as any).user?.email || 'System',
+          userName: auditName,
           entityType: 'payout',
           entityId: transferResult?.reference || `PAY-${Date.now()}`,
           details: { amount, currency, reason, recipient: recipientDetails.accountName, countryCode },
@@ -2930,10 +2965,11 @@ export async function registerRoutes(
       const utilityRef = `UTL-${Date.now()}`;
 
       try {
+        const auditName = await getAuditUserName(req);
         await storage.createAuditLog({
           action: 'utility_payment',
           userId: effectiveUserId || 'system',
-          userName: (req as any).user?.email || 'System',
+          userName: auditName,
           entityType: 'utility',
           entityId: utilityRef,
           details: { type, provider, amount, reference, countryCode, paymentProvider },
@@ -3947,6 +3983,8 @@ export async function registerRoutes(
           preferredTimezone: profile.preferredTimezone,
           preferredDateFormat: profile.preferredDateFormat,
           darkMode: profile.darkMode,
+          twoFactorEnabled: profile.twoFactorEnabled,
+          transactionPinEnabled: profile.transactionPinEnabled,
           sessionTimeout: profile.sessionTimeout,
         }
       });
