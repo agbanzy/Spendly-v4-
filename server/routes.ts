@@ -1107,9 +1107,9 @@ export async function registerRoutes(
       if (account.userId) {
         const profile = await storage.getUserProfile(account.userId);
         const settings = await storage.getNotificationSettings(account.userId);
-        if (profile?.phone && settings?.transactionNotifications) {
+        if (profile?.phoneNumber && settings?.paymentNotifications) {
           notificationService.sendTransactionAlertSms({
-            phone: profile.phone,
+            phone: profile.phoneNumber,
             type: 'credit',
             amount,
             currency: 'USD',
@@ -1166,9 +1166,9 @@ export async function registerRoutes(
       if (account.userId) {
         const profile = await storage.getUserProfile(account.userId);
         const settings = await storage.getNotificationSettings(account.userId);
-        if (profile?.phone && settings?.transactionNotifications) {
+        if (profile?.phoneNumber && settings?.paymentNotifications) {
           notificationService.sendTransactionAlertSms({
-            phone: profile.phone,
+            phone: profile.phoneNumber,
             type: 'debit',
             amount,
             currency: 'USD',
