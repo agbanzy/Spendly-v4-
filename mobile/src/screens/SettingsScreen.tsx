@@ -8,6 +8,7 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../lib/auth-context';
 
 interface SettingsItemProps {
@@ -42,6 +43,7 @@ function SettingsItem({ icon, label, value, onPress, danger }: SettingsItemProps
 
 export default function SettingsScreen() {
   const { user, logout } = useAuth();
+  const navigation = useNavigation<any>();
 
   const handleLogout = () => {
     Alert.alert(
@@ -57,7 +59,7 @@ export default function SettingsScreen() {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Settings</Text>
+        <Text style={styles.title}>More</Text>
       </View>
 
       <View style={styles.profileCard}>
@@ -69,6 +71,63 @@ export default function SettingsScreen() {
         <View style={styles.profileInfo}>
           <Text style={styles.profileName}>{user?.displayName || 'User'}</Text>
           <Text style={styles.profileEmail}>{user?.email}</Text>
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Finance</Text>
+        <View style={styles.sectionContent}>
+          <SettingsItem
+            icon="swap-horizontal"
+            label="Transactions"
+            onPress={() => navigation.navigate('Transactions')}
+          />
+          <SettingsItem
+            icon="pie-chart"
+            label="Budget"
+            onPress={() => navigation.navigate('Budget')}
+          />
+          <SettingsItem
+            icon="card"
+            label="Cards"
+            onPress={() => navigation.navigate('Cards')}
+          />
+          <SettingsItem
+            icon="document-text"
+            label="Invoices"
+            onPress={() => navigation.navigate('Invoices')}
+          />
+          <SettingsItem
+            icon="bar-chart"
+            label="Analytics"
+            onPress={() => navigation.navigate('Analytics')}
+          />
+          <SettingsItem
+            icon="clipboard"
+            label="Reports"
+            onPress={() => navigation.navigate('Reports')}
+          />
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Business</Text>
+        <View style={styles.sectionContent}>
+          <SettingsItem
+            icon="people"
+            label="Team"
+            onPress={() => navigation.navigate('Team')}
+          />
+          <SettingsItem
+            icon="briefcase"
+            label="Vendors"
+            onPress={() => navigation.navigate('Vendors')}
+          />
+          <SettingsItem
+            icon="cash"
+            label="Payroll"
+            onPress={() => navigation.navigate('Payroll')}
+          />
         </View>
       </View>
 
@@ -123,11 +182,6 @@ export default function SettingsScreen() {
           <SettingsItem
             icon="help-circle-outline"
             label="Help Center"
-            onPress={() => {}}
-          />
-          <SettingsItem
-            icon="chatbubble-outline"
-            label="Contact Support"
             onPress={() => {}}
           />
           <SettingsItem

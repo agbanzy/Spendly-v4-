@@ -14,6 +14,14 @@ import CardsScreen from '../screens/CardsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import TransactionsScreen from '../screens/TransactionsScreen';
 import BudgetScreen from '../screens/BudgetScreen';
+import BillsScreen from '../screens/BillsScreen';
+import InvoicesScreen from '../screens/InvoicesScreen';
+import VendorsScreen from '../screens/VendorsScreen';
+import TeamScreen from '../screens/TeamScreen';
+import PayrollScreen from '../screens/PayrollScreen';
+import AnalyticsScreen from '../screens/AnalyticsScreen';
+import ReportsScreen from '../screens/ReportsScreen';
+import WalletScreen from '../screens/WalletScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -47,11 +55,11 @@ function MainTabs() {
         }}
       />
       <Tab.Screen
-        name="Transactions"
-        component={TransactionsScreen}
+        name="Wallet"
+        component={WalletScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="swap-horizontal" size={size} color={color} />
+            <Ionicons name="wallet" size={size} color={color} />
           ),
         }}
       />
@@ -65,17 +73,17 @@ function MainTabs() {
         }}
       />
       <Tab.Screen
-        name="Budget"
-        component={BudgetScreen}
+        name="Bills"
+        component={BillsScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="pie-chart" size={size} color={color} />
+            <Ionicons name="document-text" size={size} color={color} />
           ),
         }}
       />
       <Tab.Screen
         name="More"
-        component={SettingsScreen}
+        component={MoreStack}
         options={{
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="menu" size={size} color={color} />
@@ -83,6 +91,29 @@ function MainTabs() {
         }}
       />
     </Tab.Navigator>
+  );
+}
+
+function MoreStack() {
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: '#0F172A' },
+        headerTintColor: '#FFFFFF',
+        headerTitleStyle: { fontWeight: '600' },
+      }}
+    >
+      <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Transactions" component={TransactionsScreen} />
+      <Stack.Screen name="Budget" component={BudgetScreen} />
+      <Stack.Screen name="Cards" component={CardsScreen} />
+      <Stack.Screen name="Invoices" component={InvoicesScreen} />
+      <Stack.Screen name="Vendors" component={VendorsScreen} />
+      <Stack.Screen name="Team" component={TeamScreen} />
+      <Stack.Screen name="Payroll" component={PayrollScreen} />
+      <Stack.Screen name="Analytics" component={AnalyticsScreen} />
+      <Stack.Screen name="Reports" component={ReportsScreen} />
+    </Stack.Navigator>
   );
 }
 

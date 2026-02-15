@@ -331,11 +331,10 @@ export default function Dashboard() {
         throw new Error("User profile not found. Please complete onboarding first.");
       }
 
-      if (!userProfile.phoneNumber && !userProfile.phone) {
+      if (!userProfile.phoneNumber) {
         throw new Error("Phone number is required. Please update your phone number in Settings before generating a virtual account.");
       }
       
-      // Parse name from displayName
       const displayName = userProfile.displayName || user.email?.split('@')[0] || "User";
       const nameParts = displayName.split(' ');
       const firstName = nameParts[0] || "User";
@@ -347,7 +346,7 @@ export default function Dashboard() {
         firstName,
         lastName,
         countryCode: userProfile.country || countryCode,
-        phone: userProfile.phoneNumber || userProfile.phone || "",
+        phone: userProfile.phoneNumber || "",
       });
       
       return res.json();

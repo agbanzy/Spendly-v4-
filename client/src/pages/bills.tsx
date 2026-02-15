@@ -292,14 +292,20 @@ export default function Bills() {
 
   const payBillMutation = useMutation({
     mutationFn: async (id: string) => {
+      if (userWallet?.id) {
+        return apiRequest("POST", `/api/bills/${id}/pay`, { walletId: userWallet.id });
+      }
       return apiRequest("PATCH", `/api/bills/${id}`, { status: "Paid" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/bills"] });
-      toast({ title: "Bill marked as paid" });
+      queryClient.invalidateQueries({ queryKey: ["/api/wallets"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/balances"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+      toast({ title: "Bill paid successfully", description: "Payment has been deducted from your wallet." });
     },
-    onError: () => {
-      toast({ title: "Failed to pay bill", variant: "destructive" });
+    onError: (error: any) => {
+      toast({ title: "Failed to pay bill", description: error.message, variant: "destructive" });
     },
   });
 

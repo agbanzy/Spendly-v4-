@@ -157,12 +157,13 @@ export default function Team() {
     mutationFn: async (data: { name: string; email: string; role: string; department?: string }) => {
       let companyId = currentCompany?.id;
       if (!companyId) {
-        const newCompany = await apiRequest("POST", "/api/companies", {
+        const res = await apiRequest("POST", "/api/companies", {
           name: settings?.companyName || "My Company",
           currency: settings?.currency || "USD",
-          country: settings?.country || "US",
+          country: settings?.countryCode || "US",
         });
-        companyId = (newCompany as any).id;
+        const newCompany = await res.json();
+        companyId = newCompany.id;
         queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
       }
       return apiRequest("POST", `/api/companies/${companyId}/invitations`, data);
@@ -193,7 +194,8 @@ export default function Team() {
 
   const createMemberMutation = useMutation({
     mutationFn: async (data: typeof memberForm) => {
-      return apiRequest("POST", "/api/team", data);
+      const res = await apiRequest("POST", "/api/team", data);
+      return res.json();
     },
     onSuccess: (data: { inviteEmailSent?: boolean; inviteEmailError?: string }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/team"] });
