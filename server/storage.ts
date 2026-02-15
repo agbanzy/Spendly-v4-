@@ -8,6 +8,7 @@ import {
   departments, auditLogs, organizationSettings, systemSettings, rolePermissions,
   wallets, walletTransactions, exchangeRates, exchangeRateSettings, payoutDestinations, payouts, fundingSources, adminSettings,
   companies, companyMembers, companyInvitations,
+  analyticsSnapshots, businessInsights,
   type User, type InsertUser, type Expense, type Transaction, type Bill, 
   type Budget, type VirtualCard, type TeamMember, type PayrollEntry, 
   type Invoice, type Vendor, type Report, type CardTransaction, 
@@ -23,6 +24,8 @@ import {
   type AdminSettings, type InsertAdminSettings,
   type Company, type InsertCompany, type CompanyMember, type InsertCompanyMember,
   type CompanyInvitation, type InsertCompanyInvitation,
+  type AnalyticsSnapshot, type InsertAnalyticsSnapshot,
+  type BusinessInsight, type InsertBusinessInsight,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -238,6 +241,15 @@ export interface IStorage {
   createCompanyInvitation(invitation: InsertCompanyInvitation): Promise<CompanyInvitation>;
   updateCompanyInvitation(id: string, data: Partial<CompanyInvitation>): Promise<CompanyInvitation | undefined>;
   revokeCompanyInvitation(id: string): Promise<boolean>;
+
+  // Analytics Snapshots
+  getAnalyticsSnapshots(periodType?: string): Promise<AnalyticsSnapshot[]>;
+  createAnalyticsSnapshot(snapshot: InsertAnalyticsSnapshot): Promise<AnalyticsSnapshot>;
+
+  // Business Insights
+  getBusinessInsights(category?: string): Promise<BusinessInsight[]>;
+  createBusinessInsight(insight: InsertBusinessInsight): Promise<BusinessInsight>;
+  clearBusinessInsights(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1458,6 +1470,41 @@ export class DatabaseStorage implements IStorage {
       .where(eq(companyInvitations.id, id))
       .returning();
     return result.length > 0;
+  }
+
+  // ==================== ANALYTICS ====================
+  async getAnalyticsSnapshots(periodType?: string): Promise<AnalyticsSnapshot[]> {
+    if (periodType) {
+      return db.select().from(analyticsSnapshots)
+        .where(eq(analyticsSnapshots.periodType, periodType))
+        .orderBy(desc(analyticsSnapshots.periodStart));
+    }
+    return db.select().from(analyticsSnapshots).orderBy(desc(analyticsSnapshots.periodStart));
+  }
+
+  async createAnalyticsSnapshot(snapshot: InsertAnalyticsSnapshot): Promise<AnalyticsSnapshot> {
+    const result = await db.insert(analyticsSnapshots).values(snapshot as any).returning();
+    return result[0];
+  }
+
+  async getBusinessInsights(category?: string): Promise<BusinessInsight[]> {
+    if (category) {
+      return db.select().from(businessInsights)
+        .where(and(eq(businessInsights.category, category), eq(businessInsights.isActive, true)))
+        .orderBy(desc(businessInsights.createdAt));
+    }
+    return db.select().from(businessInsights)
+      .where(eq(businessInsights.isActive, true))
+      .orderBy(desc(businessInsights.createdAt));
+  }
+
+  async createBusinessInsight(insight: InsertBusinessInsight): Promise<BusinessInsight> {
+    const result = await db.insert(businessInsights).values(insight as any).returning();
+    return result[0];
+  }
+
+  async clearBusinessInsights(): Promise<void> {
+    await db.update(businessInsights).set({ isActive: false } as any);
   }
 }
 

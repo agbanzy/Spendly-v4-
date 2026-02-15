@@ -938,6 +938,62 @@ export type NotificationSettings = typeof notificationSettings.$inferSelect;
 export type InsertPushToken = z.infer<typeof insertPushTokenSchema>;
 export type PushToken = typeof pushTokens.$inferSelect;
 
+// Analytics Snapshots table - persisted daily/monthly aggregated metrics
+export const analyticsSnapshots = pgTable("analytics_snapshots", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  periodType: text("period_type").notNull(), // 'daily', 'weekly', 'monthly'
+  periodStart: text("period_start").notNull(),
+  periodEnd: text("period_end").notNull(),
+  currency: text("currency").notNull().default('USD'),
+  totalRevenue: decimal("total_revenue", { precision: 14, scale: 2 }).notNull().default('0'),
+  totalExpenses: decimal("total_expenses", { precision: 14, scale: 2 }).notNull().default('0'),
+  totalPayroll: decimal("total_payroll", { precision: 14, scale: 2 }).notNull().default('0'),
+  totalBillsPaid: decimal("total_bills_paid", { precision: 14, scale: 2 }).notNull().default('0'),
+  totalInvoicesIssued: decimal("total_invoices_issued", { precision: 14, scale: 2 }).notNull().default('0'),
+  totalInvoicesPaid: decimal("total_invoices_paid", { precision: 14, scale: 2 }).notNull().default('0'),
+  grossProfit: decimal("gross_profit", { precision: 14, scale: 2 }).notNull().default('0'),
+  profitMargin: decimal("profit_margin", { precision: 6, scale: 2 }).notNull().default('0'),
+  netCashFlow: decimal("net_cash_flow", { precision: 14, scale: 2 }).notNull().default('0'),
+  expenseCount: integer("expense_count").notNull().default(0),
+  transactionCount: integer("transaction_count").notNull().default(0),
+  topCategory: text("top_category"),
+  topVendor: text("top_vendor"),
+  categoryBreakdown: jsonb("category_breakdown").$type<Record<string, number>>().default({}),
+  departmentBreakdown: jsonb("department_breakdown").$type<Record<string, number>>().default({}),
+  companyId: text("company_id"),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+});
+
+// Business Insights table - generated insights and recommendations
+export const businessInsights = pgTable("business_insights", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  summary: text("summary").notNull(),
+  category: text("category").notNull(), // 'cash-flow', 'vendor', 'payroll', 'budget', 'risk', 'growth', 'savings'
+  severity: text("severity").notNull().default('info'), // 'info', 'warning', 'critical', 'success'
+  source: text("source").notNull().default('system'), // 'system', 'ai'
+  recommendation: text("recommendation"),
+  metric: text("metric"),
+  metricValue: decimal("metric_value", { precision: 14, scale: 2 }),
+  metricChange: decimal("metric_change", { precision: 8, scale: 2 }),
+  relatedEntityType: text("related_entity_type"),
+  relatedEntityId: text("related_entity_id"),
+  periodStart: text("period_start"),
+  periodEnd: text("period_end"),
+  companyId: text("company_id"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+});
+
+export const insertAnalyticsSnapshotSchema = createInsertSchema(analyticsSnapshots).omit({ id: true });
+export const insertBusinessInsightSchema = createInsertSchema(businessInsights).omit({ id: true });
+
+export type InsertAnalyticsSnapshot = z.infer<typeof insertAnalyticsSnapshotSchema>;
+export type AnalyticsSnapshot = typeof analyticsSnapshots.$inferSelect;
+
+export type InsertBusinessInsight = z.infer<typeof insertBusinessInsightSchema>;
+export type BusinessInsight = typeof businessInsights.$inferSelect;
+
 // Category icons mapping
 export const categoryIcons: Record<string, string> = {
   'Software': 'code',
