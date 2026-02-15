@@ -12,33 +12,51 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 
-interface Wallet {
-  id: number;
+interface Balance {
+  id: string;
+  local: string;
+  usd: string;
+  escrow: string;
+  localCurrency: string;
+}
+
+interface VirtualAccount {
+  id: string;
   name: string;
+  accountNumber: string;
+  bankName: string;
+  bankCode: string;
   currency: string;
-  balance: number;
+  balance: string;
+  type: string;
   status: string;
+  createdAt: string;
 }
 
 interface Transaction {
-  id: number;
+  id: string;
   type: string;
   description: string;
-  amount: number;
-  currency: string;
+  amount: string;
+  fee: string;
   status: string;
   date: string;
-  category: string;
+  currency: string;
 }
 
 export default function WalletScreen() {
-  const { data: wallets, isLoading: walletsLoading, refetch: refetchWallets } = useQuery({
-    queryKey: ['wallets'],
-    queryFn: () => api.get<Wallet[]>('/api/wallets'),
+  const { data: balance, isLoading: balanceLoading, refetch: refetchBalance } = useQuery({
+    queryKey: ['/api/balances'],
+    queryFn: () => api.get<Balance>('/api/balances'),
+  });
+
+  const { data: virtualAccounts, isLoading: virtualAccountsLoading, refetch: refetchVirtualAccounts } = useQuery({
+    queryKey: ['/api/virtual-accounts'],
+    queryFn: () => api.get<VirtualAccount[]>('/api/virtual-accounts'),
   });
 
   const { data: transactions, isLoading: transactionsLoading, refetch: refetchTransactions } = useQuery({
-    queryKey: ['wallet-transactions'],
+    queryKey: ['/api/transactions'],
     queryFn: () => api.get<Transaction[]>('/api/transactions'),
   });
 
@@ -46,55 +64,44 @@ export default function WalletScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([refetchWallets(), refetchTransactions()]);
+    await Promise.all([refetchBalance(), refetchVirtualAccounts(), refetchTransactions()]);
     setRefreshing(false);
   };
 
-  const formatCurrency = (amount: number, currency: string = 'USD') => {
+  const formatCurrency = (amount: string | number, currency: string = 'USD') => {
+    const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency,
-    }).format(amount);
+    }).format(numAmount);
   };
 
-  const totalBalance = wallets?.reduce((sum, w) => sum + w.balance, 0) || 0;
-  const primaryWallet = wallets?.[0];
+  const maskAccountNumber = (accountNumber: string): string => {
+    if (accountNumber.length <= 4) return accountNumber;
+    const lastFour = accountNumber.slice(-4);
+    return `****${lastFour}`;
+  };
 
   const getTransactionIcon = (type: string): keyof typeof Ionicons.glyphMap => {
-    switch (type.toLowerCase()) {
-      case 'credit':
-      case 'deposit':
-      case 'fund':
-        return 'arrow-down';
-      case 'debit':
-      case 'withdrawal':
-      case 'withdraw':
-        return 'arrow-up';
-      case 'transfer':
-      case 'send':
-        return 'swap-horizontal';
-      default:
-        return 'ellipse-outline';
-    }
+    const lowerType = type.toLowerCase();
+    if (lowerType.includes('deposit')) return 'arrow-down';
+    if (lowerType.includes('payout') || lowerType.includes('bill')) return 'arrow-up';
+    return 'swap-horizontal';
   };
 
   const getTransactionColor = (type: string): string => {
-    switch (type.toLowerCase()) {
-      case 'credit':
-      case 'deposit':
-      case 'fund':
-        return '#34D399';
-      case 'debit':
-      case 'withdrawal':
-      case 'withdraw':
-        return '#F87171';
-      default:
-        return '#818CF8';
-    }
+    const lowerType = type.toLowerCase();
+    if (lowerType.includes('deposit')) return '#34D399';
+    if (lowerType.includes('payout') || lowerType.includes('bill')) return '#F87171';
+    return '#818CF8';
   };
 
   const getStatusStyle = (status: string) => {
     switch (status.toLowerCase()) {
+      case 'active':
+        return styles.statusActive;
+      case 'inactive':
+        return styles.statusInactive;
       case 'completed':
       case 'success':
         return styles.statusCompleted;
@@ -107,7 +114,7 @@ export default function WalletScreen() {
     }
   };
 
-  const isLoading = walletsLoading || transactionsLoading;
+  const isLoading = balanceLoading || virtualAccountsLoading || transactionsLoading;
 
   if (isLoading) {
     return (
@@ -116,6 +123,11 @@ export default function WalletScreen() {
       </View>
     );
   }
+
+  const localBalance = balance ? parseFloat(balance.local) : 0;
+  const usdBalance = balance ? parseFloat(balance.usd) : 0;
+  const escrowBalance = balance ? parseFloat(balance.escrow) : 0;
+  const localCurrency = balance?.localCurrency || 'USD';
 
   return (
     <ScrollView
@@ -130,21 +142,27 @@ export default function WalletScreen() {
         <Text style={styles.title}>Wallet</Text>
       </View>
 
-      <View style={styles.walletCard}>
-        <Text style={styles.walletLabel}>Available Balance</Text>
-        <Text style={styles.walletBalance} testID="text-wallet-balance">
-          {formatCurrency(totalBalance, primaryWallet?.currency)}
+      <View style={styles.mainBalanceCard}>
+        <Text style={styles.balanceLabel}>Total Available</Text>
+        <Text style={styles.mainBalance} testID="text-main-balance">
+          {formatCurrency(localBalance, localCurrency)}
         </Text>
-        {wallets && wallets.length > 1 && (
-          <View style={styles.walletRow}>
-            {wallets.slice(0, 3).map((wallet, index) => (
-              <View key={index} style={styles.walletItem}>
-                <Text style={styles.walletCurrency}>{wallet.currency}</Text>
-                <Text style={styles.walletAmount}>
-                  {formatCurrency(wallet.balance, wallet.currency)}
-                </Text>
+        <Text style={styles.currencyLabel}>{localCurrency}</Text>
+
+        {(usdBalance > 0 || escrowBalance > 0) && (
+          <View style={styles.subBalancesContainer}>
+            {usdBalance > 0 && (
+              <View style={styles.subBalance}>
+                <Text style={styles.subBalanceLabel}>USD</Text>
+                <Text style={styles.subBalanceAmount}>{formatCurrency(usdBalance, 'USD')}</Text>
               </View>
-            ))}
+            )}
+            {escrowBalance > 0 && (
+              <View style={styles.subBalance}>
+                <Text style={styles.subBalanceLabel}>Escrow</Text>
+                <Text style={styles.subBalanceAmount}>{formatCurrency(escrowBalance, localCurrency)}</Text>
+              </View>
+            )}
           </View>
         )}
       </View>
@@ -170,44 +188,82 @@ export default function WalletScreen() {
         </TouchableOpacity>
       </View>
 
+      {virtualAccounts && virtualAccounts.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Virtual Accounts</Text>
+          {virtualAccounts.map((account) => (
+            <TouchableOpacity
+              key={account.id}
+              style={styles.virtualAccountCard}
+              testID={`virtual-account-${account.id}`}
+            >
+              <View style={styles.accountIconContainer}>
+                <Ionicons name="card" size={24} color="#818CF8" />
+              </View>
+              <View style={styles.accountDetailsLeft}>
+                <Text style={styles.accountName}>{account.name}</Text>
+                <Text style={styles.accountNumber}>{maskAccountNumber(account.accountNumber)}</Text>
+                <Text style={styles.accountBank}>{account.bankName}</Text>
+              </View>
+              <View style={styles.accountDetailsRight}>
+                <Text style={styles.accountBalance} testID={`account-balance-${account.id}`}>
+                  {formatCurrency(account.balance, account.currency)}
+                </Text>
+                <View style={[styles.accountStatusBadge, getStatusStyle(account.status)]}>
+                  <Text style={styles.accountStatusText}>{account.status}</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {(!virtualAccounts || virtualAccounts.length === 0) && (
+        <View style={styles.section}>
+          <View style={styles.emptyContainer} testID="empty-virtual-accounts">
+            <Ionicons name="card-outline" size={48} color="#334155" />
+            <Text style={styles.emptyText}>No virtual accounts</Text>
+            <Text style={styles.emptySubtext}>Create a virtual account to get started</Text>
+          </View>
+        </View>
+      )}
+
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Recent Transactions</Text>
-          <TouchableOpacity testID="link-view-all-wallet-transactions">
+          <TouchableOpacity testID="link-view-all-transactions">
             <Text style={styles.viewAll}>View All</Text>
           </TouchableOpacity>
         </View>
 
-        {transactions?.slice(0, 10).map((tx) => (
-          <TouchableOpacity key={tx.id} style={styles.txItem} testID={`wallet-tx-${tx.id}`}>
-            <View style={[styles.txIcon, { backgroundColor: getTransactionColor(tx.type) + '20' }]}>
-              <Ionicons
-                name={getTransactionIcon(tx.type)}
-                size={18}
-                color={getTransactionColor(tx.type)}
-              />
-            </View>
-            <View style={styles.txDetails}>
-              <Text style={styles.txDescription}>{tx.description}</Text>
-              <Text style={styles.txType}>{tx.type}</Text>
-            </View>
-            <View style={styles.txRight}>
-              <Text style={[styles.txAmount, { color: getTransactionColor(tx.type) }]}>
-                {tx.type === 'credit' || tx.type === 'deposit' || tx.type === 'fund'
-                  ? '+'
-                  : '-'}
-                {formatCurrency(Math.abs(tx.amount))}
-              </Text>
-              <View style={[styles.txStatusBadge, getStatusStyle(tx.status)]}>
-                <Text style={styles.txStatusText}>{tx.status}</Text>
+        {transactions && transactions.length > 0 ? (
+          transactions.slice(0, 10).map((tx) => (
+            <TouchableOpacity key={tx.id} style={styles.txItem} testID={`transaction-${tx.id}`}>
+              <View style={[styles.txIcon, { backgroundColor: getTransactionColor(tx.type) + '20' }]}>
+                <Ionicons
+                  name={getTransactionIcon(tx.type)}
+                  size={18}
+                  color={getTransactionColor(tx.type)}
+                />
               </View>
-              <Text style={styles.txDate}>{new Date(tx.date).toLocaleDateString()}</Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-
-        {(!transactions || transactions.length === 0) && (
-          <View style={styles.emptyContainer} testID="empty-wallet-transactions">
+              <View style={styles.txDetails}>
+                <Text style={styles.txDescription}>{tx.description}</Text>
+                <Text style={styles.txType}>{tx.type}</Text>
+              </View>
+              <View style={styles.txRight}>
+                <Text style={[styles.txAmount, { color: getTransactionColor(tx.type) }]}>
+                  {getTransactionColor(tx.type) === '#34D399' ? '+' : '-'}
+                  {formatCurrency(Math.abs(parseFloat(tx.amount)), tx.currency)}
+                </Text>
+                <View style={[styles.txStatusBadge, getStatusStyle(tx.status)]}>
+                  <Text style={styles.txStatusText}>{tx.status}</Text>
+                </View>
+                <Text style={styles.txDate}>{new Date(tx.date).toLocaleDateString()}</Text>
+              </View>
+            </TouchableOpacity>
+          ))
+        ) : (
+          <View style={styles.emptyContainer} testID="empty-transactions">
             <Ionicons name="wallet-outline" size={48} color="#334155" />
             <Text style={styles.emptyText}>No transactions yet</Text>
             <Text style={styles.emptySubtext}>Fund your wallet to get started</Text>
@@ -244,7 +300,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     marginTop: 4,
   },
-  walletCard: {
+  mainBalanceCard: {
     backgroundColor: '#1E293B',
     marginHorizontal: 20,
     borderRadius: 16,
@@ -253,32 +309,41 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#334155',
   },
-  walletLabel: {
+  balanceLabel: {
     fontSize: 14,
     color: '#94A3B8',
   },
-  walletBalance: {
-    fontSize: 36,
+  mainBalance: {
+    fontSize: 40,
     fontWeight: 'bold',
     color: '#FFFFFF',
     marginTop: 8,
   },
-  walletRow: {
-    flexDirection: 'row',
-    marginTop: 20,
-    gap: 16,
-  },
-  walletItem: {
-    flex: 1,
-  },
-  walletCurrency: {
+  currencyLabel: {
     fontSize: 12,
-    color: '#64748B',
+    color: '#818CF8',
+    marginTop: 4,
   },
-  walletAmount: {
-    fontSize: 14,
+  subBalancesContainer: {
+    flexDirection: 'row',
+    marginTop: 16,
+    gap: 12,
+  },
+  subBalance: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    padding: 12,
+  },
+  subBalanceLabel: {
+    fontSize: 12,
+    color: '#94A3B8',
+  },
+  subBalanceAmount: {
+    fontSize: 16,
+    fontWeight: '600',
     color: '#E2E8F0',
-    marginTop: 2,
+    marginTop: 4,
   },
   quickActions: {
     flexDirection: 'row',
@@ -324,6 +389,79 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#818CF8',
   },
+  virtualAccountCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E293B',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  accountIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#0F172A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  accountDetailsLeft: {
+    flex: 1,
+  },
+  accountName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  accountNumber: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginTop: 2,
+    fontFamily: 'monospace',
+  },
+  accountBank: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  accountDetailsRight: {
+    alignItems: 'flex-end',
+  },
+  accountBalance: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  accountStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginTop: 6,
+  },
+  accountStatusText: {
+    fontSize: 10,
+    color: '#FFFFFF',
+    textTransform: 'capitalize',
+    fontWeight: '500',
+  },
+  statusActive: {
+    backgroundColor: '#065F46',
+  },
+  statusInactive: {
+    backgroundColor: '#4B5563',
+  },
+  statusCompleted: {
+    backgroundColor: '#065F46',
+  },
+  statusPending: {
+    backgroundColor: '#92400E',
+  },
+  statusFailed: {
+    backgroundColor: '#991B1B',
+  },
   txItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -363,18 +501,9 @@ const styles = StyleSheet.create({
   },
   txStatusBadge: {
     paddingHorizontal: 6,
-    paddingVertical: 1,
+    paddingVertical: 2,
     borderRadius: 4,
     marginTop: 4,
-  },
-  statusCompleted: {
-    backgroundColor: '#065F46',
-  },
-  statusPending: {
-    backgroundColor: '#92400E',
-  },
-  statusFailed: {
-    backgroundColor: '#991B1B',
   },
   txStatusText: {
     fontSize: 9,

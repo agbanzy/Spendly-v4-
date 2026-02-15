@@ -35,8 +35,8 @@ Spendly is a comprehensive financial operating system for high-growth teams, off
 - **Multi-Currency Support**: Virtual cards and exchange rates support USD, EUR, GBP, NGN, GHS, KES, ZAR. Live market rates from `exchangerate-api.com` with admin-configurable buy/sell markups.
 - **Notifications**: Comprehensive email notification system (8 templates) via AWS SES and SMS via AWS SNS, triggered by user actions (signup, payout, invoice, payroll, login security).
 - **Organization Settings**: Customizable company profile, currency, timezone, fiscal year, branding (logo, colors, tagline), and invoice settings.
-- **Analytics & Reporting**: Real-time charts (recharts) and a CRUD API for generating and downloading financial reports (JSON export).
-- **Financial Health Score & AI Insights**: Dynamic calculation based on spending patterns and context-aware recommendations.
+- **Analytics & Reporting**: Server-side analytics with 8 API endpoints (KPIs, cash flow, vendor performance, payroll summary, insights, snapshots, stored-insights, legacy summary). 6-tab web UI (Overview, Cash Flow, Spending, Vendors, Payroll, Insights) with recharts visualizations. Mobile analytics screen with KPI cards, cash flow trend bars, and insight cards. DB tables: `analyticsSnapshots`, `businessInsights`.
+- **Financial Health Score & AI Insights**: Dynamic calculation of 30+ KPIs including profit margin, burn rate, runway months, expense growth rate, budget utilization, payroll ratios. Context-aware recommendations with severity-based prioritization (critical/warning/info/success).
 
 ### Core Features
 - **Dashboard**: Financial overview, balance cards, AI insights, recent activity.
@@ -45,7 +45,7 @@ Spendly is a comprehensive financial operating system for high-growth teams, off
 - **Bills**: Recurring bill management with utility payments (airtime, data, electricity, cable, internet). Country-specific validation for phone numbers, meter numbers, and smartcard numbers. Wallet balance verification before payment. Supports Africa (NG, KE, GH, ZA), US, GB, and EU regions with provider auto-selection based on currency. Enhanced bill form validation (name, provider, amount, due date, category) with server-side validation matching frontend rules. Bills table includes userId, recurring, frequency, createdAt, updatedAt fields.
 - **Budget**: Category-based budget tracking.
 - **Cards**: Virtual card management with multi-currency support.
-- **Analytics**: Spending trends, charts, category breakdown.
+- **Analytics**: 6-tab analytics (Overview, Cash Flow, Spending, Vendors, Payroll, Insights) with server-driven KPIs, charts, and business insights.
 - **Reports**: Generate and download financial reports.
 - **Payroll**: Employee salary management, batch processing, payslips.
 - **Invoices**: Create and manage client invoices.
