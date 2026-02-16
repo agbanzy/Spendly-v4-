@@ -18,6 +18,9 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
+  const searchParams = new URLSearchParams(window.location.search);
+  const inviteToken = searchParams.get("invite");
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -38,7 +41,11 @@ export default function LoginPage() {
         title: "Welcome back!",
         description: "You have been logged in successfully."
       });
-      setLocation("/dashboard");
+      if (inviteToken) {
+        setLocation(`/invite/${inviteToken}`);
+      } else {
+        setLocation("/dashboard");
+      }
     } catch (error: any) {
       let errorMessage = "Login failed. Please try again.";
       if (error?.code === "auth/user-not-found") {
@@ -165,7 +172,7 @@ export default function LoginPage() {
 
               <p className="text-center text-sm text-muted-foreground mt-6">
                 Don't have an account?{" "}
-                <Link href="/signup">
+                <Link href={inviteToken ? `/signup?invite=${inviteToken}` : "/signup"}>
                   <span className="text-indigo-600 hover:text-indigo-700 font-medium cursor-pointer" data-testid="link-signup">
                     Sign up
                   </span>

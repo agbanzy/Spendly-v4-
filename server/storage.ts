@@ -241,6 +241,14 @@ export interface IStorage {
   createCompanyInvitation(invitation: InsertCompanyInvitation): Promise<CompanyInvitation>;
   updateCompanyInvitation(id: string, data: Partial<CompanyInvitation>): Promise<CompanyInvitation | undefined>;
   revokeCompanyInvitation(id: string): Promise<boolean>;
+  acceptInvitationTransaction(params: {
+    invitationId: string;
+    companyId: string;
+    userId: string;
+    email: string;
+    role: string;
+    createdAt: string;
+  }): Promise<{ companyName?: string; walletId?: string }>;
 
   // Analytics Snapshots
   getAnalyticsSnapshots(periodType?: string): Promise<AnalyticsSnapshot[]>;
@@ -1470,6 +1478,91 @@ export class DatabaseStorage implements IStorage {
       .where(eq(companyInvitations.id, id))
       .returning();
     return result.length > 0;
+  }
+
+  async acceptInvitationTransaction(params: {
+    invitationId: string;
+    companyId: string;
+    userId: string;
+    email: string;
+    role: string;
+    createdAt: string;
+  }): Promise<{ companyName?: string; walletId?: string }> {
+    return await db.transaction(async (tx) => {
+      await tx.update(companyInvitations)
+        .set({ status: 'accepted', acceptedAt: new Date().toISOString() } as any)
+        .where(eq(companyInvitations.id, params.invitationId));
+
+      const existingMember = await tx.select().from(companyMembers)
+        .where(and(eq(companyMembers.companyId, params.companyId), eq(companyMembers.userId, params.userId)))
+        .limit(1);
+
+      if (existingMember.length === 0) {
+        await tx.insert(companyMembers).values({
+          companyId: params.companyId,
+          userId: params.userId,
+          email: params.email,
+          role: params.role,
+          status: 'active',
+          invitedAt: params.createdAt,
+          joinedAt: new Date().toISOString(),
+        } as any);
+      }
+
+      const teamMemberResult = await tx.select().from(teamMembers)
+        .where(eq(teamMembers.email, params.email))
+        .limit(1);
+
+      if (teamMemberResult.length > 0) {
+        await tx.update(teamMembers)
+          .set({ status: 'Active', userId: params.userId, companyId: params.companyId } as any)
+          .where(eq(teamMembers.id, teamMemberResult[0].id));
+      }
+
+      await tx.update(userProfiles)
+        .set({ companyId: params.companyId } as any)
+        .where(eq(userProfiles.userId, params.userId));
+
+      const existingWallet = await tx.select().from(wallets)
+        .where(eq(wallets.userId, params.userId))
+        .limit(1);
+
+      let walletId: string | undefined;
+
+      if (existingWallet.length === 0) {
+        const companyResult = await tx.select().from(companies)
+          .where(eq(companies.id, params.companyId))
+          .limit(1);
+        const company = companyResult[0];
+        const newWallet = await tx.insert(wallets).values({
+          userId: params.userId,
+          companyId: params.companyId,
+          type: 'personal',
+          currency: company?.currency || 'USD',
+          balance: '0',
+          availableBalance: '0',
+          pendingBalance: '0',
+          status: 'active',
+        } as any).returning();
+        walletId = newWallet[0]?.id;
+      } else if (!existingWallet[0].companyId) {
+        await tx.update(wallets)
+          .set({ companyId: params.companyId } as any)
+          .where(eq(wallets.id, existingWallet[0].id));
+        walletId = existingWallet[0].id;
+      } else {
+        walletId = existingWallet[0].id;
+      }
+
+      const companyResult = await tx.select().from(companies)
+        .where(eq(companies.id, params.companyId))
+        .limit(1);
+
+      return {
+        companyName: companyResult[0]?.name,
+        walletId,
+      };
+    });
   }
 
   // ==================== ANALYTICS ====================

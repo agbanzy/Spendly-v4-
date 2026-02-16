@@ -1403,7 +1403,11 @@ export async function registerRoutes(
 
       const existingInvite = await storage.getCompanyInvitationByEmail(companyId, email);
       if (existingInvite) {
-        return res.status(400).json({ error: "An invitation has already been sent to this email" });
+        if (new Date(existingInvite.expiresAt) < new Date()) {
+          await storage.updateCompanyInvitation(existingInvite.id, { status: 'expired' });
+        } else {
+          return res.status(400).json({ error: "An invitation has already been sent to this email" });
+        }
       }
 
       const crypto = await import('crypto');
@@ -1524,60 +1528,21 @@ export async function registerRoutes(
         return res.status(403).json({ error: "This invitation was sent to a different email address" });
       }
 
-      await storage.updateCompanyInvitation(invitation.id, {
-        status: 'accepted',
-        acceptedAt: new Date().toISOString(),
+      const result = await storage.acceptInvitationTransaction({
+        invitationId: invitation.id,
+        companyId: invitation.companyId,
+        userId,
+        email: invitation.email,
+        role: invitation.role,
+        createdAt: invitation.createdAt,
       });
-
-      const existingMember = await storage.getCompanyMember(invitation.companyId, userId);
-      if (!existingMember) {
-        await storage.createCompanyMember({
-          companyId: invitation.companyId,
-          userId,
-          email: invitation.email,
-          role: invitation.role,
-          status: 'active',
-          invitedAt: invitation.createdAt,
-          joinedAt: new Date().toISOString(),
-        });
-      }
-
-      const teamMember = await storage.getTeamMemberByEmail(invitation.email);
-      if (teamMember) {
-        await storage.updateTeamMember(teamMember.id, {
-          status: 'Active',
-          userId,
-          companyId: invitation.companyId,
-        });
-      }
-
-      await storage.updateUserProfile(userId, { companyId: invitation.companyId });
-
-      let wallet = await storage.getWalletByUserId(userId);
-      if (!wallet) {
-        const company = await storage.getCompany(invitation.companyId);
-        wallet = await storage.createWallet({
-          userId,
-          companyId: invitation.companyId,
-          type: 'personal',
-          currency: company?.currency || 'USD',
-          balance: '0',
-          availableBalance: '0',
-          pendingBalance: '0',
-          status: 'active',
-        });
-      } else if (!wallet.companyId) {
-        await storage.updateWallet(wallet.id, { companyId: invitation.companyId });
-      }
-
-      const company = await storage.getCompany(invitation.companyId);
 
       res.json({
         message: "Invitation accepted successfully",
         companyId: invitation.companyId,
-        companyName: company?.name,
+        companyName: result.companyName,
         role: invitation.role,
-        walletId: wallet?.id,
+        walletId: result.walletId,
       });
     } catch (error) {
       console.error('Accept invitation error:', error);

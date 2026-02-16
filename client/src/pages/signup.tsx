@@ -14,6 +14,10 @@ export default function SignupPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { signup } = useAuth();
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const inviteToken = searchParams.get("invite");
+
   const [formData, setFormData] = useState({
     fullName: "",
     email: "",
@@ -67,7 +71,11 @@ export default function SignupPage() {
         title: "Account created!",
         description: "Welcome to Spendly. Let's get you set up."
       });
-      setLocation("/onboarding");
+      if (inviteToken) {
+        setLocation(`/invite/${inviteToken}`);
+      } else {
+        setLocation("/onboarding");
+      }
     } catch (error: any) {
       let errorMessage = "Signup failed. Please try again.";
       if (error?.code === "auth/email-already-in-use") {
@@ -265,7 +273,7 @@ export default function SignupPage() {
 
               <p className="text-center text-sm text-muted-foreground mt-6">
                 Already have an account?{" "}
-                <Link href="/login">
+                <Link href={inviteToken ? `/login?invite=${inviteToken}` : "/login"}>
                   <span className="text-indigo-600 hover:text-indigo-700 font-medium cursor-pointer" data-testid="link-login">
                     Sign in
                   </span>

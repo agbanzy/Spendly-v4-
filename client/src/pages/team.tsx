@@ -153,6 +153,14 @@ export default function Team() {
     enabled: !!currentCompany?.id,
   });
 
+  const invalidateInvitations = () => {
+    if (currentCompany?.id) {
+      queryClient.invalidateQueries({ queryKey: [`/api/companies/${currentCompany.id}/invitations`] });
+    }
+    queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/team"] });
+  };
+
   const sendInviteMutation = useMutation({
     mutationFn: async (data: { name: string; email: string; role: string; department?: string }) => {
       let companyId = currentCompany?.id;
@@ -169,7 +177,7 @@ export default function Team() {
       return apiRequest("POST", `/api/companies/${companyId}/invitations`, data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
+      invalidateInvitations();
       toast({ title: "Invitation sent", description: "An email invitation has been sent to the team member." });
       setIsInviteOpen(false);
       setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "" });
@@ -184,7 +192,7 @@ export default function Team() {
       return apiRequest("DELETE", `/api/companies/${currentCompany?.id}/invitations/${invitationId}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
+      invalidateInvitations();
       toast({ title: "Invitation revoked" });
     },
     onError: () => {
