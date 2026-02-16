@@ -53,6 +53,8 @@ export const TransactionType = {
   BILL: 'Bill',
   FEE: 'Fee',
   FUNDING: 'Funding',
+  TRANSFER: 'Transfer',
+  WITHDRAWAL: 'Withdrawal',
 } as const;
 export type TransactionType = typeof TransactionType[keyof typeof TransactionType];
 
