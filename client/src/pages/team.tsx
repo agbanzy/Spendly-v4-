@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -57,37 +55,58 @@ import {
   UserX,
   UserCheck,
   Building2,
-  Palette,
   DollarSign,
   FolderPlus,
   Send,
   Clock,
   XCircle,
   CheckCircle,
-  Link2,
   Copy,
 } from "lucide-react";
+import {
+  PageWrapper,
+  PageHeader,
+  MetricCard,
+  StatusBadge,
+  AnimatedListItem,
+  EmptyState,
+  GlassCard,
+  SectionLabel,
+  fadeUp,
+  stagger,
+} from "@/components/ui-extended";
+import { motion } from "framer-motion";
 import type { TeamMember, Department, CompanySettings } from "@shared/schema";
 
-const roleColors: Record<string, string> = {
-  OWNER: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-  ADMIN: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-  MANAGER: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-  EDITOR: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-  EMPLOYEE: "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300",
-  VIEWER: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
+const roleColors: Record<string, { bg: string; text: string; badge: string }> = {
+  OWNER: { bg: "bg-violet-50 dark:bg-violet-950/30", text: "text-violet-700 dark:text-violet-400", badge: "bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400" },
+  ADMIN: { bg: "bg-rose-50 dark:bg-rose-950/30", text: "text-rose-700 dark:text-rose-400", badge: "bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400" },
+  MANAGER: { bg: "bg-amber-50 dark:bg-amber-950/30", text: "text-amber-700 dark:text-amber-400", badge: "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400" },
+  EDITOR: { bg: "bg-cyan-50 dark:bg-cyan-950/30", text: "text-cyan-700 dark:text-cyan-400", badge: "bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400" },
+  EMPLOYEE: { bg: "bg-emerald-50 dark:bg-emerald-950/30", text: "text-emerald-700 dark:text-emerald-400", badge: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" },
+  VIEWER: { bg: "bg-slate-50 dark:bg-slate-950/30", text: "text-slate-700 dark:text-slate-400", badge: "bg-slate-100 dark:bg-slate-900/30 text-slate-700 dark:text-slate-400" },
 };
 
 const departmentColors = [
-  { name: "Indigo", value: "#6366f1" },
-  { name: "Blue", value: "#3b82f6" },
+  { name: "Violet", value: "#7c3aed" },
   { name: "Emerald", value: "#10b981" },
   { name: "Amber", value: "#f59e0b" },
   { name: "Rose", value: "#f43f5e" },
-  { name: "Purple", value: "#a855f7" },
+  { name: "Slate", value: "#64748b" },
   { name: "Cyan", value: "#06b6d4" },
-  { name: "Orange", value: "#f97316" },
 ];
+
+const getGradientByRole = (role: string) => {
+  const gradients: Record<string, string> = {
+    OWNER: "from-violet-500 to-violet-600",
+    ADMIN: "from-rose-500 to-rose-600",
+    MANAGER: "from-amber-500 to-amber-600",
+    EDITOR: "from-cyan-500 to-cyan-600",
+    EMPLOYEE: "from-emerald-500 to-emerald-600",
+    VIEWER: "from-slate-500 to-slate-600",
+  };
+  return gradients[role] || "from-violet-500 to-violet-600";
+};
 
 export default function Team() {
   const { toast } = useToast();
@@ -107,13 +126,12 @@ export default function Team() {
     queryKey: ["/api/settings"],
   });
 
-  // Currency formatting
   const currencySymbols: Record<string, string> = {
     USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
   };
   const currency = settings?.currency || "USD";
   const currencySymbol = currencySymbols[currency] || "$";
-  
+
   const formatCurrency = (amount: number | string) => {
     const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
     return `${currencySymbol}${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -130,7 +148,7 @@ export default function Team() {
     name: "",
     description: "",
     budget: "",
-    color: "#6366f1",
+    color: "#7c3aed",
     headId: "",
   });
 
@@ -209,15 +227,15 @@ export default function Team() {
       queryClient.invalidateQueries({ queryKey: ["/api/team"] });
       queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
       if (data?.inviteEmailSent) {
-        toast({ 
-          title: "Team member added", 
+        toast({
+          title: "Team member added",
           description: "An invite email has been sent to the new team member."
         });
       } else {
-        toast({ 
-          title: "Team member added", 
-          description: data?.inviteEmailError 
-            ? `Invite email failed: ${data.inviteEmailError}` 
+        toast({
+          title: "Team member added",
+          description: data?.inviteEmailError
+            ? `Invite email failed: ${data.inviteEmailError}`
             : "Team member created but invite email could not be sent."
         });
       }
@@ -334,7 +352,7 @@ export default function Team() {
   };
 
   const resetDeptForm = () => {
-    setDeptForm({ name: "", description: "", budget: "", color: "#6366f1", headId: "" });
+    setDeptForm({ name: "", description: "", budget: "", color: "#7c3aed", headId: "" });
   };
 
   const openEditMember = (member: TeamMember) => {
@@ -377,7 +395,6 @@ export default function Team() {
       toast({ title: "Department name is required", variant: "destructive" });
       return;
     }
-    // Convert "none" to null for headId
     const submitData = {
       ...deptForm,
       headId: deptForm.headId === "none" ? null : deptForm.headId
@@ -411,373 +428,511 @@ export default function Team() {
   const allDepartments = Array.from(new Set([...(team?.map(m => m.department) || []), ...departmentList.map(d => d.name)]));
 
   const getMemberCountForDept = (deptName: string) => team?.filter(m => m.department === deptName).length || 0;
+  const pendingInvitations = invitations?.filter(i => i.status === 'pending').length || 0;
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-black tracking-tight" data-testid="text-team-title">Team Management</h1>
-          <p className="text-muted-foreground mt-1">Manage team members and departments</p>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" onClick={() => { resetDeptForm(); setEditingDept(null); setIsDeptOpen(true); }} data-testid="button-add-department">
-            <FolderPlus className="h-4 w-4 mr-2" />Add Department
-          </Button>
-          <Button onClick={() => { resetMemberForm(); setEditingMember(null); setIsMemberOpen(true); }} data-testid="button-add-member">
-            <UserPlus className="h-4 w-4 mr-2" />Add Member
-          </Button>
-        </div>
-      </div>
+    <PageWrapper>
+      <PageHeader
+        title="Team Management"
+        subtitle="Manage team members, departments, and invitations"
+        actions={
+          <motion.div className="flex gap-2 flex-wrap" variants={stagger} initial="initial" animate="animate">
+            <motion.div variants={fadeUp}>
+              <Button
+                variant="outline"
+                onClick={() => { resetDeptForm(); setEditingDept(null); setIsDeptOpen(true); }}
+                data-testid="button-add-department"
+              >
+                <FolderPlus className="h-4 w-4 mr-2" />Add Department
+              </Button>
+            </motion.div>
+            <motion.div variants={fadeUp}>
+              <Button
+                onClick={() => { resetMemberForm(); setEditingMember(null); setIsMemberOpen(true); }}
+                data-testid="button-add-member"
+              >
+                <UserPlus className="h-4 w-4 mr-2" />Add Member
+              </Button>
+            </motion.div>
+          </motion.div>
+        }
+      />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="glass card-hover">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Total Members</p>
-              <div className="p-2 bg-gradient-to-br from-primary/20 to-primary/5 rounded-xl">
-                <Users className="h-4 w-4 text-primary" />
-              </div>
-            </div>
-            {teamLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black" data-testid="text-total-members">{team?.length || 0}</p>}
-          </CardContent>
-        </Card>
-        <Card className="glass card-hover">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Active</p>
-              <div className="p-2 bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 rounded-xl">
-                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-              </div>
-            </div>
-            {teamLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black text-emerald-600" data-testid="text-active-members">{activeMembers}</p>}
-          </CardContent>
-        </Card>
-        <Card className="glass card-hover">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Admins</p>
-              <div className="p-2 bg-gradient-to-br from-amber-500/20 to-amber-500/5 rounded-xl">
-                <Shield className="h-4 w-4 text-amber-600" />
-              </div>
-            </div>
-            {teamLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black" data-testid="text-admin-count">{team?.filter((m) => m.role === "ADMIN" || m.role === "OWNER").length || 0}</p>}
-          </CardContent>
-        </Card>
-        <Card className="glass card-hover">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Departments</p>
-              <div className="p-2 bg-gradient-to-br from-cyan-500/20 to-cyan-500/5 rounded-xl">
-                <Building2 className="h-4 w-4 text-cyan-600" />
-              </div>
-            </div>
-            {deptsLoading ? <Skeleton className="h-8 w-12" /> : <p className="text-2xl font-black" data-testid="text-dept-count">{departmentList.length || allDepartments.length}</p>}
-          </CardContent>
-        </Card>
-      </div>
+      <motion.div
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+        variants={stagger}
+        initial="initial"
+        animate="animate"
+      >
+        <motion.div variants={fadeUp}>
+          <MetricCard
+            title="Total Members"
+            value={teamLoading ? <Skeleton className="h-8 w-12" /> : team?.length || 0}
+            icon={Users}
+            color="primary"
+            data-testid="text-total-members"
+          />
+        </motion.div>
+        <motion.div variants={fadeUp}>
+          <MetricCard
+            title="Active"
+            value={teamLoading ? <Skeleton className="h-8 w-12" /> : activeMembers}
+            icon={UserCheck}
+            color="emerald"
+            data-testid="text-active-members"
+          />
+        </motion.div>
+        <motion.div variants={fadeUp}>
+          <MetricCard
+            title="Admins"
+            value={teamLoading ? <Skeleton className="h-8 w-12" /> : team?.filter((m) => m.role === "ADMIN" || m.role === "OWNER").length || 0}
+            icon={Shield}
+            color="rose"
+            data-testid="text-admin-count"
+          />
+        </motion.div>
+        <motion.div variants={fadeUp}>
+          <MetricCard
+            title="Departments"
+            value={deptsLoading ? <Skeleton className="h-8 w-12" /> : departmentList.length || allDepartments.length}
+            icon={Building2}
+            color="cyan"
+            data-testid="text-dept-count"
+          />
+        </motion.div>
+      </motion.div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <TabsList>
-            <TabsTrigger value="members" data-testid="tab-members">
-              <Users className="h-4 w-4 mr-2" />Members
-            </TabsTrigger>
-            <TabsTrigger value="departments" data-testid="tab-departments">
-              <Building2 className="h-4 w-4 mr-2" />Departments
-            </TabsTrigger>
-            <TabsTrigger value="invitations" data-testid="tab-invitations">
-              <Send className="h-4 w-4 mr-2" />Invitations
-              {invitations && invitations.filter(i => i.status === 'pending').length > 0 && (
-                <Badge variant="secondary" className="ml-1.5 text-xs">{invitations.filter(i => i.status === 'pending').length}</Badge>
-              )}
-            </TabsTrigger>
-          </TabsList>
+      <div className="mt-8">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <TabsList>
+              <TabsTrigger value="members" data-testid="tab-members">
+                <Users className="h-4 w-4 mr-2" />Members
+              </TabsTrigger>
+              <TabsTrigger value="departments" data-testid="tab-departments">
+                <Building2 className="h-4 w-4 mr-2" />Departments
+              </TabsTrigger>
+              <TabsTrigger value="invitations" data-testid="tab-invitations">
+                <Send className="h-4 w-4 mr-2" />Invitations
+                {pendingInvitations > 0 && (
+                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400">
+                    {pendingInvitations}
+                  </span>
+                )}
+              </TabsTrigger>
+            </TabsList>
 
-          {activeTab === "members" && (
-            <div className="flex items-center gap-2">
-              <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-                <SelectTrigger className="w-40" data-testid="select-department-filter">
-                  <SelectValue placeholder="Department" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Departments</SelectItem>
-                  {allDepartments.map((dept) => (
-                    <SelectItem key={dept} value={dept}>{dept}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="relative w-full sm:w-64">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input placeholder="Search members..." className="pl-10" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} data-testid="input-search-team" />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <TabsContent value="members">
-          <Card>
-            <CardHeader className="border-b flex flex-row items-center justify-between gap-4">
-              <CardTitle className="text-sm font-bold uppercase tracking-widest">All Members</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              {teamLoading ? (
-                <div className="p-6 space-y-4">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div key={i} className="flex items-center justify-between py-2">
-                      <div className="flex items-center gap-4">
-                        <Skeleton className="h-12 w-12 rounded-full" />
-                        <div><Skeleton className="h-4 w-32 mb-2" /><Skeleton className="h-3 w-48" /></div>
-                      </div>
-                      <Skeleton className="h-6 w-20" />
-                    </div>
-                  ))}
+            {activeTab === "members" && (
+              <motion.div className="flex items-center gap-2" variants={fadeUp}>
+                <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                  <SelectTrigger className="w-40" data-testid="select-department-filter">
+                    <SelectValue placeholder="Department" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Departments</SelectItem>
+                    {allDepartments.map((dept) => (
+                      <SelectItem key={dept} value={dept}>{dept}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="relative w-full sm:w-64">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search members..."
+                    className="pl-10"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    data-testid="input-search-team"
+                  />
                 </div>
-              ) : filteredTeam && filteredTeam.length > 0 ? (
-                <div className="divide-y divide-border">
-                  {filteredTeam.map((member) => (
-                    <div key={member.id} className="flex items-center justify-between p-4 hover:bg-muted/50 transition-colors" data-testid={`team-member-${member.id}`}>
-                      <div className="flex items-center gap-4">
-                        <Avatar className="h-12 w-12">
-                          {member.avatar && <AvatarImage src={member.avatar} />}
-                          <AvatarFallback className="bg-primary/10 text-primary font-bold">{member.name.split(' ').map(n => n[0]).join('').toUpperCase()}</AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-bold truncate" data-testid={`text-member-name-${member.id}`}>{member.name}</p>
-                            {member.status === "Active" && <span className="w-2 h-2 bg-emerald-500 rounded-full" />}
-                          </div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <Mail className="h-3 w-3 text-muted-foreground" />
-                            <span className="text-xs text-muted-foreground truncate">{member.email}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="text-right">
-                          <Badge variant="outline" className="text-xs mb-1">{member.department}</Badge>
-                          <br />
-                          <Badge variant="secondary" className={`text-xs ${roleColors[member.role] || ""}`}>{member.role}</Badge>
-                        </div>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" data-testid={`button-member-menu-${member.id}`}><MoreVertical className="h-4 w-4" /></Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => openEditMember(member)} data-testid={`button-edit-member-${member.id}`}><Pencil className="h-4 w-4 mr-2" />Edit</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => toggleStatusMutation.mutate({ id: member.id, status: member.status === "Active" ? "Inactive" : "Active" })} data-testid={`button-toggle-status-${member.id}`}>
-                              {member.status === "Active" ? <><UserX className="h-4 w-4 mr-2" />Deactivate</> : <><UserCheck className="h-4 w-4 mr-2" />Activate</>}
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem className="text-red-600" onClick={() => { setDeleteTarget({ type: "member", id: member.id, name: member.name }); setIsDeleteOpen(true); }} data-testid={`button-delete-member-${member.id}`}><Trash2 className="h-4 w-4 mr-2" />Remove</DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-12 text-center">
-                  <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
-                    <Users className="h-8 w-8 text-muted-foreground" />
-                  </div>
-                  <h3 className="text-lg font-bold mb-1">No team members yet</h3>
-                  <p className="text-sm text-muted-foreground mb-4">Add your first team member to get started.</p>
-                  <Button onClick={() => { resetMemberForm(); setEditingMember(null); setIsMemberOpen(true); }} data-testid="button-add-first-member"><UserPlus className="h-4 w-4 mr-2" />Add Member</Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="departments">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {deptsLoading ? (
-              [1, 2, 3].map((i) => (
-                <Card key={i}>
-                  <CardContent className="p-6">
-                    <Skeleton className="h-6 w-32 mb-2" />
-                    <Skeleton className="h-4 w-full mb-4" />
-                    <Skeleton className="h-8 w-20" />
-                  </CardContent>
-                </Card>
-              ))
-            ) : departmentList.length > 0 ? (
-              departmentList.map((dept) => (
-                <Card key={dept.id} className="group hover:shadow-lg transition-shadow" data-testid={`department-card-${dept.id}`}>
-                  <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${dept.color}20` }}>
-                          <Building2 className="h-5 w-5" style={{ color: dept.color }} />
-                        </div>
-                        <div>
-                          <CardTitle className="text-lg" data-testid={`text-dept-name-${dept.id}`}>{dept.name}</CardTitle>
-                          <p className="text-sm text-muted-foreground">{getMemberCountForDept(dept.name)} members</p>
-                        </div>
-                      </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity" data-testid={`button-dept-menu-${dept.id}`}><MoreVertical className="h-4 w-4" /></Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => openEditDept(dept)} data-testid={`button-edit-dept-${dept.id}`}><Pencil className="h-4 w-4 mr-2" />Edit</DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem className="text-red-600" onClick={() => { setDeleteTarget({ type: "department", id: dept.id, name: dept.name }); setIsDeleteOpen(true); }} data-testid={`button-delete-dept-${dept.id}`}><Trash2 className="h-4 w-4 mr-2" />Delete</DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {dept.description && (
-                      <p className="text-sm text-muted-foreground line-clamp-2">{dept.description}</p>
-                    )}
-                    <div className="flex items-center justify-between">
-                      {dept.budget && (
-                        <div className="flex items-center gap-1 text-sm">
-                          <DollarSign className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium">{formatCurrency(dept.budget)}</span>
-                          <span className="text-muted-foreground">budget</span>
-                        </div>
-                      )}
-                      <Badge variant={dept.status === "Active" ? "default" : "secondary"} className={dept.status === "Active" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : ""}>{dept.status}</Badge>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
-            ) : (
-              <Card className="col-span-full">
-                <CardContent className="p-12 text-center">
-                  <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
-                    <Building2 className="h-8 w-8 text-muted-foreground" />
-                  </div>
-                  <h3 className="text-lg font-bold mb-1">No departments yet</h3>
-                  <p className="text-sm text-muted-foreground mb-4">Create your first department to organize your team.</p>
-                  <Button onClick={() => { resetDeptForm(); setEditingDept(null); setIsDeptOpen(true); }} data-testid="button-add-first-department"><FolderPlus className="h-4 w-4 mr-2" />Create Department</Button>
-                </CardContent>
-              </Card>
+              </motion.div>
             )}
           </div>
-        </TabsContent>
 
-        <TabsContent value="invitations">
-          <Card>
-            <CardHeader className="border-b flex flex-row items-center justify-between gap-4">
-              <div>
-                <CardTitle className="text-sm font-bold uppercase tracking-widest">Pending Invitations</CardTitle>
-                <CardDescription>Track and manage team invitations</CardDescription>
+          <TabsContent value="members">
+            <GlassCard>
+              <div className="p-6">
+                <SectionLabel>Team Members</SectionLabel>
+
+                {teamLoading ? (
+                  <div className="space-y-3 mt-4">
+                    {[1, 2, 3, 4].map((i) => (
+                      <div key={i} className="flex items-center justify-between py-3">
+                        <div className="flex items-center gap-4">
+                          <Skeleton className="h-12 w-12 rounded-full" />
+                          <div><Skeleton className="h-4 w-32 mb-2" /><Skeleton className="h-3 w-48" /></div>
+                        </div>
+                        <Skeleton className="h-6 w-20" />
+                      </div>
+                    ))}
+                  </div>
+                ) : filteredTeam && filteredTeam.length > 0 ? (
+                  <motion.div className="space-y-2 mt-4" variants={stagger} initial="initial" animate="animate">
+                    {filteredTeam.map((member, idx) => (
+                      <AnimatedListItem key={member.id} delay={idx * 0.05}>
+                        <div className="flex items-center justify-between p-4 rounded-lg hover:bg-white/50 dark:hover:bg-white/5 transition-colors" data-testid={`team-member-${member.id}`}>
+                          <div className="flex items-center gap-4 flex-1 min-w-0">
+                            <Avatar className="h-12 w-12 flex-shrink-0">
+                              {member.avatar && <AvatarImage src={member.avatar} />}
+                              <AvatarFallback className={`bg-gradient-to-br ${getGradientByRole(member.role)} text-white font-bold`}>
+                                {member.name.split(' ').map(n => n[0]).join('').toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-semibold truncate" data-testid={`text-member-name-${member.id}`}>
+                                  {member.name}
+                                </p>
+                                {member.status === "Active" && (
+                                  <span className="inline-block w-2 h-2 bg-emerald-500 rounded-full flex-shrink-0" />
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                <Mail className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                                <span className="text-xs text-muted-foreground truncate">{member.email}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3 ml-2 flex-shrink-0">
+                            <div className="text-right">
+                              <div className="mb-1">
+                                <span className="inline-block px-2 py-1 rounded-md text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                                  {member.department}
+                                </span>
+                              </div>
+                              <div>
+                                <span className={`inline-block px-2 py-1 rounded-md text-xs font-medium ${roleColors[member.role]?.badge || ""}`}>
+                                  {member.role}
+                                </span>
+                              </div>
+                            </div>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8" data-testid={`button-member-menu-${member.id}`}>
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => openEditMember(member)} data-testid={`button-edit-member-${member.id}`}>
+                                  <Pencil className="h-4 w-4 mr-2" />Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => toggleStatusMutation.mutate({ id: member.id, status: member.status === "Active" ? "Inactive" : "Active" })} data-testid={`button-toggle-status-${member.id}`}>
+                                  {member.status === "Active" ? (
+                                    <><UserX className="h-4 w-4 mr-2" />Deactivate</>
+                                  ) : (
+                                    <><UserCheck className="h-4 w-4 mr-2" />Activate</>
+                                  )}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-rose-600 dark:text-rose-400"
+                                  onClick={() => { setDeleteTarget({ type: "member", id: member.id, name: member.name }); setIsDeleteOpen(true); }}
+                                  data-testid={`button-delete-member-${member.id}`}
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />Remove
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </div>
+                      </AnimatedListItem>
+                    ))}
+                  </motion.div>
+                ) : (
+                  <EmptyState
+                    icon={Users}
+                    title="No team members yet"
+                    subtitle="Add your first team member to get started"
+                    action={
+                      <Button
+                        onClick={() => { resetMemberForm(); setEditingMember(null); setIsMemberOpen(true); }}
+                        data-testid="button-add-first-member"
+                      >
+                        <UserPlus className="h-4 w-4 mr-2" />Add Member
+                      </Button>
+                    }
+                  />
+                )}
               </div>
-              <Button onClick={() => { setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "" }); setIsInviteOpen(true); }} data-testid="button-new-invite">
-                <Send className="h-4 w-4 mr-2" />New Invite
-              </Button>
-            </CardHeader>
-            <CardContent className="p-0">
-              {invitationsLoading ? (
-                <div className="p-6 space-y-4">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="flex items-center justify-between py-2">
-                      <Skeleton className="h-4 w-48" />
-                      <Skeleton className="h-6 w-20" />
-                    </div>
-                  ))}
-                </div>
-              ) : !currentCompany ? (
-                <div className="p-12 text-center">
-                  <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
-                    <Building2 className="h-8 w-8 text-muted-foreground" />
-                  </div>
-                  <h3 className="text-lg font-bold mb-1">No company set up</h3>
-                  <p className="text-sm text-muted-foreground mb-4">Company invitations require a company to be configured. Contact your admin.</p>
-                </div>
-              ) : invitations && invitations.length > 0 ? (
-                <div className="divide-y divide-border">
-                  {invitations.map((inv: any) => (
-                    <div key={inv.id} className="flex items-center justify-between p-4 hover:bg-muted/50 transition-colors" data-testid={`invitation-${inv.id}`}>
-                      <div className="flex items-center gap-4">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${inv.status === 'pending' ? 'bg-amber-100 dark:bg-amber-900/30' : inv.status === 'accepted' ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>
-                          {inv.status === 'pending' ? <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400" /> :
-                           inv.status === 'accepted' ? <CheckCircle className="h-5 w-5 text-emerald-600 dark:text-emerald-400" /> :
-                           <XCircle className="h-5 w-5 text-red-600 dark:text-red-400" />}
+            </GlassCard>
+          </TabsContent>
+
+          <TabsContent value="departments">
+            {deptsLoading ? (
+              <motion.div
+                className="grid gap-4 md:grid-cols-2 lg:grid-cols-3"
+                variants={stagger}
+                initial="initial"
+                animate="animate"
+              >
+                {[1, 2, 3].map((i) => (
+                  <motion.div key={i} variants={fadeUp}>
+                    <GlassCard>
+                      <div className="p-6 space-y-3">
+                        <Skeleton className="h-6 w-32" />
+                        <Skeleton className="h-4 w-full" />
+                        <Skeleton className="h-8 w-20" />
+                      </div>
+                    </GlassCard>
+                  </motion.div>
+                ))}
+              </motion.div>
+            ) : departmentList.length > 0 ? (
+              <motion.div
+                className="grid gap-4 md:grid-cols-2 lg:grid-cols-3"
+                variants={stagger}
+                initial="initial"
+                animate="animate"
+              >
+                {departmentList.map((dept, idx) => (
+                  <motion.div key={dept.id} variants={fadeUp} data-testid={`department-card-${dept.id}`}>
+                    <GlassCard className="group card-hover h-full">
+                      <div className="p-6">
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                              style={{ backgroundColor: `${dept.color}20` }}
+                            >
+                              <Building2 className="h-5 w-5" style={{ color: dept.color }} />
+                            </div>
+                            <div>
+                              <h3 className="text-lg font-semibold" data-testid={`text-dept-name-${dept.id}`}>
+                                {dept.name}
+                              </h3>
+                              <p className="text-sm text-muted-foreground">
+                                {getMemberCountForDept(dept.name)} member{getMemberCountForDept(dept.name) !== 1 ? 's' : ''}
+                              </p>
+                            </div>
+                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity" data-testid={`button-dept-menu-${dept.id}`}>
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => openEditDept(dept)} data-testid={`button-edit-dept-${dept.id}`}>
+                                <Pencil className="h-4 w-4 mr-2" />Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-rose-600 dark:text-rose-400"
+                                onClick={() => { setDeleteTarget({ type: "department", id: dept.id, name: dept.name }); setIsDeleteOpen(true); }}
+                                data-testid={`button-delete-dept-${dept.id}`}
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-medium truncate" data-testid={`text-invite-email-${inv.id}`}>{inv.email}</p>
-                          </div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <Badge variant="secondary" className={`text-xs ${roleColors[inv.role] || ""}`}>{inv.role}</Badge>
-                            {inv.department && <Badge variant="outline" className="text-xs">{inv.department}</Badge>}
-                          </div>
+
+                        {dept.description && (
+                          <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
+                            {dept.description}
+                          </p>
+                        )}
+
+                        <div className="flex items-center justify-between pt-3 border-t border-white/10">
+                          {dept.budget && (
+                            <div className="flex items-center gap-1 text-sm">
+                              <DollarSign className="h-4 w-4 text-muted-foreground" />
+                              <span className="font-medium">{formatCurrency(dept.budget)}</span>
+                              <span className="text-muted-foreground">budget</span>
+                            </div>
+                          )}
+                          <StatusBadge
+                            status={dept.status || "Active"}
+                            variant={dept.status === "Active" ? "default" : "secondary"}
+                          />
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={inv.status === 'pending' ? 'secondary' : inv.status === 'accepted' ? 'default' : 'destructive'} className="text-xs capitalize">
-                          {inv.status}
-                        </Badge>
-                        {inv.status === 'pending' && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              const url = `${window.location.origin}/invite/${inv.token}`;
-                              navigator.clipboard.writeText(url);
-                              toast({ title: "Invite link copied to clipboard" });
-                            }}
-                            data-testid={`button-copy-invite-${inv.id}`}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                        )}
-                        {inv.status === 'pending' && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => revokeInviteMutation.mutate(inv.id)}
-                            disabled={revokeInviteMutation.isPending}
-                            data-testid={`button-revoke-invite-${inv.id}`}
-                          >
-                            <XCircle className="h-4 w-4 text-red-500" />
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-12 text-center">
-                  <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
-                    <Send className="h-8 w-8 text-muted-foreground" />
+                    </GlassCard>
+                  </motion.div>
+                ))}
+              </motion.div>
+            ) : (
+              <GlassCard>
+                <EmptyState
+                  icon={Building2}
+                  title="No departments yet"
+                  subtitle="Create your first department to organize your team"
+                  action={
+                    <Button
+                      onClick={() => { resetDeptForm(); setEditingDept(null); setIsDeptOpen(true); }}
+                      data-testid="button-add-first-department"
+                    >
+                      <FolderPlus className="h-4 w-4 mr-2" />Create Department
+                    </Button>
+                  }
+                />
+              </GlassCard>
+            )}
+          </TabsContent>
+
+          <TabsContent value="invitations">
+            <GlassCard>
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <SectionLabel>Pending Invitations</SectionLabel>
+                    <p className="text-sm text-muted-foreground mt-1">Track and manage team invitations</p>
                   </div>
-                  <h3 className="text-lg font-bold mb-1">No invitations sent</h3>
-                  <p className="text-sm text-muted-foreground mb-4">Send invitations to add team members to your company.</p>
-                  <Button onClick={() => { setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "" }); setIsInviteOpen(true); }} data-testid="button-send-first-invite">
-                    <Send className="h-4 w-4 mr-2" />Send First Invite
+                  <Button
+                    onClick={() => { setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "" }); setIsInviteOpen(true); }}
+                    data-testid="button-new-invite"
+                  >
+                    <Send className="h-4 w-4 mr-2" />New Invite
                   </Button>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+
+                {invitationsLoading ? (
+                  <div className="space-y-3">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="flex items-center justify-between py-3">
+                        <Skeleton className="h-4 w-48" />
+                        <Skeleton className="h-6 w-20" />
+                      </div>
+                    ))}
+                  </div>
+                ) : !currentCompany ? (
+                  <EmptyState
+                    icon={Building2}
+                    title="No company set up"
+                    subtitle="Company invitations require a company to be configured. Contact your admin."
+                  />
+                ) : invitations && invitations.length > 0 ? (
+                  <motion.div className="space-y-2" variants={stagger} initial="initial" animate="animate">
+                    {invitations.map((inv: any, idx: number) => {
+                      const statusColors: Record<string, { icon: typeof Clock, bg: string, iconColor: string }> = {
+                        pending: { icon: Clock, bg: "bg-amber-100 dark:bg-amber-900/30", iconColor: "text-amber-600 dark:text-amber-400" },
+                        accepted: { icon: CheckCircle, bg: "bg-emerald-100 dark:bg-emerald-900/30", iconColor: "text-emerald-600 dark:text-emerald-400" },
+                        rejected: { icon: XCircle, bg: "bg-rose-100 dark:bg-rose-900/30", iconColor: "text-rose-600 dark:text-rose-400" },
+                      };
+                      const statusConfig = statusColors[inv.status] || statusColors.pending;
+                      const IconComponent = statusConfig.icon;
+
+                      return (
+                        <AnimatedListItem key={inv.id} delay={idx * 0.05}>
+                          <div className="flex items-center justify-between p-4 rounded-lg hover:bg-white/50 dark:hover:bg-white/5 transition-colors" data-testid={`invitation-${inv.id}`}>
+                            <div className="flex items-center gap-4 flex-1 min-w-0">
+                              <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${statusConfig.bg}`}>
+                                <IconComponent className={`h-5 w-5 ${statusConfig.iconColor}`} />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium truncate" data-testid={`text-invite-email-${inv.id}`}>
+                                  {inv.email}
+                                </p>
+                                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                  <span className={`inline-block px-2 py-1 rounded-md text-xs font-medium ${roleColors[inv.role]?.badge || ""}`}>
+                                    {inv.role}
+                                  </span>
+                                  {inv.department && (
+                                    <span className="inline-block px-2 py-1 rounded-md text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                                      {inv.department}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 ml-2 flex-shrink-0">
+                              <StatusBadge
+                                status={inv.status}
+                                variant={inv.status === 'pending' ? 'secondary' : inv.status === 'accepted' ? 'default' : 'destructive'}
+                              />
+                              {inv.status === 'pending' && (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => {
+                                      const url = `${window.location.origin}/invite/${inv.token}`;
+                                      navigator.clipboard.writeText(url);
+                                      toast({ title: "Invite link copied to clipboard" });
+                                    }}
+                                    data-testid={`button-copy-invite-${inv.id}`}
+                                  >
+                                    <Copy className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => revokeInviteMutation.mutate(inv.id)}
+                                    disabled={revokeInviteMutation.isPending}
+                                    data-testid={`button-revoke-invite-${inv.id}`}
+                                  >
+                                    <XCircle className="h-4 w-4 text-rose-500" />
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </AnimatedListItem>
+                      );
+                    })}
+                  </motion.div>
+                ) : (
+                  <EmptyState
+                    icon={Send}
+                    title="No invitations sent"
+                    subtitle="Send invitations to add team members to your company"
+                    action={
+                      <Button
+                        onClick={() => { setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "" }); setIsInviteOpen(true); }}
+                        data-testid="button-send-first-invite"
+                      >
+                        <Send className="h-4 w-4 mr-2" />Send First Invite
+                      </Button>
+                    }
+                  />
+                )}
+              </div>
+            </GlassCard>
+          </TabsContent>
+        </Tabs>
+      </div>
 
       <Dialog open={isMemberOpen} onOpenChange={setIsMemberOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>{editingMember ? "Edit Team Member" : "Add Team Member"}</DialogTitle>
-            <DialogDescription>{editingMember ? "Update the team member's details." : "Add a new member to your team."}</DialogDescription>
+            <DialogDescription>
+              {editingMember ? "Update the team member's details." : "Add a new member to your team."}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="name">Full Name *</Label>
-              <Input id="name" value={memberForm.name} onChange={(e) => setMemberForm({ ...memberForm, name: e.target.value })} placeholder="John Doe" data-testid="input-member-name" />
+              <Input
+                id="name"
+                value={memberForm.name}
+                onChange={(e) => setMemberForm({ ...memberForm, name: e.target.value })}
+                placeholder="John Doe"
+                data-testid="input-member-name"
+                className="border-slate-200 dark:border-slate-700"
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="email">Email Address *</Label>
-              <Input id="email" type="email" value={memberForm.email} onChange={(e) => setMemberForm({ ...memberForm, email: e.target.value })} placeholder="john@company.com" data-testid="input-member-email" />
+              <Input
+                id="email"
+                type="email"
+                value={memberForm.email}
+                onChange={(e) => setMemberForm({ ...memberForm, email: e.target.value })}
+                placeholder="john@company.com"
+                data-testid="input-member-email"
+                className="border-slate-200 dark:border-slate-700"
+              />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="role">Role</Label>
                 <Select value={memberForm.role} onValueChange={(value) => setMemberForm({ ...memberForm, role: value })}>
-                  <SelectTrigger data-testid="select-member-role"><SelectValue /></SelectTrigger>
+                  <SelectTrigger data-testid="select-member-role" className="border-slate-200 dark:border-slate-700">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="OWNER">Owner</SelectItem>
                     <SelectItem value="ADMIN">Admin</SelectItem>
@@ -791,7 +946,9 @@ export default function Team() {
               <div className="space-y-2">
                 <Label htmlFor="department">Department</Label>
                 <Select value={memberForm.department} onValueChange={(value) => setMemberForm({ ...memberForm, department: value })}>
-                  <SelectTrigger data-testid="select-member-department"><SelectValue placeholder="Select department" /></SelectTrigger>
+                  <SelectTrigger data-testid="select-member-department" className="border-slate-200 dark:border-slate-700">
+                    <SelectValue placeholder="Select department" />
+                  </SelectTrigger>
                   <SelectContent>
                     {departmentList.length > 0 ? (
                       departmentList.map((dept) => (
@@ -814,8 +971,14 @@ export default function Team() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsMemberOpen(false)} data-testid="button-cancel-member">Cancel</Button>
-            <Button onClick={handleMemberSubmit} disabled={createMemberMutation.isPending || updateMemberMutation.isPending} data-testid="button-submit-member">
+            <Button variant="outline" onClick={() => setIsMemberOpen(false)} data-testid="button-cancel-member">
+              Cancel
+            </Button>
+            <Button
+              onClick={handleMemberSubmit}
+              disabled={createMemberMutation.isPending || updateMemberMutation.isPending}
+              data-testid="button-submit-member"
+            >
               {(createMemberMutation.isPending || updateMemberMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {editingMember ? "Update Member" : "Add Member"}
             </Button>
@@ -824,26 +987,50 @@ export default function Team() {
       </Dialog>
 
       <Dialog open={isDeptOpen} onOpenChange={setIsDeptOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>{editingDept ? "Edit Department" : "Create Department"}</DialogTitle>
-            <DialogDescription>{editingDept ? "Update department details." : "Create a new department to organize your team."}</DialogDescription>
+            <DialogDescription>
+              {editingDept ? "Update department details." : "Create a new department to organize your team."}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="deptName">Department Name *</Label>
-              <Input id="deptName" value={deptForm.name} onChange={(e) => setDeptForm({ ...deptForm, name: e.target.value })} placeholder="e.g. Engineering" data-testid="input-dept-name" />
+              <Input
+                id="deptName"
+                value={deptForm.name}
+                onChange={(e) => setDeptForm({ ...deptForm, name: e.target.value })}
+                placeholder="e.g. Engineering"
+                data-testid="input-dept-name"
+                className="border-slate-200 dark:border-slate-700"
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="deptDesc">Description</Label>
-              <Textarea id="deptDesc" value={deptForm.description} onChange={(e) => setDeptForm({ ...deptForm, description: e.target.value })} placeholder="Describe the department's responsibilities..." className="resize-none" data-testid="input-dept-description" />
+              <Textarea
+                id="deptDesc"
+                value={deptForm.description}
+                onChange={(e) => setDeptForm({ ...deptForm, description: e.target.value })}
+                placeholder="Describe the department's responsibilities..."
+                className="resize-none border-slate-200 dark:border-slate-700"
+                data-testid="input-dept-description"
+              />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="deptBudget">Monthly Budget</Label>
                 <div className="relative">
                   <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input id="deptBudget" type="number" className="pl-10" value={deptForm.budget} onChange={(e) => setDeptForm({ ...deptForm, budget: e.target.value })} placeholder="50000" data-testid="input-dept-budget" />
+                  <Input
+                    id="deptBudget"
+                    type="number"
+                    className="pl-10 border-slate-200 dark:border-slate-700"
+                    value={deptForm.budget}
+                    onChange={(e) => setDeptForm({ ...deptForm, budget: e.target.value })}
+                    placeholder="50000"
+                    data-testid="input-dept-budget"
+                  />
                 </div>
               </div>
               <div className="space-y-2">
@@ -853,7 +1040,7 @@ export default function Team() {
                     <button
                       key={color.value}
                       type="button"
-                      className={`w-8 h-8 rounded-lg transition-transform hover:scale-110 ${deptForm.color === color.value ? "ring-2 ring-offset-2 ring-primary" : ""}`}
+                      className={`w-8 h-8 rounded-lg transition-transform hover:scale-110 ${deptForm.color === color.value ? "ring-2 ring-offset-2 ring-violet-500" : ""}`}
                       style={{ backgroundColor: color.value }}
                       onClick={() => setDeptForm({ ...deptForm, color: color.value })}
                       title={color.name}
@@ -866,7 +1053,9 @@ export default function Team() {
             <div className="space-y-2">
               <Label htmlFor="deptHead">Department Head</Label>
               <Select value={deptForm.headId} onValueChange={(value) => setDeptForm({ ...deptForm, headId: value })}>
-                <SelectTrigger data-testid="select-dept-head"><SelectValue placeholder="Select a department head" /></SelectTrigger>
+                <SelectTrigger data-testid="select-dept-head" className="border-slate-200 dark:border-slate-700">
+                  <SelectValue placeholder="Select a department head" />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No head assigned</SelectItem>
                   {team?.filter(m => m.role === "MANAGER" || m.role === "ADMIN" || m.role === "OWNER").map((member) => (
@@ -877,8 +1066,14 @@ export default function Team() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeptOpen(false)} data-testid="button-cancel-dept">Cancel</Button>
-            <Button onClick={handleDeptSubmit} disabled={createDeptMutation.isPending || updateDeptMutation.isPending} data-testid="button-submit-dept">
+            <Button variant="outline" onClick={() => setIsDeptOpen(false)} data-testid="button-cancel-dept">
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDeptSubmit}
+              disabled={createDeptMutation.isPending || updateDeptMutation.isPending}
+              data-testid="button-submit-dept"
+            >
               {(createDeptMutation.isPending || updateDeptMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {editingDept ? "Update Department" : "Create Department"}
             </Button>
@@ -887,7 +1082,7 @@ export default function Team() {
       </Dialog>
 
       <Dialog open={isInviteOpen} onOpenChange={setIsInviteOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>Send Team Invitation</DialogTitle>
             <DialogDescription>
@@ -899,17 +1094,34 @@ export default function Team() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="inviteName">Full Name *</Label>
-              <Input id="inviteName" value={inviteForm.name} onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })} placeholder="Jane Doe" data-testid="input-invite-name" />
+              <Input
+                id="inviteName"
+                value={inviteForm.name}
+                onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })}
+                placeholder="Jane Doe"
+                data-testid="input-invite-name"
+                className="border-slate-200 dark:border-slate-700"
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="inviteEmail">Email Address *</Label>
-              <Input id="inviteEmail" type="email" value={inviteForm.email} onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })} placeholder="colleague@company.com" data-testid="input-invite-email" />
+              <Input
+                id="inviteEmail"
+                type="email"
+                value={inviteForm.email}
+                onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
+                placeholder="colleague@company.com"
+                data-testid="input-invite-email"
+                className="border-slate-200 dark:border-slate-700"
+              />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="inviteRole">Role</Label>
                 <Select value={inviteForm.role} onValueChange={(value) => setInviteForm({ ...inviteForm, role: value })}>
-                  <SelectTrigger data-testid="select-invite-role"><SelectValue /></SelectTrigger>
+                  <SelectTrigger data-testid="select-invite-role" className="border-slate-200 dark:border-slate-700">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="ADMIN">Admin</SelectItem>
                     <SelectItem value="MANAGER">Manager</SelectItem>
@@ -921,7 +1133,9 @@ export default function Team() {
               <div className="space-y-2">
                 <Label htmlFor="inviteDept">Department</Label>
                 <Select value={inviteForm.department} onValueChange={(value) => setInviteForm({ ...inviteForm, department: value })}>
-                  <SelectTrigger data-testid="select-invite-department"><SelectValue placeholder="Optional" /></SelectTrigger>
+                  <SelectTrigger data-testid="select-invite-department" className="border-slate-200 dark:border-slate-700">
+                    <SelectValue placeholder="Optional" />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No department</SelectItem>
                     {departmentList.length > 0 ? (
@@ -943,19 +1157,25 @@ export default function Team() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsInviteOpen(false)} data-testid="button-cancel-invite">Cancel</Button>
-            <Button onClick={() => {
-              if (!inviteForm.name || !inviteForm.email) {
-                toast({ title: "Name and email are required", variant: "destructive" });
-                return;
-              }
-              sendInviteMutation.mutate({
-                name: inviteForm.name,
-                email: inviteForm.email,
-                role: inviteForm.role,
-                department: inviteForm.department && inviteForm.department !== "none" ? inviteForm.department : undefined,
-              });
-            }} disabled={sendInviteMutation.isPending} data-testid="button-confirm-invite">
+            <Button variant="outline" onClick={() => setIsInviteOpen(false)} data-testid="button-cancel-invite">
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!inviteForm.name || !inviteForm.email) {
+                  toast({ title: "Name and email are required", variant: "destructive" });
+                  return;
+                }
+                sendInviteMutation.mutate({
+                  name: inviteForm.name,
+                  email: inviteForm.email,
+                  role: inviteForm.role,
+                  department: inviteForm.department && inviteForm.department !== "none" ? inviteForm.department : undefined,
+                });
+              }}
+              disabled={sendInviteMutation.isPending}
+              data-testid="button-confirm-invite"
+            >
               {sendInviteMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Send Invitation
             </Button>
@@ -975,13 +1195,17 @@ export default function Team() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700" data-testid="button-confirm-delete">
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-rose-600 hover:bg-rose-700"
+              data-testid="button-confirm-delete"
+            >
               {(deleteMemberMutation.isPending || deleteDeptMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageWrapper>
   );
 }

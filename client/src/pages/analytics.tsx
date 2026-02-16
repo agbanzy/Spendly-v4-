@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Progress } from "@/components/ui/progress";
+import { PageWrapper, PageHeader, MetricCard, StatusBadge, EmptyState, SectionLabel, GlassCard, ProgressRing, fadeUp, stagger } from "@/components/ui-extended";
 import {
   TrendingUp,
   TrendingDown,
@@ -54,12 +54,30 @@ import {
 } from "recharts";
 import type { CompanySettings } from "@shared/schema";
 
-const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16'];
+const COLORS = ['#7c3aed', '#10b981', '#f59e0b', '#f43f5e', '#64748b', '#06b6d4'];
+const COLOR_MAP = {
+  primary: '#7c3aed',
+  emerald: '#10b981',
+  amber: '#f59e0b',
+  rose: '#f43f5e',
+  slate: '#64748b',
+  cyan: '#06b6d4'
+};
 
-const tooltipStyle = {
-  backgroundColor: 'hsl(var(--card))',
-  border: '1px solid hsl(var(--border))',
-  borderRadius: '8px'
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-card/95 backdrop-blur-xl border border-border rounded-xl shadow-xl p-3 max-w-xs">
+        <p className="text-xs font-medium text-foreground">{label}</p>
+        {payload.map((entry: any, index: number) => (
+          <p key={index} className="text-xs" style={{ color: entry.color }}>
+            {entry.name}: {entry.value}
+          </p>
+        ))}
+      </div>
+    );
+  }
+  return null;
 };
 
 export default function AnalyticsPage() {
@@ -269,38 +287,49 @@ export default function AnalyticsPage() {
 
   if (isLoading) {
     return (
-      <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500" data-testid="analytics-loading">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <Skeleton className="h-9 w-48" />
-          <div className="flex items-center gap-2">
-            <Skeleton className="h-9 w-36" />
-            <Skeleton className="h-9 w-24" />
+      <PageWrapper>
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <Skeleton className="h-9 w-48" />
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-9 w-36" />
+              <Skeleton className="h-9 w-24" />
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+              <Skeleton key={i} className="h-32 rounded-2xl" />
+            ))}
+          </div>
+          <Skeleton className="h-10 w-full max-w-xl" />
+          <div className="grid gap-4 md:grid-cols-2">
+            <Skeleton className="h-[380px] rounded-2xl" />
+            <Skeleton className="h-[380px] rounded-2xl" />
           </div>
         </div>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
-            <Skeleton key={i} className="h-32" />
-          ))}
-        </div>
-        <Skeleton className="h-10 w-full max-w-xl" />
-        <div className="grid gap-4 md:grid-cols-2">
-          <Skeleton className="h-[380px]" />
-          <Skeleton className="h-[380px]" />
-        </div>
-      </div>
+      </PageWrapper>
     );
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500" data-testid="analytics-page">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-black tracking-tight" data-testid="text-analytics-title">Analytics</h1>
-          <p className="text-muted-foreground">Comprehensive financial insights and performance metrics</p>
-        </div>
+    <PageWrapper className="space-y-8 animate-in fade-in duration-500" data-testid="analytics-page">
+      <motion.div initial="hidden" animate="visible" variants={stagger} className="space-y-2">
+        <PageHeader
+          title="Analytics"
+          subtitle="Comprehensive financial insights and performance metrics"
+          data-testid="text-analytics-title"
+        />
+      </motion.div>
+
+      <motion.div
+        initial="hidden"
+        animate="visible"
+        variants={stagger}
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+      >
         <div className="flex items-center gap-2 flex-wrap">
           <Select value={timePeriod} onValueChange={setTimePeriod}>
-            <SelectTrigger className="w-36" data-testid="select-time-period">
+            <SelectTrigger className="w-36 rounded-xl" data-testid="select-time-period">
               <Calendar className="mr-2 h-4 w-4" />
               <SelectValue />
             </SelectTrigger>
@@ -311,157 +340,195 @@ export default function AnalyticsPage() {
               <SelectItem value="1y">Last year</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={exportAnalytics} data-testid="button-export">
+          <Button
+            variant="outline"
+            onClick={exportAnalytics}
+            className="rounded-xl"
+            data-testid="button-export"
+          >
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>
         </div>
-      </div>
+      </motion.div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <motion.div
+        initial="hidden"
+        animate="visible"
+        variants={stagger}
+        className="grid gap-4 md:grid-cols-2 lg:grid-cols-4"
+      >
         {statsCards.map((stat, index) => (
-          <Card key={index} className="glass card-hover" data-testid={`card-stat-${index}`}>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between gap-2">
-                <div className={`p-2 rounded-lg ${stat.bgColor}`}>
-                  <stat.icon className={`h-5 w-5 ${stat.color}`} />
-                </div>
-                <Badge variant={stat.trend === "up" ? "default" : "secondary"} className="text-xs">
-                  {stat.trend === "up" ? (
-                    <ArrowUpRight className="mr-1 h-3 w-3" />
-                  ) : (
-                    <ArrowDownRight className="mr-1 h-3 w-3" />
-                  )}
-                  {stat.change}
-                </Badge>
-              </div>
-              <div className="mt-4">
-                <p className="text-sm text-muted-foreground">{stat.title}</p>
-                <p className="text-2xl font-bold" data-testid={`stat-value-${index}`}>{stat.value}</p>
-              </div>
-            </CardContent>
-          </Card>
+          <motion.div key={index} variants={fadeUp}>
+            <MetricCard
+              title={stat.title}
+              value={stat.value}
+              icon={stat.icon}
+              trend={stat.trend}
+              change={stat.change}
+              className="h-full"
+              data-testid={`card-stat-${index}`}
+            />
+          </motion.div>
         ))}
-      </div>
+      </motion.div>
 
-      <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList data-testid="analytics-tabs">
-          <TabsTrigger value="overview" data-testid="tab-overview">
-            <Activity className="mr-2 h-4 w-4" />
-            Overview
-          </TabsTrigger>
-          <TabsTrigger value="cashflow" data-testid="tab-cashflow">
-            <TrendingUp className="mr-2 h-4 w-4" />
-            Cash Flow
-          </TabsTrigger>
-          <TabsTrigger value="spending" data-testid="tab-spending">
-            <BarChart2 className="mr-2 h-4 w-4" />
-            Spending
-          </TabsTrigger>
-          <TabsTrigger value="vendors" data-testid="tab-vendors">
-            <Building2 className="mr-2 h-4 w-4" />
-            Vendors
-          </TabsTrigger>
-          <TabsTrigger value="payroll" data-testid="tab-payroll">
-            <Users className="mr-2 h-4 w-4" />
-            Payroll
-          </TabsTrigger>
-          <TabsTrigger value="insights" data-testid="tab-insights">
-            <Lightbulb className="mr-2 h-4 w-4" />
-            Insights
-          </TabsTrigger>
-        </TabsList>
+      <Tabs defaultValue="overview" className="space-y-6">
+        <motion.div initial="hidden" animate="visible" variants={fadeUp}>
+          <TabsList className="grid w-full grid-cols-2 md:grid-cols-6 h-auto bg-transparent gap-2 p-0" data-testid="analytics-tabs">
+            <TabsTrigger
+              value="overview"
+              className="rounded-xl py-2 px-4 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=inactive]:bg-muted"
+              data-testid="tab-overview"
+            >
+              <Activity className="mr-2 h-4 w-4" />
+              <span className="hidden sm:inline">Overview</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="cashflow"
+              className="rounded-xl py-2 px-4 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=inactive]:bg-muted"
+              data-testid="tab-cashflow"
+            >
+              <TrendingUp className="mr-2 h-4 w-4" />
+              <span className="hidden sm:inline">Cash Flow</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="spending"
+              className="rounded-xl py-2 px-4 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=inactive]:bg-muted"
+              data-testid="tab-spending"
+            >
+              <BarChart2 className="mr-2 h-4 w-4" />
+              <span className="hidden sm:inline">Spending</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="vendors"
+              className="rounded-xl py-2 px-4 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=inactive]:bg-muted"
+              data-testid="tab-vendors"
+            >
+              <Building2 className="mr-2 h-4 w-4" />
+              <span className="hidden sm:inline">Vendors</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="payroll"
+              className="rounded-xl py-2 px-4 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=inactive]:bg-muted"
+              data-testid="tab-payroll"
+            >
+              <Users className="mr-2 h-4 w-4" />
+              <span className="hidden sm:inline">Payroll</span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="insights"
+              className="rounded-xl py-2 px-4 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=inactive]:bg-muted"
+              data-testid="tab-insights"
+            >
+              <Lightbulb className="mr-2 h-4 w-4" />
+              <span className="hidden sm:inline">Insights</span>
+            </TabsTrigger>
+          </TabsList>
+        </motion.div>
 
         {/* OVERVIEW TAB */}
-        <TabsContent value="overview" className="space-y-4" data-testid="content-overview">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Monthly Income vs Expenses</CardTitle>
-                <CardDescription>Revenue and expense comparison over time</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <ComposedChart data={cashFlowData?.monthlyData || []}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis dataKey="month" className="text-xs" />
-                    <YAxis className="text-xs" tickFormatter={(v) => formatCompact(v)} />
-                    <Tooltip
-                      contentStyle={tooltipStyle}
-                      formatter={(value: number, name: string) => [formatCurrency(value), name]}
-                    />
-                    <Legend />
-                    <Bar dataKey="invoiceIncome" fill="#10b981" name="Income" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="expenses" fill="#6366f1" name="Expenses" radius={[4, 4, 0, 0]} />
-                    <Line type="monotone" dataKey="net" stroke="#f59e0b" strokeWidth={2} dot={false} name="Net" />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
+        <TabsContent value="overview" className="space-y-6" data-testid="content-overview">
+          <motion.div initial="hidden" animate="visible" variants={stagger} className="grid gap-4 md:grid-cols-2">
+            <motion.div variants={fadeUp}>
+              <GlassCard className="rounded-2xl overflow-hidden">
+                <div className="p-6 border-b border-border">
+                  <SectionLabel>Monthly Income vs Expenses</SectionLabel>
+                  <p className="text-sm text-muted-foreground mt-1">Revenue and expense comparison over time</p>
+                </div>
+                <div className="p-6">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <ComposedChart data={cashFlowData?.monthlyData || []}>
+                      <defs>
+                        <linearGradient id="overviewIncome" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={COLOR_MAP.emerald} stopOpacity={0.3} />
+                          <stop offset="95%" stopColor={COLOR_MAP.emerald} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="month" className="text-xs" fill="hsl(var(--muted-foreground))" />
+                      <YAxis className="text-xs" tickFormatter={(v) => formatCompact(v)} fill="hsl(var(--muted-foreground))" />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                      <Bar dataKey="invoiceIncome" fill={COLOR_MAP.emerald} name="Income" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="expenses" fill={COLOR_MAP.primary} name="Expenses" radius={[4, 4, 0, 0]} />
+                      <Line type="monotone" dataKey="net" stroke={COLOR_MAP.amber} strokeWidth={2} dot={false} name="Net" />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </GlassCard>
+            </motion.div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Cash Flow Distribution</CardTitle>
-                <CardDescription>Total inflow vs outflow breakdown</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={cashFlowDonut}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={100}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {cashFlowDonut.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.fill} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value: number) => [formatCurrency(value), '']}
-                      contentStyle={tooltipStyle}
-                    />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="flex items-center justify-center gap-6 mt-2">
-                  <div className="text-center">
-                    <p className="text-xs text-muted-foreground">Inflow</p>
-                    <p className="font-semibold text-emerald-600" data-testid="text-total-inflow">{formatCompact(cashFlowData?.totalInflow || 0)}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-xs text-muted-foreground">Outflow</p>
-                    <p className="font-semibold text-red-600" data-testid="text-total-outflow">{formatCompact(cashFlowData?.totalOutflow || 0)}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-xs text-muted-foreground">Net</p>
-                    <p className="font-semibold" data-testid="text-net-cashflow">{formatCompact(cashFlowData?.netCashFlow || 0)}</p>
+            <motion.div variants={fadeUp}>
+              <GlassCard className="rounded-2xl overflow-hidden">
+                <div className="p-6 border-b border-border">
+                  <SectionLabel>Cash Flow Distribution</SectionLabel>
+                  <p className="text-sm text-muted-foreground mt-1">Total inflow vs outflow breakdown</p>
+                </div>
+                <div className="p-6">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={cashFlowDonut}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={90}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {cashFlowDonut.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.fill} />
+                        ))}
+                      </Pie>
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="flex items-center justify-center gap-6 mt-4">
+                    <div className="text-center">
+                      <p className="text-xs text-muted-foreground">Inflow</p>
+                      <p className="font-semibold text-emerald-600" data-testid="text-total-inflow">
+                        {formatCompact(cashFlowData?.totalInflow || 0)}
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs text-muted-foreground">Outflow</p>
+                      <p className="font-semibold text-rose-600" data-testid="text-total-outflow">
+                        {formatCompact(cashFlowData?.totalOutflow || 0)}
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs text-muted-foreground">Net</p>
+                      <p className="font-semibold" data-testid="text-net-cashflow">
+                        {formatCompact(cashFlowData?.netCashFlow || 0)}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          </div>
+              </GlassCard>
+            </motion.div>
+          </motion.div>
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <Card>
-              <CardContent className="p-6">
+          <motion.div initial="hidden" animate="visible" variants={stagger} className="grid gap-4 md:grid-cols-3">
+            <motion.div variants={fadeUp}>
+              <GlassCard className="rounded-2xl p-6">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
                     <FileText className="h-5 w-5 text-emerald-600" />
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Invoice Revenue</p>
-                    <p className="text-xl font-bold" data-testid="text-invoice-revenue">{formatCompact(kpis?.invoiceRevenue || 0)}</p>
+                    <p className="text-xl font-bold" data-testid="text-invoice-revenue">
+                      {formatCompact(kpis?.invoiceRevenue || 0)}
+                    </p>
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">{formatCompact(kpis?.invoicePending || 0)} pending</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-6">
+              </GlassCard>
+            </motion.div>
+            <motion.div variants={fadeUp}>
+              <GlassCard className="rounded-2xl p-6">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30">
                     <Clock className="h-5 w-5 text-amber-600" />
@@ -472,600 +539,673 @@ export default function AnalyticsPage() {
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">{kpis?.overdueBills || 0} overdue</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-6">
+              </GlassCard>
+            </motion.div>
+            <motion.div variants={fadeUp}>
+              <GlassCard className="rounded-2xl p-6">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900/30">
-                    <Percent className="h-5 w-5 text-indigo-600" />
+                  <div className="p-2 rounded-lg bg-primary/10">
+                    <Percent className="h-5 w-5 text-primary" />
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Expense Growth</p>
-                    <p className="text-xl font-bold" data-testid="text-expense-growth">{(kpis?.expenseGrowthRate || 0).toFixed(1)}%</p>
+                    <p className="text-xl font-bold" data-testid="text-expense-growth">
+                      {(kpis?.expenseGrowthRate || 0).toFixed(1)}%
+                    </p>
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground mt-2">{kpis?.pendingExpenses || 0} pending, {kpis?.approvedExpenses || 0} approved</p>
-              </CardContent>
-            </Card>
-          </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  {kpis?.pendingExpenses || 0} pending, {kpis?.approvedExpenses || 0} approved
+                </p>
+              </GlassCard>
+            </motion.div>
+          </motion.div>
         </TabsContent>
 
         {/* CASH FLOW TAB */}
-        <TabsContent value="cashflow" className="space-y-4" data-testid="content-cashflow">
+        <TabsContent value="cashflow" className="space-y-6" data-testid="content-cashflow">
           {loadingCashFlow ? (
-            <Skeleton className="h-[450px]" />
+            <Skeleton className="h-[450px] rounded-2xl" />
           ) : (
             <>
-              <Card>
-                <CardHeader>
-                  <CardTitle>12-Month Cash Flow</CardTitle>
-                  <CardDescription>Inflow, outflow, and net cash flow trends</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={400}>
-                    <AreaChart data={cashFlowData?.monthlyData || []}>
-                      <defs>
-                        <linearGradient id="colorInflow" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                        </linearGradient>
-                        <linearGradient id="colorOutflow" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                        </linearGradient>
-                        <linearGradient id="colorNet" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis dataKey="month" className="text-xs" />
-                      <YAxis className="text-xs" tickFormatter={(v) => formatCompact(v)} />
-                      <Tooltip
-                        contentStyle={tooltipStyle}
-                        formatter={(value: number, name: string) => [formatCurrency(value), name]}
-                      />
-                      <Legend />
-                      <Area type="monotone" dataKey="inflow" stroke="#10b981" fill="url(#colorInflow)" strokeWidth={2} name="Inflow" />
-                      <Area type="monotone" dataKey="outflow" stroke="#ef4444" fill="url(#colorOutflow)" strokeWidth={2} name="Outflow" />
-                      <Area type="monotone" dataKey="net" stroke="#6366f1" fill="url(#colorNet)" strokeWidth={2} name="Net" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
+              <motion.div initial="hidden" animate="visible" variants={fadeUp}>
+                <GlassCard className="rounded-2xl overflow-hidden">
+                  <div className="p-6 border-b border-border">
+                    <SectionLabel>12-Month Cash Flow</SectionLabel>
+                    <p className="text-sm text-muted-foreground mt-1">Inflow, outflow, and net cash flow trends</p>
+                  </div>
+                  <div className="p-6">
+                    <ResponsiveContainer width="100%" height={400}>
+                      <AreaChart data={cashFlowData?.monthlyData || []}>
+                        <defs>
+                          <linearGradient id="colorInflow" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor={COLOR_MAP.emerald} stopOpacity={0.3} />
+                            <stop offset="95%" stopColor={COLOR_MAP.emerald} stopOpacity={0} />
+                          </linearGradient>
+                          <linearGradient id="colorOutflow" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor={COLOR_MAP.rose} stopOpacity={0.3} />
+                            <stop offset="95%" stopColor={COLOR_MAP.rose} stopOpacity={0} />
+                          </linearGradient>
+                          <linearGradient id="colorNet" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor={COLOR_MAP.primary} stopOpacity={0.3} />
+                            <stop offset="95%" stopColor={COLOR_MAP.primary} stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis dataKey="month" className="text-xs" fill="hsl(var(--muted-foreground))" />
+                        <YAxis className="text-xs" tickFormatter={(v) => formatCompact(v)} fill="hsl(var(--muted-foreground))" />
+                        <Tooltip content={<CustomTooltip />} />
+                        <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                        <Area type="monotone" dataKey="inflow" stroke={COLOR_MAP.emerald} fill="url(#colorInflow)" strokeWidth={2} name="Inflow" />
+                        <Area type="monotone" dataKey="outflow" stroke={COLOR_MAP.rose} fill="url(#colorOutflow)" strokeWidth={2} name="Outflow" />
+                        <Area type="monotone" dataKey="net" stroke={COLOR_MAP.primary} fill="url(#colorNet)" strokeWidth={2} name="Net" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </GlassCard>
+              </motion.div>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Cash Flow Waterfall</CardTitle>
-                  <CardDescription>Revenue through expenses to net cash flow</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={350}>
-                    <BarChart data={cashFlowData?.waterfall || []}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis dataKey="name" className="text-xs" />
-                      <YAxis className="text-xs" tickFormatter={(v) => formatCompact(v)} />
-                      <Tooltip
-                        contentStyle={tooltipStyle}
-                        formatter={(value: number) => [formatCurrency(Math.abs(value)), '']}
-                      />
-                      <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                        {(cashFlowData?.waterfall || []).map((entry: any, index: number) => (
-                          <Cell
-                            key={`cell-${index}`}
-                            fill={entry.type === 'positive' ? '#10b981' : entry.type === 'negative' ? '#ef4444' : '#6366f1'}
-                          />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
+              <motion.div initial="hidden" animate="visible" variants={fadeUp}>
+                <GlassCard className="rounded-2xl overflow-hidden">
+                  <div className="p-6 border-b border-border">
+                    <SectionLabel>Cash Flow Waterfall</SectionLabel>
+                    <p className="text-sm text-muted-foreground mt-1">Revenue through expenses to net cash flow</p>
+                  </div>
+                  <div className="p-6">
+                    <ResponsiveContainer width="100%" height={350}>
+                      <BarChart data={cashFlowData?.waterfall || []}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis dataKey="name" className="text-xs" fill="hsl(var(--muted-foreground))" />
+                        <YAxis className="text-xs" tickFormatter={(v) => formatCompact(v)} fill="hsl(var(--muted-foreground))" />
+                        <Tooltip content={<CustomTooltip />} />
+                        <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                          {(cashFlowData?.waterfall || []).map((entry: any, index: number) => (
+                            <Cell
+                              key={`cell-${index}`}
+                              fill={entry.type === 'positive' ? COLOR_MAP.emerald : entry.type === 'negative' ? COLOR_MAP.rose : COLOR_MAP.primary}
+                            />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </GlassCard>
+              </motion.div>
 
-              <div className="grid gap-4 md:grid-cols-4">
+              <motion.div initial="hidden" animate="visible" variants={stagger} className="grid gap-4 md:grid-cols-4">
                 {(cashFlowData?.monthlyData || []).length > 0 && (
                   <>
-                    <Card>
-                      <CardContent className="p-6 text-center">
+                    <motion.div variants={fadeUp}>
+                      <GlassCard className="rounded-2xl p-6 text-center">
                         <p className="text-sm text-muted-foreground">Avg Monthly Inflow</p>
-                        <p className="text-xl font-bold text-emerald-600" data-testid="text-avg-inflow">
+                        <p className="text-xl font-bold text-emerald-600 mt-2" data-testid="text-avg-inflow">
                           {formatCompact((cashFlowData?.monthlyData || []).reduce((s: number, d: any) => s + (d.inflow || 0), 0) / Math.max((cashFlowData?.monthlyData || []).length, 1))}
                         </p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="p-6 text-center">
+                      </GlassCard>
+                    </motion.div>
+                    <motion.div variants={fadeUp}>
+                      <GlassCard className="rounded-2xl p-6 text-center">
                         <p className="text-sm text-muted-foreground">Avg Monthly Outflow</p>
-                        <p className="text-xl font-bold text-red-600" data-testid="text-avg-outflow">
+                        <p className="text-xl font-bold text-rose-600 mt-2" data-testid="text-avg-outflow">
                           {formatCompact((cashFlowData?.monthlyData || []).reduce((s: number, d: any) => s + (d.outflow || 0), 0) / Math.max((cashFlowData?.monthlyData || []).length, 1))}
                         </p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="p-6 text-center">
+                      </GlassCard>
+                    </motion.div>
+                    <motion.div variants={fadeUp}>
+                      <GlassCard className="rounded-2xl p-6 text-center">
                         <p className="text-sm text-muted-foreground">Total Payroll</p>
-                        <p className="text-xl font-bold" data-testid="text-cf-payroll">
+                        <p className="text-xl font-bold mt-2" data-testid="text-cf-payroll">
                           {formatCompact((cashFlowData?.monthlyData || []).reduce((s: number, d: any) => s + (d.payroll || 0), 0))}
                         </p>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="p-6 text-center">
+                      </GlassCard>
+                    </motion.div>
+                    <motion.div variants={fadeUp}>
+                      <GlassCard className="rounded-2xl p-6 text-center">
                         <p className="text-sm text-muted-foreground">Total Bills</p>
-                        <p className="text-xl font-bold" data-testid="text-cf-bills">
+                        <p className="text-xl font-bold mt-2" data-testid="text-cf-bills">
                           {formatCompact((cashFlowData?.monthlyData || []).reduce((s: number, d: any) => s + (d.bills || 0), 0))}
                         </p>
-                      </CardContent>
-                    </Card>
+                      </GlassCard>
+                    </motion.div>
                   </>
                 )}
-              </div>
+              </motion.div>
             </>
           )}
         </TabsContent>
 
         {/* SPENDING TAB */}
-        <TabsContent value="spending" className="space-y-4" data-testid="content-spending">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Weekly Spending Pattern</CardTitle>
-                <CardDescription>Daily spending distribution this week</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <AreaChart data={weeklySpendingData}>
-                    <defs>
-                      <linearGradient id="colorSpending" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis dataKey="day" className="text-xs" />
-                    <YAxis className="text-xs" tickFormatter={(v) => formatCompact(v)} />
-                    <Tooltip
-                      formatter={(value: number) => [formatCurrency(value), 'Amount']}
-                      contentStyle={tooltipStyle}
-                    />
-                    <Area type="monotone" dataKey="amount" stroke="#6366f1" fill="url(#colorSpending)" strokeWidth={2} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
+        <TabsContent value="spending" className="space-y-6" data-testid="content-spending">
+          <motion.div initial="hidden" animate="visible" variants={stagger} className="grid gap-4 md:grid-cols-2">
+            <motion.div variants={fadeUp}>
+              <GlassCard className="rounded-2xl overflow-hidden">
+                <div className="p-6 border-b border-border">
+                  <SectionLabel>Weekly Spending Pattern</SectionLabel>
+                  <p className="text-sm text-muted-foreground mt-1">Daily spending distribution this week</p>
+                </div>
+                <div className="p-6">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <AreaChart data={weeklySpendingData}>
+                      <defs>
+                        <linearGradient id="colorSpending" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={COLOR_MAP.primary} stopOpacity={0.3} />
+                          <stop offset="95%" stopColor={COLOR_MAP.primary} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="day" className="text-xs" fill="hsl(var(--muted-foreground))" />
+                      <YAxis className="text-xs" tickFormatter={(v) => formatCompact(v)} fill="hsl(var(--muted-foreground))" />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Area type="monotone" dataKey="amount" stroke={COLOR_MAP.primary} fill="url(#colorSpending)" strokeWidth={2} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </GlassCard>
+            </motion.div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Budget vs Actual</CardTitle>
-                <CardDescription>Budget utilization by category</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={budgetComparisonData} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis type="number" className="text-xs" tickFormatter={(v) => formatCompact(v)} />
-                    <YAxis dataKey="name" type="category" width={100} className="text-xs" />
-                    <Tooltip
-                      formatter={(value: number) => [formatCurrency(value), '']}
-                      contentStyle={tooltipStyle}
-                    />
-                    <Legend />
-                    <Bar dataKey="budget" fill="#94a3b8" name="Budget" radius={[0, 4, 4, 0]} />
-                    <Bar dataKey="spent" fill="#6366f1" name="Spent" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          </div>
+            <motion.div variants={fadeUp}>
+              <GlassCard className="rounded-2xl overflow-hidden">
+                <div className="p-6 border-b border-border">
+                  <SectionLabel>Budget vs Actual</SectionLabel>
+                  <p className="text-sm text-muted-foreground mt-1">Budget utilization by category</p>
+                </div>
+                <div className="p-6">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={budgetComparisonData} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis type="number" className="text-xs" tickFormatter={(v) => formatCompact(v)} fill="hsl(var(--muted-foreground))" />
+                      <YAxis dataKey="name" type="category" width={100} className="text-xs" fill="hsl(var(--muted-foreground))" />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                      <Bar dataKey="budget" fill={COLOR_MAP.slate} name="Budget" radius={[0, 4, 4, 0]} />
+                      <Bar dataKey="spent" fill={COLOR_MAP.primary} name="Spent" radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </GlassCard>
+            </motion.div>
+          </motion.div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Department Spending</CardTitle>
-                <CardDescription>Spending breakdown by department</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={departmentBreakdown}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis dataKey="name" className="text-xs" />
-                    <YAxis className="text-xs" tickFormatter={(v) => formatCompact(v)} />
-                    <Tooltip
-                      formatter={(value: number) => [formatCurrency(value), 'Amount']}
-                      contentStyle={tooltipStyle}
-                    />
-                    <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                      {departmentBreakdown.map((_entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Category Breakdown</CardTitle>
-                <CardDescription>Distribution of expenses across categories</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <ResponsiveContainer width="100%" height={250}>
-                    <PieChart>
-                      <Pie
-                        data={categoryBreakdown.slice(0, 8)}
-                        cx="50%"
-                        cy="50%"
-                        outerRadius={80}
-                        dataKey="value"
-                      >
-                        {categoryBreakdown.slice(0, 8).map((_entry, index) => (
+          <motion.div initial="hidden" animate="visible" variants={stagger} className="grid gap-4 md:grid-cols-2">
+            <motion.div variants={fadeUp}>
+              <GlassCard className="rounded-2xl overflow-hidden">
+                <div className="p-6 border-b border-border">
+                  <SectionLabel>Department Spending</SectionLabel>
+                  <p className="text-sm text-muted-foreground mt-1">Spending breakdown by department</p>
+                </div>
+                <div className="p-6">
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={departmentBreakdown}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="name" className="text-xs" fill="hsl(var(--muted-foreground))" />
+                      <YAxis className="text-xs" tickFormatter={(v) => formatCompact(v)} fill="hsl(var(--muted-foreground))" />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                        {departmentBreakdown.map((_entry, index) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(value: number) => [formatCurrency(value), '']}
-                        contentStyle={tooltipStyle}
-                      />
-                    </PieChart>
+                      </Bar>
+                    </BarChart>
                   </ResponsiveContainer>
-                  <div className="space-y-3">
-                    {categoryBreakdown.slice(0, 6).map((cat, index) => {
-                      const percentage = totalSpent > 0 ? Math.round((cat.value / totalSpent) * 100) : 0;
-                      return (
-                        <div key={cat.name} className="space-y-1" data-testid={`category-item-${index}`}>
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <div
-                                className="w-3 h-3 rounded-full"
-                                style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                              />
-                              <span className="text-sm truncate">{cat.name}</span>
+                </div>
+              </GlassCard>
+            </motion.div>
+
+            <motion.div variants={fadeUp}>
+              <GlassCard className="rounded-2xl overflow-hidden">
+                <div className="p-6 border-b border-border">
+                  <SectionLabel>Category Breakdown</SectionLabel>
+                  <p className="text-sm text-muted-foreground mt-1">Distribution of expenses across categories</p>
+                </div>
+                <div className="p-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <ResponsiveContainer width="100%" height={250}>
+                      <PieChart>
+                        <Pie
+                          data={categoryBreakdown.slice(0, 8)}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={90}
+                          dataKey="value"
+                        >
+                          {categoryBreakdown.slice(0, 8).map((_entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip content={<CustomTooltip />} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="space-y-3">
+                      {categoryBreakdown.slice(0, 6).map((cat, index) => {
+                        const percentage = totalSpent > 0 ? Math.round((cat.value / totalSpent) * 100) : 0;
+                        return (
+                          <div key={cat.name} className="space-y-1" data-testid={`category-item-${index}`}>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <div
+                                  className="w-3 h-3 rounded-full"
+                                  style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                                />
+                                <span className="text-sm truncate">{cat.name}</span>
+                              </div>
+                              <span className="text-sm font-semibold whitespace-nowrap">{formatCompact(cat.value)}</span>
                             </div>
-                            <span className="text-sm font-semibold whitespace-nowrap">{formatCompact(cat.value)}</span>
+                            <div className="h-2 rounded-full bg-muted overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all"
+                                style={{
+                                  width: `${percentage}%`,
+                                  backgroundColor: COLORS[index % COLORS.length]
+                                }}
+                              />
+                            </div>
                           </div>
-                          <div className="h-2 rounded-full bg-muted overflow-hidden">
-                            <div
-                              className="h-full rounded-full transition-all"
-                              style={{
-                                width: `${percentage}%`,
-                                backgroundColor: COLORS[index % COLORS.length]
-                              }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          </div>
+              </GlassCard>
+            </motion.div>
+          </motion.div>
         </TabsContent>
 
         {/* VENDORS TAB */}
-        <TabsContent value="vendors" className="space-y-4" data-testid="content-vendors">
+        <TabsContent value="vendors" className="space-y-6" data-testid="content-vendors">
           {loadingVendors ? (
-            <Skeleton className="h-[450px]" />
+            <Skeleton className="h-[450px] rounded-2xl" />
           ) : (
             <>
-              <div className="grid gap-4 md:grid-cols-3">
-                <Card>
-                  <CardContent className="p-6 text-center">
+              <motion.div initial="hidden" animate="visible" variants={stagger} className="grid gap-4 md:grid-cols-3">
+                <motion.div variants={fadeUp}>
+                  <GlassCard className="rounded-2xl p-6 text-center">
                     <p className="text-sm text-muted-foreground">Total Vendors</p>
-                    <p className="text-2xl font-bold" data-testid="text-total-vendors">{vendorData?.totalVendors || 0}</p>
+                    <p className="text-2xl font-bold mt-2" data-testid="text-total-vendors">
+                      {vendorData?.totalVendors || 0}
+                    </p>
                     <p className="text-xs text-muted-foreground mt-1">{vendorData?.activeVendors || 0} active</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-6 text-center">
+                  </GlassCard>
+                </motion.div>
+                <motion.div variants={fadeUp}>
+                  <GlassCard className="rounded-2xl p-6 text-center">
                     <p className="text-sm text-muted-foreground">Total Paid</p>
-                    <p className="text-2xl font-bold text-emerald-600" data-testid="text-vendor-total-paid">{formatCompact(vendorData?.totalPaid || 0)}</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-6 text-center">
+                    <p className="text-2xl font-bold text-emerald-600 mt-2" data-testid="text-vendor-total-paid">
+                      {formatCompact(vendorData?.totalPaid || 0)}
+                    </p>
+                  </GlassCard>
+                </motion.div>
+                <motion.div variants={fadeUp}>
+                  <GlassCard className="rounded-2xl p-6 text-center">
                     <p className="text-sm text-muted-foreground">Total Pending</p>
-                    <p className="text-2xl font-bold text-amber-600" data-testid="text-vendor-total-pending">{formatCompact(vendorData?.totalPending || 0)}</p>
-                  </CardContent>
-                </Card>
-              </div>
+                    <p className="text-2xl font-bold text-amber-600 mt-2" data-testid="text-vendor-total-pending">
+                      {formatCompact(vendorData?.totalPending || 0)}
+                    </p>
+                  </GlassCard>
+                </motion.div>
+              </motion.div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Top Vendors by Payment</CardTitle>
-                    <CardDescription>Vendors sorted by total payments made</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {(vendorData?.vendors || []).slice(0, 10).map((vendor: any, index: number) => (
-                        <div key={index} className="flex items-center justify-between gap-3 py-2 border-b last:border-0" data-testid={`vendor-row-${index}`}>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm truncate">{vendor.name}</p>
-                            <p className="text-xs text-muted-foreground">{vendor.category} - {vendor.expenseCount} expenses</p>
+              <motion.div initial="hidden" animate="visible" variants={stagger} className="grid gap-4 md:grid-cols-2">
+                <motion.div variants={fadeUp}>
+                  <GlassCard className="rounded-2xl overflow-hidden">
+                    <div className="p-6 border-b border-border">
+                      <SectionLabel>Top Vendors by Payment</SectionLabel>
+                      <p className="text-sm text-muted-foreground mt-1">Vendors sorted by total payments made</p>
+                    </div>
+                    <div className="p-6">
+                      <div className="space-y-3">
+                        {(vendorData?.vendors || []).slice(0, 10).map((vendor: any, index: number) => (
+                          <motion.div
+                            key={index}
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: index * 0.05 }}
+                            className="flex items-center justify-between gap-3 py-2 border-b last:border-0"
+                            data-testid={`vendor-row-${index}`}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-sm truncate">{vendor.name}</p>
+                              <p className="text-xs text-muted-foreground">{vendor.category} - {vendor.expenseCount} expenses</p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="font-semibold text-sm">{formatCompact(vendor.totalPaid)}</p>
+                              {vendor.pendingPayments > 0 && (
+                                <p className="text-xs text-amber-600">{formatCompact(vendor.pendingPayments)} pending</p>
+                              )}
+                            </div>
+                          </motion.div>
+                        ))}
+                        {(vendorData?.vendors || []).length === 0 && (
+                          <p className="text-sm text-muted-foreground text-center py-8">No vendor data available</p>
+                        )}
+                      </div>
+                    </div>
+                  </GlassCard>
+                </motion.div>
+
+                <motion.div variants={fadeUp}>
+                  <GlassCard className="rounded-2xl overflow-hidden">
+                    <div className="p-6 border-b border-border">
+                      <SectionLabel>Vendor Categories</SectionLabel>
+                      <p className="text-sm text-muted-foreground mt-1">Spending distribution by vendor category</p>
+                    </div>
+                    <div className="p-6">
+                      {vendorData?.categoryBreakdown && Object.keys(vendorData.categoryBreakdown).length > 0 ? (
+                        <>
+                          <ResponsiveContainer width="100%" height={250}>
+                            <PieChart>
+                              <Pie
+                                data={Object.entries(vendorData.categoryBreakdown).map(([name, value]) => ({ name, value: value as number }))}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={60}
+                                outerRadius={90}
+                                dataKey="value"
+                                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                labelLine={true}
+                              >
+                                {Object.keys(vendorData.categoryBreakdown).map((_key, index) => (
+                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                ))}
+                              </Pie>
+                              <Tooltip content={<CustomTooltip />} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                          <div className="space-y-2 mt-4">
+                            {Object.entries(vendorData.categoryBreakdown).map(([name, value], index) => (
+                              <div key={name} className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                                  <span className="text-sm">{name}</span>
+                                </div>
+                                <span className="text-sm font-semibold">{formatCompact(value as number)}</span>
+                              </div>
+                            ))}
                           </div>
-                          <div className="text-right shrink-0">
-                            <p className="font-semibold text-sm">{formatCompact(vendor.totalPaid)}</p>
-                            {vendor.pendingPayments > 0 && (
-                              <p className="text-xs text-amber-600">{formatCompact(vendor.pendingPayments)} pending</p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                      {(vendorData?.vendors || []).length === 0 && (
-                        <p className="text-sm text-muted-foreground text-center py-8">No vendor data available</p>
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground text-center py-8">No category data available</p>
                       )}
                     </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Vendor Categories</CardTitle>
-                    <CardDescription>Spending distribution by vendor category</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {vendorData?.categoryBreakdown && Object.keys(vendorData.categoryBreakdown).length > 0 ? (
-                      <>
-                        <ResponsiveContainer width="100%" height={250}>
-                          <PieChart>
-                            <Pie
-                              data={Object.entries(vendorData.categoryBreakdown).map(([name, value]) => ({ name, value: value as number }))}
-                              cx="50%"
-                              cy="50%"
-                              outerRadius={80}
-                              dataKey="value"
-                              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                              labelLine={true}
-                            >
-                              {Object.keys(vendorData.categoryBreakdown).map((_key, index) => (
-                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                              ))}
-                            </Pie>
-                            <Tooltip
-                              formatter={(value: number) => [formatCurrency(value), '']}
-                              contentStyle={tooltipStyle}
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
-                        <div className="space-y-2 mt-4">
-                          {Object.entries(vendorData.categoryBreakdown).map(([name, value], index) => (
-                            <div key={name} className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
-                                <span className="text-sm">{name}</span>
-                              </div>
-                              <span className="text-sm font-semibold">{formatCompact(value as number)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <p className="text-sm text-muted-foreground text-center py-8">No category data available</p>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
+                  </GlassCard>
+                </motion.div>
+              </motion.div>
             </>
           )}
         </TabsContent>
 
         {/* PAYROLL TAB */}
-        <TabsContent value="payroll" className="space-y-4" data-testid="content-payroll">
+        <TabsContent value="payroll" className="space-y-6" data-testid="content-payroll">
           {loadingPayroll ? (
-            <Skeleton className="h-[450px]" />
+            <Skeleton className="h-[450px] rounded-2xl" />
           ) : (
             <>
-              <div className="grid gap-4 md:grid-cols-4">
-                <Card>
-                  <CardContent className="p-6 text-center">
+              <motion.div initial="hidden" animate="visible" variants={stagger} className="grid gap-4 md:grid-cols-4">
+                <motion.div variants={fadeUp}>
+                  <GlassCard className="rounded-2xl p-6 text-center">
                     <p className="text-sm text-muted-foreground">Total Employees</p>
-                    <p className="text-2xl font-bold" data-testid="text-employee-count">{payrollData?.employeeCount || 0}</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-6 text-center">
+                    <p className="text-2xl font-bold mt-2" data-testid="text-employee-count">
+                      {payrollData?.employeeCount || 0}
+                    </p>
+                  </GlassCard>
+                </motion.div>
+                <motion.div variants={fadeUp}>
+                  <GlassCard className="rounded-2xl p-6 text-center">
                     <p className="text-sm text-muted-foreground">Total Net Pay</p>
-                    <p className="text-2xl font-bold text-emerald-600" data-testid="text-total-netpay">{formatCompact(payrollData?.totals?.totalNetPay || 0)}</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-6 text-center">
+                    <p className="text-2xl font-bold text-emerald-600 mt-2" data-testid="text-total-netpay">
+                      {formatCompact(payrollData?.totals?.totalNetPay || 0)}
+                    </p>
+                  </GlassCard>
+                </motion.div>
+                <motion.div variants={fadeUp}>
+                  <GlassCard className="rounded-2xl p-6 text-center">
                     <p className="text-sm text-muted-foreground">Avg Salary</p>
-                    <p className="text-2xl font-bold" data-testid="text-avg-salary">{formatCompact(payrollData?.avgSalary || 0)}</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-6 text-center">
+                    <p className="text-2xl font-bold mt-2" data-testid="text-avg-salary">
+                      {formatCompact(payrollData?.avgSalary || 0)}
+                    </p>
+                  </GlassCard>
+                </motion.div>
+                <motion.div variants={fadeUp}>
+                  <GlassCard className="rounded-2xl p-6 text-center">
                     <p className="text-sm text-muted-foreground">Payroll Entries</p>
-                    <p className="text-2xl font-bold" data-testid="text-payroll-entries">{payrollData?.payrollEntries || 0}</p>
-                  </CardContent>
-                </Card>
-              </div>
+                    <p className="text-2xl font-bold mt-2" data-testid="text-payroll-entries">
+                      {payrollData?.payrollEntries || 0}
+                    </p>
+                  </GlassCard>
+                </motion.div>
+              </motion.div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Department Payroll</CardTitle>
-                    <CardDescription>Net pay breakdown by department</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={payrollData?.departments || []}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                        <XAxis dataKey="name" className="text-xs" />
-                        <YAxis className="text-xs" tickFormatter={(v) => formatCompact(v)} />
-                        <Tooltip
-                          contentStyle={tooltipStyle}
-                          formatter={(value: number, name: string) => [formatCurrency(value), name]}
-                        />
-                        <Legend />
-                        <Bar dataKey="totalSalary" fill="#6366f1" name="Salary" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="totalBonus" fill="#10b981" name="Bonus" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="totalDeductions" fill="#ef4444" name="Deductions" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
+              <motion.div initial="hidden" animate="visible" variants={stagger} className="grid gap-4 md:grid-cols-2">
+                <motion.div variants={fadeUp}>
+                  <GlassCard className="rounded-2xl overflow-hidden">
+                    <div className="p-6 border-b border-border">
+                      <SectionLabel>Department Payroll</SectionLabel>
+                      <p className="text-sm text-muted-foreground mt-1">Net pay breakdown by department</p>
+                    </div>
+                    <div className="p-6">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={payrollData?.departments || []}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                          <XAxis dataKey="name" className="text-xs" fill="hsl(var(--muted-foreground))" />
+                          <YAxis className="text-xs" tickFormatter={(v) => formatCompact(v)} fill="hsl(var(--muted-foreground))" />
+                          <Tooltip content={<CustomTooltip />} />
+                          <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                          <Bar dataKey="totalSalary" fill={COLOR_MAP.primary} name="Salary" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="totalBonus" fill={COLOR_MAP.emerald} name="Bonus" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="totalDeductions" fill={COLOR_MAP.rose} name="Deductions" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </GlassCard>
+                </motion.div>
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Monthly Payroll Trend</CardTitle>
-                    <CardDescription>Payroll components over time</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={payrollData?.monthlyPayroll || []}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                        <XAxis dataKey="month" className="text-xs" />
-                        <YAxis className="text-xs" tickFormatter={(v) => formatCompact(v)} />
-                        <Tooltip
-                          contentStyle={tooltipStyle}
-                          formatter={(value: number, name: string) => [formatCurrency(value), name]}
-                        />
-                        <Legend />
-                        <Bar dataKey="salary" stackId="a" fill="#6366f1" name="Salary" />
-                        <Bar dataKey="bonus" stackId="a" fill="#10b981" name="Bonus" />
-                        <Bar dataKey="deductions" stackId="a" fill="#f59e0b" name="Deductions" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-              </div>
+                <motion.div variants={fadeUp}>
+                  <GlassCard className="rounded-2xl overflow-hidden">
+                    <div className="p-6 border-b border-border">
+                      <SectionLabel>Monthly Payroll Trend</SectionLabel>
+                      <p className="text-sm text-muted-foreground mt-1">Payroll components over time</p>
+                    </div>
+                    <div className="p-6">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={payrollData?.monthlyPayroll || []}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                          <XAxis dataKey="month" className="text-xs" fill="hsl(var(--muted-foreground))" />
+                          <YAxis className="text-xs" tickFormatter={(v) => formatCompact(v)} fill="hsl(var(--muted-foreground))" />
+                          <Tooltip content={<CustomTooltip />} />
+                          <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                          <Bar dataKey="salary" stackId="a" fill={COLOR_MAP.primary} name="Salary" />
+                          <Bar dataKey="bonus" stackId="a" fill={COLOR_MAP.emerald} name="Bonus" />
+                          <Bar dataKey="deductions" stackId="a" fill={COLOR_MAP.amber} name="Deductions" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </GlassCard>
+                </motion.div>
+              </motion.div>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Department Details</CardTitle>
-                  <CardDescription>Headcount and salary breakdown</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {(payrollData?.departments || []).map((dept: any, index: number) => (
-                      <div key={index} className="flex items-center justify-between gap-4 py-3 border-b last:border-0" data-testid={`payroll-dept-${index}`}>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium">{dept.name}</p>
-                          <p className="text-xs text-muted-foreground">{dept.headcount} employees - Avg: {formatCompact(dept.avgSalary)}</p>
-                        </div>
-                        <div className="grid grid-cols-3 gap-4 text-right text-sm shrink-0">
-                          <div>
-                            <p className="text-muted-foreground text-xs">Salary</p>
-                            <p className="font-semibold">{formatCompact(dept.totalSalary)}</p>
-                          </div>
-                          <div>
-                            <p className="text-muted-foreground text-xs">Bonus</p>
-                            <p className="font-semibold text-emerald-600">{formatCompact(dept.totalBonus)}</p>
-                          </div>
-                          <div>
-                            <p className="text-muted-foreground text-xs">Net Pay</p>
-                            <p className="font-semibold">{formatCompact(dept.totalNetPay)}</p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                    {(payrollData?.departments || []).length === 0 && (
-                      <p className="text-sm text-muted-foreground text-center py-8">No payroll data available</p>
-                    )}
+              <motion.div initial="hidden" animate="visible" variants={fadeUp}>
+                <GlassCard className="rounded-2xl overflow-hidden">
+                  <div className="p-6 border-b border-border">
+                    <SectionLabel>Department Details</SectionLabel>
+                    <p className="text-sm text-muted-foreground mt-1">Headcount and salary breakdown</p>
                   </div>
-                </CardContent>
-              </Card>
+                  <div className="p-6">
+                    <div className="space-y-4">
+                      {(payrollData?.departments || []).map((dept: any, index: number) => (
+                        <motion.div
+                          key={index}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.05 }}
+                          className="flex items-center justify-between gap-4 py-3 border-b last:border-0"
+                          data-testid={`payroll-dept-${index}`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium">{dept.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {dept.headcount} employees - Avg: {formatCompact(dept.avgSalary)}
+                            </p>
+                          </div>
+                          <div className="grid grid-cols-3 gap-4 text-right text-sm shrink-0">
+                            <div>
+                              <p className="text-muted-foreground text-xs">Salary</p>
+                              <p className="font-semibold">{formatCompact(dept.totalSalary)}</p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground text-xs">Bonus</p>
+                              <p className="font-semibold text-emerald-600">{formatCompact(dept.totalBonus)}</p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground text-xs">Net Pay</p>
+                              <p className="font-semibold">{formatCompact(dept.totalNetPay)}</p>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                      {(payrollData?.departments || []).length === 0 && (
+                        <p className="text-sm text-muted-foreground text-center py-8">No payroll data available</p>
+                      )}
+                    </div>
+                  </div>
+                </GlassCard>
+              </motion.div>
             </>
           )}
         </TabsContent>
 
         {/* INSIGHTS TAB */}
-        <TabsContent value="insights" className="space-y-4" data-testid="content-insights">
+        <TabsContent value="insights" className="space-y-6" data-testid="content-insights">
           {loadingInsights ? (
-            <div className="space-y-4">
+            <motion.div initial="hidden" animate="visible" variants={stagger} className="space-y-4">
               {[1, 2, 3, 4].map(i => (
-                <Skeleton key={i} className="h-32" />
+                <Skeleton key={i} className="h-32 rounded-2xl" />
               ))}
-            </div>
+            </motion.div>
           ) : (
             <>
-              <div className="flex items-center justify-between gap-4 flex-wrap">
-                <div>
+              <motion.div initial="hidden" animate="visible" variants={fadeUp}>
+                <div className="space-y-1">
                   <h2 className="text-xl font-semibold">Business Insights</h2>
-                  <p className="text-sm text-muted-foreground">{(insightsData?.insights || []).length} insights generated from your financial data</p>
+                  <p className="text-sm text-muted-foreground">
+                    {(insightsData?.insights || []).length} insights generated from your financial data
+                  </p>
                 </div>
-              </div>
+              </motion.div>
 
-              <div className="space-y-4">
+              <motion.div initial="hidden" animate="visible" variants={stagger} className="space-y-4">
                 {(insightsData?.insights || []).map((insight: any, index: number) => {
-                  const severityConfig: Record<string, { color: string; bgColor: string; icon: any }> = {
-                    critical: { color: "text-red-700 dark:text-red-400", bgColor: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400", icon: ShieldAlert },
-                    warning: { color: "text-amber-700 dark:text-amber-400", bgColor: "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400", icon: AlertTriangle },
-                    info: { color: "text-blue-700 dark:text-blue-400", bgColor: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400", icon: Info },
-                    success: { color: "text-emerald-700 dark:text-emerald-400", bgColor: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400", icon: CheckCircle2 },
+                  const severityConfig: Record<string, { color: string; bgColor: string; borderColor: string; icon: any }> = {
+                    critical: {
+                      color: "text-rose-700 dark:text-rose-400",
+                      bgColor: "bg-rose-100 dark:bg-rose-900/30",
+                      borderColor: "border-l-4 border-l-rose-600",
+                      icon: ShieldAlert
+                    },
+                    warning: {
+                      color: "text-amber-700 dark:text-amber-400",
+                      bgColor: "bg-amber-100 dark:bg-amber-900/30",
+                      borderColor: "border-l-4 border-l-amber-600",
+                      icon: AlertTriangle
+                    },
+                    info: {
+                      color: "text-cyan-700 dark:text-cyan-400",
+                      bgColor: "bg-cyan-100 dark:bg-cyan-900/30",
+                      borderColor: "border-l-4 border-l-cyan-600",
+                      icon: Info
+                    },
+                    success: {
+                      color: "text-emerald-700 dark:text-emerald-400",
+                      bgColor: "bg-emerald-100 dark:bg-emerald-900/30",
+                      borderColor: "border-l-4 border-l-emerald-600",
+                      icon: CheckCircle2
+                    },
                   };
                   const config = severityConfig[insight.severity] || severityConfig.info;
                   const SeverityIcon = config.icon;
 
                   return (
-                    <Card key={index} data-testid={`insight-card-${index}`}>
-                      <CardContent className="p-6">
-                        <div className="flex items-start gap-4">
-                          <div className={`p-2 rounded-lg shrink-0 ${config.bgColor.split(' ').slice(0, 2).join(' ')}`}>
-                            <SeverityIcon className={`h-5 w-5 ${config.color}`} />
-                          </div>
-                          <div className="flex-1 min-w-0 space-y-2">
-                            <div className="flex items-center justify-between gap-3 flex-wrap">
-                              <h3 className="font-semibold" data-testid={`insight-title-${index}`}>{insight.title}</h3>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <Badge variant="outline" className="text-xs no-default-active-elevate">
-                                  {insight.category}
-                                </Badge>
-                                <Badge className={`text-xs ${config.bgColor} no-default-active-elevate`} data-testid={`insight-severity-${index}`}>
-                                  {insight.severity}
-                                </Badge>
-                              </div>
+                    <motion.div key={index} variants={fadeUp} data-testid={`insight-card-${index}`}>
+                      <GlassCard className={`rounded-2xl overflow-hidden ${config.borderColor}`}>
+                        <div className="p-6">
+                          <div className="flex items-start gap-4">
+                            <div className={`p-2 rounded-lg shrink-0 ${config.bgColor}`}>
+                              <SeverityIcon className={`h-5 w-5 ${config.color}`} />
                             </div>
-                            <p className="text-sm text-muted-foreground" data-testid={`insight-summary-${index}`}>{insight.summary}</p>
-                            {insight.recommendation && (
-                              <div className="bg-muted/50 rounded-md p-3 mt-2">
-                                <p className="text-sm"><span className="font-medium">Recommendation:</span> {insight.recommendation}</p>
+                            <div className="flex-1 min-w-0 space-y-2">
+                              <div className="flex items-center justify-between gap-3 flex-wrap">
+                                <h3 className="font-semibold" data-testid={`insight-title-${index}`}>
+                                  {insight.title}
+                                </h3>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <Badge variant="outline" className="text-xs rounded-full">
+                                    {insight.category}
+                                  </Badge>
+                                  <Badge
+                                    className={`text-xs rounded-full ${config.color} ${config.bgColor}`}
+                                    data-testid={`insight-severity-${index}`}
+                                  >
+                                    {insight.severity}
+                                  </Badge>
+                                </div>
                               </div>
-                            )}
-                            <div className="flex items-center gap-4 flex-wrap mt-2">
-                              {insight.metric && (
-                                <div className="text-sm">
-                                  <span className="text-muted-foreground">{insight.metric}: </span>
-                                  <span className="font-semibold" data-testid={`insight-metric-${index}`}>{insight.metricValue}</span>
+                              <p className="text-sm text-muted-foreground" data-testid={`insight-summary-${index}`}>
+                                {insight.summary}
+                              </p>
+                              {insight.recommendation && (
+                                <div className="bg-primary/5 rounded-lg p-3 mt-2 border border-primary/10">
+                                  <p className="text-sm">
+                                    <span className="font-medium">Recommendation:</span> {insight.recommendation}
+                                  </p>
                                 </div>
                               )}
-                              {insight.metricChange !== undefined && insight.metricChange !== null && (
-                                <Badge variant={insight.metricChange >= 0 ? "default" : "secondary"} className="text-xs">
-                                  {insight.metricChange >= 0 ? (
-                                    <ArrowUpRight className="mr-1 h-3 w-3" />
-                                  ) : (
-                                    <ArrowDownRight className="mr-1 h-3 w-3" />
-                                  )}
-                                  {Math.abs(insight.metricChange).toFixed(1)}%
-                                </Badge>
-                              )}
+                              <div className="flex items-center gap-4 flex-wrap mt-2">
+                                {insight.metric && (
+                                  <div className="text-sm">
+                                    <span className="text-muted-foreground">{insight.metric}: </span>
+                                    <span className="font-semibold" data-testid={`insight-metric-${index}`}>
+                                      {insight.metricValue}
+                                    </span>
+                                  </div>
+                                )}
+                                {insight.metricChange !== undefined && insight.metricChange !== null && (
+                                  <Badge
+                                    variant={insight.metricChange >= 0 ? "default" : "secondary"}
+                                    className="text-xs rounded-full"
+                                  >
+                                    {insight.metricChange >= 0 ? (
+                                      <ArrowUpRight className="mr-1 h-3 w-3" />
+                                    ) : (
+                                      <ArrowDownRight className="mr-1 h-3 w-3" />
+                                    )}
+                                    {Math.abs(insight.metricChange).toFixed(1)}%
+                                  </Badge>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </CardContent>
-                    </Card>
+                      </GlassCard>
+                    </motion.div>
                   );
                 })}
                 {(insightsData?.insights || []).length === 0 && (
-                  <Card>
-                    <CardContent className="p-12 text-center">
-                      <Lightbulb className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                      <p className="text-lg font-medium">No Insights Yet</p>
-                      <p className="text-sm text-muted-foreground mt-1">Insights will appear as more financial data is recorded</p>
-                    </CardContent>
-                  </Card>
+                  <motion.div variants={fadeUp}>
+                    <GlassCard className="rounded-2xl p-12">
+                      <div className="text-center">
+                        <Lightbulb className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                        <p className="text-lg font-medium">No Insights Yet</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Insights will appear as more financial data is recorded
+                        </p>
+                      </div>
+                    </GlassCard>
+                  </motion.div>
                 )}
-              </div>
+              </motion.div>
             </>
           )}
         </TabsContent>
       </Tabs>
-    </div>
+    </PageWrapper>
   );
 }

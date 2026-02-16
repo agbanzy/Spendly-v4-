@@ -1,10 +1,8 @@
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -37,6 +35,17 @@ import {
   Link,
   Hash,
 } from "lucide-react";
+import { motion } from "framer-motion";
+import {
+  PageWrapper,
+  PageHeader,
+  GlassCard,
+  SectionLabel,
+  SuccessFeedback,
+  WarningFeedback,
+  fadeUp,
+  stagger,
+} from "@/components/ui-extended";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { isPaystackRegion } from "@/lib/constants";
 import { useAuth } from "@/lib/auth";
@@ -258,847 +267,1200 @@ export default function Settings() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
+      <PageWrapper>
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="h-8 w-8 animate-spin text-violet-500" />
+        </div>
+      </PageWrapper>
     );
   }
 
   const isPaystack = isPaystackRegion(formData.countryCode || 'US');
 
+  const sectionVariants = stagger(0.1);
+
   return (
-    <div className="p-6 md:p-8 max-w-4xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
-      <div>
-        <h1 className="text-3xl font-black tracking-tight" data-testid="text-settings-title">
-          Settings
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Manage your account, company preferences, and payment settings.
-        </p>
-      </div>
+    <PageWrapper>
+      <motion.div initial="hidden" animate="visible" variants={sectionVariants}>
+        <PageHeader
+          title="Settings"
+          subtitle="Manage your account, company preferences, and payment settings."
+        />
+      </motion.div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Building className="h-5 w-5 text-primary" />
-            <CardTitle>Company Information</CardTitle>
-          </div>
-          <CardDescription>
-            Basic information about your company.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="companyName">Company Name</Label>
-              <Input
-                id="companyName"
-                value={formData.companyName || ""}
-                onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
-                data-testid="input-company-name"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="companyEmail">Company Email</Label>
-              <Input
-                id="companyEmail"
-                type="email"
-                value={formData.companyEmail || ""}
-                onChange={(e) => setFormData({ ...formData, companyEmail: e.target.value })}
-                data-testid="input-company-email"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="companyPhone">Phone Number</Label>
-              <Input
-                id="companyPhone"
-                value={formData.companyPhone || ""}
-                onChange={(e) => setFormData({ ...formData, companyPhone: e.target.value })}
-                data-testid="input-company-phone"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="address">Business Address</Label>
-              <Input
-                id="address"
-                value={formData.companyAddress || ""}
-                onChange={(e) => setFormData({ ...formData, companyAddress: e.target.value })}
-                data-testid="input-address"
-              />
-            </div>
-          </div>
-          <div className="flex justify-end">
-            <Button 
-              onClick={handleSaveCompany}
-              disabled={updateSettingsMutation.isPending}
-              data-testid="button-save-company"
-            >
-              {updateSettingsMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <Save className="h-4 w-4 mr-2" />
-              )}
-              Save Changes
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Briefcase className="h-5 w-5 text-primary" />
-            <CardTitle>Organization Details</CardTitle>
-          </div>
-          <CardDescription>
-            Additional information about your organization for legal and compliance purposes.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="industry">Industry</Label>
-              <Select 
-                value={formData.industry || ""} 
-                onValueChange={(value) => setFormData({ ...formData, industry: value })}
-              >
-                <SelectTrigger data-testid="select-industry">
-                  <SelectValue placeholder="Select industry" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="technology">Technology</SelectItem>
-                  <SelectItem value="finance">Finance & Banking</SelectItem>
-                  <SelectItem value="healthcare">Healthcare</SelectItem>
-                  <SelectItem value="retail">Retail & E-commerce</SelectItem>
-                  <SelectItem value="manufacturing">Manufacturing</SelectItem>
-                  <SelectItem value="education">Education</SelectItem>
-                  <SelectItem value="consulting">Consulting</SelectItem>
-                  <SelectItem value="real_estate">Real Estate</SelectItem>
-                  <SelectItem value="logistics">Logistics & Transportation</SelectItem>
-                  <SelectItem value="media">Media & Entertainment</SelectItem>
-                  <SelectItem value="hospitality">Hospitality</SelectItem>
-                  <SelectItem value="agriculture">Agriculture</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="companySize">Company Size</Label>
-              <Select 
-                value={formData.companySize || ""} 
-                onValueChange={(value) => setFormData({ ...formData, companySize: value })}
-              >
-                <SelectTrigger data-testid="select-company-size">
-                  <SelectValue placeholder="Select size" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1-10">1-10 employees</SelectItem>
-                  <SelectItem value="11-50">11-50 employees</SelectItem>
-                  <SelectItem value="51-200">51-200 employees</SelectItem>
-                  <SelectItem value="201-500">201-500 employees</SelectItem>
-                  <SelectItem value="501-1000">501-1,000 employees</SelectItem>
-                  <SelectItem value="1001+">1,000+ employees</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="taxId">Tax ID / VAT Number</Label>
-              <Input
-                id="taxId"
-                placeholder="e.g., 12-3456789"
-                value={formData.taxId || ""}
-                onChange={(e) => setFormData({ ...formData, taxId: e.target.value })}
-                data-testid="input-tax-id"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="registrationNumber">Registration Number</Label>
-              <Input
-                id="registrationNumber"
-                placeholder="e.g., RC123456"
-                value={formData.registrationNumber || ""}
-                onChange={(e) => setFormData({ ...formData, registrationNumber: e.target.value })}
-                data-testid="input-registration-number"
-              />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="website">Company Website</Label>
-            <Input
-              id="website"
-              type="url"
-              placeholder="https://example.com"
-              value={formData.website || ""}
-              onChange={(e) => setFormData({ ...formData, website: e.target.value })}
-              data-testid="input-website"
-            />
-          </div>
-          <div className="flex justify-end">
-            <Button 
-              onClick={() => updateSettingsMutation.mutate({
-                industry: formData.industry,
-                companySize: formData.companySize,
-                taxId: formData.taxId,
-                registrationNumber: formData.registrationNumber,
-                website: formData.website,
-              })}
-              disabled={updateSettingsMutation.isPending}
-              data-testid="button-save-organization"
-            >
-              {updateSettingsMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <Save className="h-4 w-4 mr-2" />
-              )}
-              Save Organization Details
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Palette className="h-5 w-5 text-primary" />
-            <CardTitle>Branding</CardTitle>
-          </div>
-          <CardDescription>
-            Customize your company branding for invoices, receipts, and emails.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Company Logo</Label>
-              <div className="flex items-center gap-4">
-                <div className="w-20 h-20 rounded-lg border-2 border-dashed border-muted-foreground/30 flex items-center justify-center bg-muted/30">
-                  {formData.companyLogo ? (
-                    <img 
-                      src={formData.companyLogo} 
-                      alt="Company logo" 
-                      className="w-full h-full object-contain rounded-lg"
-                    />
-                  ) : (
-                    <Upload className="h-8 w-8 text-muted-foreground/50" />
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Input
-                    type="url"
-                    placeholder="Enter logo URL"
-                    value={formData.companyLogo || ""}
-                    onChange={(e) => setFormData({ ...formData, companyLogo: e.target.value })}
-                    className="w-64"
-                    data-testid="input-logo-url"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Recommended: 200x200 pixels, PNG or SVG format
-                  </p>
-                </div>
+      {/* Company Information */}
+      <motion.div variants={fadeUp} initial="hidden" animate="visible">
+        <GlassCard>
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/20 to-violet-500/10 flex items-center justify-center">
+                <Building className="h-5 w-5 text-violet-600 dark:text-violet-400" />
               </div>
-            </div>
-
-            <Separator />
-
-            <div className="space-y-2">
-              <Label htmlFor="tagline">Company Tagline</Label>
-              <Input
-                id="tagline"
-                placeholder="e.g., Simplifying expense management"
-                value={formData.companyTagline || ""}
-                onChange={(e) => setFormData({ ...formData, companyTagline: e.target.value })}
-                data-testid="input-tagline"
-              />
+              <div>
+                <SectionLabel>Company Information</SectionLabel>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Basic information about your company.
+                </p>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="primaryColor">Primary Brand Color</Label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    id="primaryColor"
-                    value={formData.primaryColor || "#4f46e5"}
-                    onChange={(e) => setFormData({ ...formData, primaryColor: e.target.value })}
-                    className="w-10 h-10 rounded cursor-pointer border-0"
-                    data-testid="input-primary-color"
-                  />
-                  <Input
-                    value={formData.primaryColor || "#4f46e5"}
-                    onChange={(e) => setFormData({ ...formData, primaryColor: e.target.value })}
-                    className="w-28 font-mono text-sm"
-                    placeholder="#4f46e5"
-                  />
-                </div>
+                <Label htmlFor="companyName" className="text-sm font-medium">
+                  Company Name
+                </Label>
+                <Input
+                  id="companyName"
+                  value={formData.companyName || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, companyName: e.target.value })
+                  }
+                  className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                  data-testid="input-company-name"
+                  placeholder="Enter your company name"
+                />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="secondaryColor">Secondary Brand Color</Label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    id="secondaryColor"
-                    value={formData.secondaryColor || "#10b981"}
-                    onChange={(e) => setFormData({ ...formData, secondaryColor: e.target.value })}
-                    className="w-10 h-10 rounded cursor-pointer border-0"
-                    data-testid="input-secondary-color"
-                  />
-                  <Input
-                    value={formData.secondaryColor || "#10b981"}
-                    onChange={(e) => setFormData({ ...formData, secondaryColor: e.target.value })}
-                    className="w-28 font-mono text-sm"
-                    placeholder="#10b981"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-lg bg-muted/50">
-              <p className="text-sm font-medium mb-2">Preview</p>
-              <div className="flex items-center gap-3">
-                <div 
-                  className="w-8 h-8 rounded"
-                  style={{ backgroundColor: formData.primaryColor || "#4f46e5" }}
-                />
-                <div 
-                  className="w-8 h-8 rounded"
-                  style={{ backgroundColor: formData.secondaryColor || "#10b981" }}
-                />
-                <span className="text-sm text-muted-foreground">Your brand colors</span>
-              </div>
-            </div>
-
-            <Separator />
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>App Theme</Label>
-                <p className="text-sm text-muted-foreground">
-                  Switch between light and dark mode.
-                </p>
-              </div>
-              <ThemeToggle />
-            </div>
-          </div>
-
-          <div className="flex justify-end">
-            <Button 
-              onClick={() => updateSettingsMutation.mutate({
-                companyLogo: formData.companyLogo,
-                companyTagline: formData.companyTagline,
-                primaryColor: formData.primaryColor,
-                secondaryColor: formData.secondaryColor,
-              })}
-              disabled={updateSettingsMutation.isPending}
-              data-testid="button-save-branding"
-            >
-              {updateSettingsMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <Save className="h-4 w-4 mr-2" />
-              )}
-              Save Branding
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <FileText className="h-5 w-5 text-primary" />
-            <CardTitle>Invoice Settings</CardTitle>
-          </div>
-          <CardDescription>
-            Customize how your invoices and receipts appear to clients.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="invoicePrefix">Invoice Number Prefix</Label>
-              <Input
-                id="invoicePrefix"
-                placeholder="INV"
-                value={formData.invoicePrefix || "INV"}
-                onChange={(e) => setFormData({ ...formData, invoicePrefix: e.target.value })}
-                data-testid="input-invoice-prefix"
-              />
-              <p className="text-xs text-muted-foreground">
-                Example: {formData.invoicePrefix || "INV"}-2024-0001
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="fiscalYear">Fiscal Year Start</Label>
-              <Select 
-                value={formData.fiscalYearStart || "January"} 
-                onValueChange={(value) => setFormData({ ...formData, fiscalYearStart: value })}
-              >
-                <SelectTrigger data-testid="select-fiscal-year">
-                  <SelectValue placeholder="Select month" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="January">January</SelectItem>
-                  <SelectItem value="February">February</SelectItem>
-                  <SelectItem value="March">March</SelectItem>
-                  <SelectItem value="April">April</SelectItem>
-                  <SelectItem value="July">July</SelectItem>
-                  <SelectItem value="October">October</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="invoiceTerms">Default Payment Terms</Label>
-            <Input
-              id="invoiceTerms"
-              placeholder="Payment due within 30 days"
-              value={formData.invoiceTerms || ""}
-              onChange={(e) => setFormData({ ...formData, invoiceTerms: e.target.value })}
-              data-testid="input-invoice-terms"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="invoiceFooter">Invoice Footer Text</Label>
-            <textarea
-              id="invoiceFooter"
-              className="w-full min-h-[80px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-              placeholder="Thank you for your business! Questions? Contact us at finance@company.com"
-              value={formData.invoiceFooter || ""}
-              onChange={(e) => setFormData({ ...formData, invoiceFooter: e.target.value })}
-              data-testid="input-invoice-footer"
-            />
-          </div>
-
-          <Separator />
-
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Show Logo on Invoices</Label>
-                <p className="text-sm text-muted-foreground">
-                  Display your company logo on generated invoices.
-                </p>
-              </div>
-              <Switch 
-                checked={formData.showLogoOnInvoice ?? true}
-                onCheckedChange={(checked) => {
-                  setFormData({ ...formData, showLogoOnInvoice: checked });
-                  updateSettingsMutation.mutate({ showLogoOnInvoice: checked });
-                }}
-                data-testid="switch-logo-invoice" 
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Show Logo on Receipts</Label>
-                <p className="text-sm text-muted-foreground">
-                  Display your company logo on expense receipts.
-                </p>
-              </div>
-              <Switch 
-                checked={formData.showLogoOnReceipts ?? true}
-                onCheckedChange={(checked) => {
-                  setFormData({ ...formData, showLogoOnReceipts: checked });
-                  updateSettingsMutation.mutate({ showLogoOnReceipts: checked });
-                }}
-                data-testid="switch-logo-receipts" 
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end">
-            <Button 
-              onClick={() => updateSettingsMutation.mutate({
-                invoicePrefix: formData.invoicePrefix,
-                fiscalYearStart: formData.fiscalYearStart,
-                invoiceTerms: formData.invoiceTerms,
-                invoiceFooter: formData.invoiceFooter,
-              })}
-              disabled={updateSettingsMutation.isPending}
-              data-testid="button-save-invoice"
-            >
-              {updateSettingsMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <Save className="h-4 w-4 mr-2" />
-              )}
-              Save Invoice Settings
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="border-2 border-primary/20">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Globe className="h-5 w-5 text-primary" />
-            <CardTitle>Region & Payment Settings</CardTitle>
-            <Badge variant="outline" className="ml-auto">Important</Badge>
-          </div>
-          <CardDescription>
-            Your country determines your payment provider. African countries use Paystack, others use Stripe.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="country">Country / Region</Label>
-              <Select 
-                value={formData.countryCode || "US"} 
-                onValueChange={handleCountryChange}
-              >
-                <SelectTrigger data-testid="select-country">
-                  <SelectValue placeholder="Select country" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="US">🇺🇸 United States</SelectItem>
-                  <SelectItem value="CA">🇨🇦 Canada</SelectItem>
-                  <SelectItem value="GB">🇬🇧 United Kingdom</SelectItem>
-                  <SelectItem value="DE">🇩🇪 Germany</SelectItem>
-                  <SelectItem value="FR">🇫🇷 France</SelectItem>
-                  <SelectItem value="NG">🇳🇬 Nigeria</SelectItem>
-                  <SelectItem value="GH">🇬🇭 Ghana</SelectItem>
-                  <SelectItem value="KE">🇰🇪 Kenya</SelectItem>
-                  <SelectItem value="ZA">🇿🇦 South Africa</SelectItem>
-                  <SelectItem value="EG">🇪🇬 Egypt</SelectItem>
-                  <SelectItem value="RW">🇷🇼 Rwanda</SelectItem>
-                  <SelectItem value="CI">🇨🇮 Côte d'Ivoire</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="currency">Default Currency</Label>
-              <Select 
-                value={formData.currency || "USD"} 
-                onValueChange={(value) => setFormData({ ...formData, currency: value })}
-              >
-                <SelectTrigger data-testid="select-currency">
-                  <SelectValue placeholder="Select currency" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="USD">$ USD - US Dollar</SelectItem>
-                  <SelectItem value="EUR">€ EUR - Euro</SelectItem>
-                  <SelectItem value="GBP">£ GBP - British Pound</SelectItem>
-                  <SelectItem value="NGN">₦ NGN - Nigerian Naira</SelectItem>
-                  <SelectItem value="KES">KSh KES - Kenyan Shilling</SelectItem>
-                  <SelectItem value="GHS">GH₵ GHS - Ghanaian Cedi</SelectItem>
-                  <SelectItem value="ZAR">R ZAR - South African Rand</SelectItem>
-                  <SelectItem value="EGP">E£ EGP - Egyptian Pound</SelectItem>
-                  <SelectItem value="RWF">RF RWF - Rwandan Franc</SelectItem>
-                  <SelectItem value="XOF">CFA XOF - West African CFA</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-lg bg-muted/50 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isPaystack ? 'bg-teal-100 dark:bg-teal-900/30' : 'bg-indigo-100 dark:bg-indigo-900/30'}`}>
-                  <Landmark className={`h-6 w-6 ${isPaystack ? 'text-teal-600' : 'text-indigo-600'}`} />
-                </div>
-                <div>
-                  <p className="font-semibold">
-                    Payment Provider: {isPaystack ? 'Paystack' : 'Stripe'}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {isPaystack 
-                      ? 'Optimized for African payments with local bank support'
-                      : 'Global payment processing with card and bank support'
-                    }
-                  </p>
-                </div>
-              </div>
-              <Badge className={isPaystack ? 'bg-teal-600' : 'bg-indigo-600'}>
-                {isPaystack ? 'Paystack' : 'Stripe'}
-              </Badge>
-            </div>
-
-            <Separator />
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex items-center gap-2">
-                {paymentKeys?.stripe ? (
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                ) : (
-                  <XCircle className="h-4 w-4 text-muted-foreground" />
-                )}
-                <span className="text-sm">Stripe {paymentKeys?.stripe ? 'Connected' : 'Not configured'}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                {paymentKeys?.paystack ? (
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                ) : (
-                  <XCircle className="h-4 w-4 text-muted-foreground" />
-                )}
-                <span className="text-sm">Paystack {paymentKeys?.paystack ? 'Connected' : 'Not configured'}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="timezone">Timezone</Label>
-              <Select 
-                value={formData.timezone || "America/Los_Angeles"}
-                onValueChange={(value) => setFormData({ ...formData, timezone: value })}
-              >
-                <SelectTrigger data-testid="select-timezone">
-                  <SelectValue placeholder="Select timezone" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="America/Los_Angeles">Pacific Time (PT)</SelectItem>
-                  <SelectItem value="America/New_York">Eastern Time (ET)</SelectItem>
-                  <SelectItem value="UTC">UTC</SelectItem>
-                  <SelectItem value="Europe/London">GMT (London)</SelectItem>
-                  <SelectItem value="Africa/Lagos">West Africa Time</SelectItem>
-                  <SelectItem value="Africa/Nairobi">East Africa Time</SelectItem>
-                  <SelectItem value="Africa/Cairo">Egypt Time</SelectItem>
-                  <SelectItem value="Africa/Johannesburg">South Africa Time</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="dateFormat">Date Format</Label>
-              <Select 
-                value={formData.dateFormat || "MM/DD/YYYY"}
-                onValueChange={(value) => setFormData({ ...formData, dateFormat: value })}
-              >
-                <SelectTrigger data-testid="select-date-format">
-                  <SelectValue placeholder="Select format" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="MM/DD/YYYY">MM/DD/YYYY</SelectItem>
-                  <SelectItem value="DD/MM/YYYY">DD/MM/YYYY</SelectItem>
-                  <SelectItem value="YYYY-MM-DD">YYYY-MM-DD</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="flex justify-end">
-            <Button 
-              onClick={handleSaveRegion}
-              disabled={updateSettingsMutation.isPending}
-              data-testid="button-save-region"
-            >
-              <Save className="h-4 w-4 mr-2" />
-              Save Region Settings
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Wallet className="h-5 w-5 text-primary" />
-            <CardTitle>Virtual Accounts</CardTitle>
-          </div>
-          <CardDescription>
-            Create virtual bank accounts for receiving payments.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="p-4 border rounded-lg bg-muted/30">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium">Virtual Account</p>
-                <p className="text-sm text-muted-foreground">
-                  {isPaystack 
-                    ? 'Create a dedicated bank account number for your company'
-                    : 'Connect your bank for direct deposits via Stripe Treasury'
+                <Label htmlFor="companyEmail" className="text-sm font-medium">
+                  Company Email
+                </Label>
+                <Input
+                  id="companyEmail"
+                  type="email"
+                  value={formData.companyEmail || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, companyEmail: e.target.value })
                   }
-                </p>
+                  className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                  data-testid="input-company-email"
+                  placeholder="company@example.com"
+                />
               </div>
-              <Button variant="outline" data-testid="button-create-virtual-account">
-                {isPaystack ? 'Create Account' : 'Connect Bank'}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="companyPhone" className="text-sm font-medium">
+                  Phone Number
+                </Label>
+                <Input
+                  id="companyPhone"
+                  value={formData.companyPhone || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, companyPhone: e.target.value })
+                  }
+                  className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                  data-testid="input-company-phone"
+                  placeholder="+1 (555) 000-0000"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="address" className="text-sm font-medium">
+                  Business Address
+                </Label>
+                <Input
+                  id="address"
+                  value={formData.companyAddress || ""}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      companyAddress: e.target.value,
+                    })
+                  }
+                  className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                  data-testid="input-address"
+                  placeholder="123 Business St, City, Country"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button
+                onClick={handleSaveCompany}
+                disabled={updateSettingsMutation.isPending}
+                className="bg-violet-600 hover:bg-violet-700 text-white"
+                data-testid="button-save-company"
+              >
+                {updateSettingsMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <Save className="h-4 w-4 mr-2" />
+                )}
+                Save Changes
               </Button>
             </div>
           </div>
-          
-          {isPaystack && (
-            <div className="text-sm text-muted-foreground">
-              <p>Supported banks: Wema Bank, Access Bank, Providus Bank</p>
-              <p>Receive instant notifications for deposits</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        </GlassCard>
+      </motion.div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Bell className="h-5 w-5 text-primary" />
-            <CardTitle>Notifications</CardTitle>
-          </div>
-          <CardDescription>
-            Manage your notification preferences.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Email Notifications</Label>
-              <p className="text-sm text-muted-foreground">
-                Receive email updates about transactions.
-              </p>
+      {/* Organization Details */}
+      <motion.div variants={fadeUp} initial="hidden" animate="visible">
+        <GlassCard>
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/10 flex items-center justify-center">
+                <Briefcase className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div>
+                <SectionLabel>Organization Details</SectionLabel>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Legal and compliance information.
+                </p>
+              </div>
             </div>
-            <Switch 
-              checked={emailNotifications}
-              onCheckedChange={(checked) => handleUserSettingChange("emailNotifications", checked)}
-              data-testid="switch-email-notifications" 
-            />
-          </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Expense Alerts</Label>
-              <p className="text-sm text-muted-foreground">
-                Get notified when expenses need approval.
-              </p>
-            </div>
-            <Switch 
-              checked={expenseAlerts}
-              onCheckedChange={(checked) => handleUserSettingChange("expenseAlerts", checked)}
-              data-testid="switch-expense-alerts" 
-            />
-          </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Budget Warnings</Label>
-              <p className="text-sm text-muted-foreground">
-                Alerts when budgets are near their limits.
-              </p>
-            </div>
-            <Switch 
-              checked={budgetWarnings}
-              onCheckedChange={(checked) => handleUserSettingChange("budgetWarnings", checked)}
-              data-testid="switch-budget-warnings" 
-            />
-          </div>
-        </CardContent>
-      </Card>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Shield className="h-5 w-5 text-primary" />
-            <CardTitle>Security</CardTitle>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="industry" className="text-sm font-medium">
+                  Industry
+                </Label>
+                <Select
+                  value={formData.industry || ""}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, industry: value })
+                  }
+                >
+                  <SelectTrigger
+                    className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                    data-testid="select-industry"
+                  >
+                    <SelectValue placeholder="Select industry" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="technology">Technology</SelectItem>
+                    <SelectItem value="finance">Finance & Banking</SelectItem>
+                    <SelectItem value="healthcare">Healthcare</SelectItem>
+                    <SelectItem value="retail">Retail & E-commerce</SelectItem>
+                    <SelectItem value="manufacturing">Manufacturing</SelectItem>
+                    <SelectItem value="education">Education</SelectItem>
+                    <SelectItem value="consulting">Consulting</SelectItem>
+                    <SelectItem value="real_estate">Real Estate</SelectItem>
+                    <SelectItem value="logistics">
+                      Logistics & Transportation
+                    </SelectItem>
+                    <SelectItem value="media">Media & Entertainment</SelectItem>
+                    <SelectItem value="hospitality">Hospitality</SelectItem>
+                    <SelectItem value="agriculture">Agriculture</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="companySize" className="text-sm font-medium">
+                  Company Size
+                </Label>
+                <Select
+                  value={formData.companySize || ""}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, companySize: value })
+                  }
+                >
+                  <SelectTrigger
+                    className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                    data-testid="select-company-size"
+                  >
+                    <SelectValue placeholder="Select size" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1-10">1-10 employees</SelectItem>
+                    <SelectItem value="11-50">11-50 employees</SelectItem>
+                    <SelectItem value="51-200">51-200 employees</SelectItem>
+                    <SelectItem value="201-500">201-500 employees</SelectItem>
+                    <SelectItem value="501-1000">
+                      501-1,000 employees
+                    </SelectItem>
+                    <SelectItem value="1001+">1,000+ employees</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="taxId" className="text-sm font-medium">
+                  Tax ID / VAT Number
+                </Label>
+                <Input
+                  id="taxId"
+                  placeholder="e.g., 12-3456789"
+                  value={formData.taxId || ""}
+                  onChange={(e) =>
+                    setFormData({ ...formData, taxId: e.target.value })
+                  }
+                  className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                  data-testid="input-tax-id"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label
+                  htmlFor="registrationNumber"
+                  className="text-sm font-medium"
+                >
+                  Registration Number
+                </Label>
+                <Input
+                  id="registrationNumber"
+                  placeholder="e.g., RC123456"
+                  value={formData.registrationNumber || ""}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      registrationNumber: e.target.value,
+                    })
+                  }
+                  className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                  data-testid="input-registration-number"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="website" className="text-sm font-medium">
+                Company Website
+              </Label>
+              <Input
+                id="website"
+                type="url"
+                placeholder="https://example.com"
+                value={formData.website || ""}
+                onChange={(e) =>
+                  setFormData({ ...formData, website: e.target.value })
+                }
+                className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                data-testid="input-website"
+              />
+            </div>
+
+            <div className="flex justify-end">
+              <Button
+                onClick={() =>
+                  updateSettingsMutation.mutate({
+                    industry: formData.industry,
+                    companySize: formData.companySize,
+                    taxId: formData.taxId,
+                    registrationNumber: formData.registrationNumber,
+                    website: formData.website,
+                  })
+                }
+                disabled={updateSettingsMutation.isPending}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                data-testid="button-save-organization"
+              >
+                {updateSettingsMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <Save className="h-4 w-4 mr-2" />
+                )}
+                Save Details
+              </Button>
+            </div>
           </div>
-          <CardDescription>
-            Secure your account with additional protections.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
-                <Label>Two-Factor Authentication</Label>
-                <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800">
-                  Recommended
+        </GlassCard>
+      </motion.div>
+
+      {/* Branding */}
+      <motion.div variants={fadeUp} initial="hidden" animate="visible">
+        <GlassCard>
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-amber-500/10 flex items-center justify-center">
+                <Palette className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div>
+                <SectionLabel>Branding</SectionLabel>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Customize your company branding.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Company Logo</Label>
+                <div className="flex items-center gap-4">
+                  <div className="w-24 h-24 rounded-xl border-2 border-dashed border-slate-500/30 flex items-center justify-center bg-slate-500/10">
+                    {formData.companyLogo ? (
+                      <img
+                        src={formData.companyLogo}
+                        alt="Company logo"
+                        className="w-full h-full object-contain rounded-xl"
+                      />
+                    ) : (
+                      <Upload className="h-8 w-8 text-slate-500/50" />
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <Input
+                      type="url"
+                      placeholder="Enter logo URL"
+                      value={formData.companyLogo || ""}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          companyLogo: e.target.value,
+                        })
+                      }
+                      className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                      data-testid="input-logo-url"
+                    />
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                      Recommended: 200x200 px, PNG or SVG
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="h-px bg-slate-500/20" />
+
+              <div className="space-y-2">
+                <Label htmlFor="tagline" className="text-sm font-medium">
+                  Company Tagline
+                </Label>
+                <Input
+                  id="tagline"
+                  placeholder="e.g., Simplifying expense management"
+                  value={formData.companyTagline || ""}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      companyTagline: e.target.value,
+                    })
+                  }
+                  className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                  data-testid="input-tagline"
+                />
+              </div>
+
+              <div className="space-y-3">
+                <Label className="text-sm font-medium">Brand Colors</Label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="primaryColor" className="text-xs text-slate-600 dark:text-slate-400">
+                      Primary
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <div className="relative h-11 w-14 rounded-xl overflow-hidden border-2 border-slate-500/50 bg-slate-500/10">
+                        <input
+                          type="color"
+                          id="primaryColor"
+                          value={formData.primaryColor || "#4f46e5"}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              primaryColor: e.target.value,
+                            })
+                          }
+                          className="absolute inset-0 w-full h-full cursor-pointer"
+                          data-testid="input-primary-color"
+                        />
+                      </div>
+                      <Input
+                        value={formData.primaryColor || "#4f46e5"}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            primaryColor: e.target.value,
+                          })
+                        }
+                        className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11 font-mono text-xs flex-1"
+                        placeholder="#4f46e5"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="secondaryColor" className="text-xs text-slate-600 dark:text-slate-400">
+                      Secondary
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <div className="relative h-11 w-14 rounded-xl overflow-hidden border-2 border-slate-500/50 bg-slate-500/10">
+                        <input
+                          type="color"
+                          id="secondaryColor"
+                          value={formData.secondaryColor || "#10b981"}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              secondaryColor: e.target.value,
+                            })
+                          }
+                          className="absolute inset-0 w-full h-full cursor-pointer"
+                          data-testid="input-secondary-color"
+                        />
+                      </div>
+                      <Input
+                        value={formData.secondaryColor || "#10b981"}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            secondaryColor: e.target.value,
+                          })
+                        }
+                        className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11 font-mono text-xs flex-1"
+                        placeholder="#10b981"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-500/10 border border-slate-500/20 flex items-center gap-3">
+                  <div
+                    className="w-10 h-10 rounded-lg ring-2 ring-slate-500/30"
+                    style={{ backgroundColor: formData.primaryColor || "#4f46e5" }}
+                  />
+                  <div
+                    className="w-10 h-10 rounded-lg ring-2 ring-slate-500/30"
+                    style={{ backgroundColor: formData.secondaryColor || "#10b981" }}
+                  />
+                  <span className="text-sm text-slate-600 dark:text-slate-400">
+                    Your brand colors
+                  </span>
+                </div>
+              </div>
+
+              <div className="h-px bg-slate-500/20" />
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm font-medium">App Theme</Label>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    Light or dark mode
+                  </p>
+                </div>
+                <ThemeToggle />
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button
+                onClick={() =>
+                  updateSettingsMutation.mutate({
+                    companyLogo: formData.companyLogo,
+                    companyTagline: formData.companyTagline,
+                    primaryColor: formData.primaryColor,
+                    secondaryColor: formData.secondaryColor,
+                  })
+                }
+                disabled={updateSettingsMutation.isPending}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+                data-testid="button-save-branding"
+              >
+                {updateSettingsMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <Save className="h-4 w-4 mr-2" />
+                )}
+                Save Branding
+              </Button>
+            </div>
+          </div>
+        </GlassCard>
+      </motion.div>
+
+      {/* Invoice Settings */}
+      <motion.div variants={fadeUp} initial="hidden" animate="visible">
+        <GlassCard>
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500/20 to-rose-500/10 flex items-center justify-center">
+                <FileText className="h-5 w-5 text-rose-600 dark:text-rose-400" />
+              </div>
+              <div>
+                <SectionLabel>Invoice Settings</SectionLabel>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Customize your invoices and receipts.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="invoicePrefix" className="text-sm font-medium">
+                  Invoice Number Prefix
+                </Label>
+                <Input
+                  id="invoicePrefix"
+                  placeholder="INV"
+                  value={formData.invoicePrefix || "INV"}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      invoicePrefix: e.target.value,
+                    })
+                  }
+                  className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                  data-testid="input-invoice-prefix"
+                />
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Example: {formData.invoicePrefix || "INV"}-2024-0001
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label
+                  htmlFor="fiscalYear"
+                  className="text-sm font-medium"
+                >
+                  Fiscal Year Start
+                </Label>
+                <Select
+                  value={formData.fiscalYearStart || "January"}
+                  onValueChange={(value) =>
+                    setFormData({
+                      ...formData,
+                      fiscalYearStart: value,
+                    })
+                  }
+                >
+                  <SelectTrigger
+                    className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                    data-testid="select-fiscal-year"
+                  >
+                    <SelectValue placeholder="Select month" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="January">January</SelectItem>
+                    <SelectItem value="February">February</SelectItem>
+                    <SelectItem value="March">March</SelectItem>
+                    <SelectItem value="April">April</SelectItem>
+                    <SelectItem value="July">July</SelectItem>
+                    <SelectItem value="October">October</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="invoiceTerms" className="text-sm font-medium">
+                Default Payment Terms
+              </Label>
+              <Input
+                id="invoiceTerms"
+                placeholder="Payment due within 30 days"
+                value={formData.invoiceTerms || ""}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    invoiceTerms: e.target.value,
+                  })
+                }
+                className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                data-testid="input-invoice-terms"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="invoiceFooter" className="text-sm font-medium">
+                Invoice Footer Text
+              </Label>
+              <textarea
+                id="invoiceFooter"
+                className="w-full min-h-[80px] rounded-xl bg-slate-500/30 border border-slate-500/50 px-3 py-2 text-sm text-foreground placeholder:text-slate-600 dark:placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950"
+                placeholder="Thank you for your business!"
+                value={formData.invoiceFooter || ""}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    invoiceFooter: e.target.value,
+                  })
+                }
+                data-testid="input-invoice-footer"
+              />
+            </div>
+
+            <div className="h-px bg-slate-500/20" />
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm font-medium">
+                    Show Logo on Invoices
+                  </Label>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    Display on generated invoices
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.showLogoOnInvoice ?? true}
+                  onCheckedChange={(checked) => {
+                    setFormData({
+                      ...formData,
+                      showLogoOnInvoice: checked,
+                    });
+                    updateSettingsMutation.mutate({
+                      showLogoOnInvoice: checked,
+                    });
+                  }}
+                  data-testid="switch-logo-invoice"
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm font-medium">
+                    Show Logo on Receipts
+                  </Label>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    Display on expense receipts
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.showLogoOnReceipts ?? true}
+                  onCheckedChange={(checked) => {
+                    setFormData({
+                      ...formData,
+                      showLogoOnReceipts: checked,
+                    });
+                    updateSettingsMutation.mutate({
+                      showLogoOnReceipts: checked,
+                    });
+                  }}
+                  data-testid="switch-logo-receipts"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button
+                onClick={() =>
+                  updateSettingsMutation.mutate({
+                    invoicePrefix: formData.invoicePrefix,
+                    fiscalYearStart: formData.fiscalYearStart,
+                    invoiceTerms: formData.invoiceTerms,
+                    invoiceFooter: formData.invoiceFooter,
+                  })
+                }
+                disabled={updateSettingsMutation.isPending}
+                className="bg-rose-600 hover:bg-rose-700 text-white"
+                data-testid="button-save-invoice"
+              >
+                {updateSettingsMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <Save className="h-4 w-4 mr-2" />
+                )}
+                Save Invoice Settings
+              </Button>
+            </div>
+          </div>
+        </GlassCard>
+      </motion.div>
+
+      {/* Region & Payment Settings */}
+      <motion.div variants={fadeUp} initial="hidden" animate="visible">
+        <GlassCard className="border-2 border-violet-500/30">
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-cyan-500/10 flex items-center justify-center">
+                <Globe className="h-5 w-5 text-cyan-600 dark:text-cyan-400" />
+              </div>
+              <div className="flex-1">
+                <SectionLabel>Region & Payment</SectionLabel>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Your country determines payment provider.
+                </p>
+              </div>
+              <Badge className="bg-violet-600 text-white">Important</Badge>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="country" className="text-sm font-medium">
+                  Country / Region
+                </Label>
+                <Select
+                  value={formData.countryCode || "US"}
+                  onValueChange={handleCountryChange}
+                >
+                  <SelectTrigger
+                    className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                    data-testid="select-country"
+                  >
+                    <SelectValue placeholder="Select country" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="US">United States</SelectItem>
+                    <SelectItem value="CA">Canada</SelectItem>
+                    <SelectItem value="GB">United Kingdom</SelectItem>
+                    <SelectItem value="DE">Germany</SelectItem>
+                    <SelectItem value="FR">France</SelectItem>
+                    <SelectItem value="NG">Nigeria</SelectItem>
+                    <SelectItem value="GH">Ghana</SelectItem>
+                    <SelectItem value="KE">Kenya</SelectItem>
+                    <SelectItem value="ZA">South Africa</SelectItem>
+                    <SelectItem value="EG">Egypt</SelectItem>
+                    <SelectItem value="RW">Rwanda</SelectItem>
+                    <SelectItem value="CI">Côte d'Ivoire</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="currency" className="text-sm font-medium">
+                  Default Currency
+                </Label>
+                <Select
+                  value={formData.currency || "USD"}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, currency: value })
+                  }
+                >
+                  <SelectTrigger
+                    className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                    data-testid="select-currency"
+                  >
+                    <SelectValue placeholder="Select currency" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="USD">USD - US Dollar</SelectItem>
+                    <SelectItem value="EUR">EUR - Euro</SelectItem>
+                    <SelectItem value="GBP">GBP - British Pound</SelectItem>
+                    <SelectItem value="NGN">NGN - Nigerian Naira</SelectItem>
+                    <SelectItem value="KES">KES - Kenyan Shilling</SelectItem>
+                    <SelectItem value="GHS">GHS - Ghanaian Cedi</SelectItem>
+                    <SelectItem value="ZAR">ZAR - South African Rand</SelectItem>
+                    <SelectItem value="EGP">EGP - Egyptian Pound</SelectItem>
+                    <SelectItem value="RWF">RWF - Rwandan Franc</SelectItem>
+                    <SelectItem value="XOF">XOF - West African CFA</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-500/10 border border-slate-500/20 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-br ${
+                      isPaystack
+                        ? "from-cyan-500/20 to-cyan-500/10"
+                        : "from-violet-500/20 to-violet-500/10"
+                    }`}
+                  >
+                    <Landmark
+                      className={`h-6 w-6 ${
+                        isPaystack
+                          ? "text-cyan-600 dark:text-cyan-400"
+                          : "text-violet-600 dark:text-violet-400"
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-sm">
+                      {isPaystack ? "Paystack" : "Stripe"}
+                    </p>
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                      {isPaystack
+                        ? "African payments"
+                        : "Global processing"}
+                    </p>
+                  </div>
+                </div>
+                <Badge
+                  className={`${
+                    isPaystack
+                      ? "bg-cyan-600"
+                      : "bg-violet-600"
+                  } text-white`}
+                >
+                  Active
                 </Badge>
               </div>
-              <p className="text-sm text-muted-foreground">
-                Add an extra layer of security to your account.
-              </p>
+
+              <div className="h-px bg-slate-500/20" />
+
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="flex items-center gap-2">
+                  {paymentKeys?.stripe ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-slate-500/50" />
+                  )}
+                  <span>
+                    Stripe {paymentKeys?.stripe ? "Connected" : "—"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {paymentKeys?.paystack ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-slate-500/50" />
+                  )}
+                  <span>
+                    Paystack {paymentKeys?.paystack ? "Connected" : "—"}
+                  </span>
+                </div>
+              </div>
             </div>
-            <Button variant="outline" data-testid="button-enable-2fa">
-              Enable
-            </Button>
-          </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Transaction PIN</Label>
-              <p className="text-sm text-muted-foreground">
-                Require PIN for sensitive transactions.
-              </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="timezone" className="text-sm font-medium">
+                  Timezone
+                </Label>
+                <Select
+                  value={formData.timezone || "America/Los_Angeles"}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, timezone: value })
+                  }
+                >
+                  <SelectTrigger
+                    className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                    data-testid="select-timezone"
+                  >
+                    <SelectValue placeholder="Select timezone" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="America/Los_Angeles">
+                      PT - Pacific
+                    </SelectItem>
+                    <SelectItem value="America/New_York">ET - Eastern</SelectItem>
+                    <SelectItem value="UTC">UTC</SelectItem>
+                    <SelectItem value="Europe/London">GMT - London</SelectItem>
+                    <SelectItem value="Africa/Lagos">WAT - West Africa</SelectItem>
+                    <SelectItem value="Africa/Nairobi">EAT - East Africa</SelectItem>
+                    <SelectItem value="Africa/Cairo">Egypt Time</SelectItem>
+                    <SelectItem value="Africa/Johannesburg">
+                      SAST - South Africa
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dateFormat" className="text-sm font-medium">
+                  Date Format
+                </Label>
+                <Select
+                  value={formData.dateFormat || "MM/DD/YYYY"}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, dateFormat: value })
+                  }
+                >
+                  <SelectTrigger
+                    className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11"
+                    data-testid="select-date-format"
+                  >
+                    <SelectValue placeholder="Select format" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="MM/DD/YYYY">MM/DD/YYYY</SelectItem>
+                    <SelectItem value="DD/MM/YYYY">DD/MM/YYYY</SelectItem>
+                    <SelectItem value="YYYY-MM-DD">YYYY-MM-DD</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <Switch 
-              checked={transactionPin}
-              onCheckedChange={(checked) => handleUserSettingChange("transactionPinEnabled", checked)}
-              data-testid="switch-transaction-pin" 
-            />
-          </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Require Receipts</Label>
-              <p className="text-sm text-muted-foreground">
-                Require receipt uploads for all expenses.
-              </p>
-            </div>
-            <Switch 
-              checked={formData.requireReceipts ?? true}
-              onCheckedChange={(checked) => {
-                setFormData({ ...formData, requireReceipts: checked });
-                updateSettingsMutation.mutate({ requireReceipts: checked });
-              }}
-              data-testid="switch-require-receipts" 
-            />
-          </div>
-          <Separator />
-          <div className="space-y-2">
-            <Label>Auto-Approve Threshold</Label>
-            <p className="text-sm text-muted-foreground mb-2">
-              Automatically approve expenses below this amount ({formData.currency || 'USD'}).
-            </p>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground font-medium">
-                {formData.currency === 'NGN' ? '₦' : 
-                 formData.currency === 'EUR' ? '€' : 
-                 formData.currency === 'GBP' ? '£' : 
-                 formData.currency === 'KES' ? 'KSh' : 
-                 formData.currency === 'GHS' ? '₵' : 
-                 formData.currency === 'ZAR' ? 'R' : '$'}
-              </span>
-              <Input 
-                type="number"
-                className="w-32"
-                value={formData.autoApproveBelow || 100}
-                onChange={(e) => setFormData({ ...formData, autoApproveBelow: parseInt(e.target.value) })}
-                data-testid="input-auto-approve"
-              />
-              <Button 
-                size="sm" 
-                variant="outline"
-                onClick={() => updateSettingsMutation.mutate({ autoApproveBelow: formData.autoApproveBelow })}
+
+            <div className="flex justify-end">
+              <Button
+                onClick={handleSaveRegion}
                 disabled={updateSettingsMutation.isPending}
+                className="bg-cyan-600 hover:bg-cyan-700 text-white"
+                data-testid="button-save-region"
               >
-                {updateSettingsMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Update'}
+                {updateSettingsMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <Save className="h-4 w-4 mr-2" />
+                )}
+                Save Region Settings
               </Button>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </GlassCard>
+      </motion.div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <HelpCircle className="h-5 w-5 text-primary" />
-            <CardTitle>Help & Support</CardTitle>
+      {/* Virtual Accounts */}
+      <motion.div variants={fadeUp} initial="hidden" animate="visible">
+        <GlassCard>
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/10 flex items-center justify-center">
+                <Wallet className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div>
+                <SectionLabel>Virtual Accounts</SectionLabel>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Receive payments directly
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 border border-slate-500/20 rounded-xl bg-slate-500/10">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-sm">Virtual Account Setup</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                    {isPaystack
+                      ? "Create a dedicated bank account for instant deposits"
+                      : "Connect your bank via Stripe Treasury"}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  className="border-slate-500/50 hover:bg-slate-500/10"
+                  data-testid="button-create-virtual-account"
+                >
+                  {isPaystack ? "Create Account" : "Connect Bank"}
+                </Button>
+              </div>
+            </div>
+
+            {isPaystack && (
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                Supported: Wema, Access, Providus • Instant notifications
+              </p>
+            )}
           </div>
-          <CardDescription>
-            Get help with Spendly.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Button variant="outline" className="w-full justify-start" data-testid="button-docs">
-            View Documentation
-          </Button>
-          <Button variant="outline" className="w-full justify-start" data-testid="button-support">
-            Contact Support
-          </Button>
-        </CardContent>
-      </Card>
-    </div>
+        </GlassCard>
+      </motion.div>
+
+      {/* Notifications */}
+      <motion.div variants={fadeUp} initial="hidden" animate="visible">
+        <GlassCard>
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-amber-500/10 flex items-center justify-center">
+                <Bell className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div>
+                <SectionLabel>Notifications</SectionLabel>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Manage your preferences
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-3 rounded-lg bg-slate-500/10">
+                <div>
+                  <p className="text-sm font-medium">Email Notifications</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    Transaction updates
+                  </p>
+                </div>
+                <Switch
+                  checked={emailNotifications}
+                  onCheckedChange={(checked) =>
+                    handleUserSettingChange("emailNotifications", checked)
+                  }
+                  data-testid="switch-email-notifications"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-3 rounded-lg bg-slate-500/10">
+                <div>
+                  <p className="text-sm font-medium">Expense Alerts</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    When approval needed
+                  </p>
+                </div>
+                <Switch
+                  checked={expenseAlerts}
+                  onCheckedChange={(checked) =>
+                    handleUserSettingChange("expenseAlerts", checked)
+                  }
+                  data-testid="switch-expense-alerts"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-3 rounded-lg bg-slate-500/10">
+                <div>
+                  <p className="text-sm font-medium">Budget Warnings</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    Near limit alerts
+                  </p>
+                </div>
+                <Switch
+                  checked={budgetWarnings}
+                  onCheckedChange={(checked) =>
+                    handleUserSettingChange("budgetWarnings", checked)
+                  }
+                  data-testid="switch-budget-warnings"
+                />
+              </div>
+            </div>
+          </div>
+        </GlassCard>
+      </motion.div>
+
+      {/* Security */}
+      <motion.div variants={fadeUp} initial="hidden" animate="visible">
+        <GlassCard>
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500/20 to-rose-500/10 flex items-center justify-center">
+                <Shield className="h-5 w-5 text-rose-600 dark:text-rose-400" />
+              </div>
+              <div>
+                <SectionLabel>Security</SectionLabel>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Protect your account
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-3 rounded-lg bg-slate-500/10">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium">Two-Factor Auth</p>
+                    <Badge className="bg-emerald-600/20 text-emerald-700 dark:text-emerald-400 text-xs border-0">
+                      Recommended
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    Extra security layer
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-slate-500/50"
+                  data-testid="button-enable-2fa"
+                >
+                  Enable
+                </Button>
+              </div>
+
+              <div className="flex items-center justify-between p-3 rounded-lg bg-slate-500/10">
+                <div>
+                  <p className="text-sm font-medium">Transaction PIN</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    For sensitive actions
+                  </p>
+                </div>
+                <Switch
+                  checked={transactionPin}
+                  onCheckedChange={(checked) =>
+                    handleUserSettingChange(
+                      "transactionPinEnabled",
+                      checked
+                    )
+                  }
+                  data-testid="switch-transaction-pin"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-3 rounded-lg bg-slate-500/10">
+                <div>
+                  <p className="text-sm font-medium">Require Receipts</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    Upload for expenses
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.requireReceipts ?? true}
+                  onCheckedChange={(checked) => {
+                    setFormData({
+                      ...formData,
+                      requireReceipts: checked,
+                    });
+                    updateSettingsMutation.mutate({
+                      requireReceipts: checked,
+                    });
+                  }}
+                  data-testid="switch-require-receipts"
+                />
+              </div>
+
+              <div className="p-3 rounded-lg bg-slate-500/10 space-y-2">
+                <Label className="text-sm font-medium block">
+                  Auto-Approve Threshold
+                </Label>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Below this amount in {formData.currency || "USD"}
+                </p>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground font-medium text-sm">
+                    {formData.currency === "NGN"
+                      ? "₦"
+                      : formData.currency === "EUR"
+                        ? "€"
+                        : formData.currency === "GBP"
+                          ? "£"
+                          : formData.currency === "KES"
+                            ? "KSh"
+                            : formData.currency === "GHS"
+                              ? "₵"
+                              : formData.currency === "ZAR"
+                                ? "R"
+                                : "$"}
+                  </span>
+                  <Input
+                    type="number"
+                    value={formData.autoApproveBelow || 100}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        autoApproveBelow: parseInt(e.target.value),
+                      })
+                    }
+                    className="bg-slate-500/30 border-slate-500/50 rounded-xl h-10 text-sm flex-1"
+                    data-testid="input-auto-approve"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-slate-500/50"
+                    onClick={() =>
+                      updateSettingsMutation.mutate({
+                        autoApproveBelow: formData.autoApproveBelow,
+                      })
+                    }
+                    disabled={updateSettingsMutation.isPending}
+                  >
+                    {updateSettingsMutation.isPending ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      "Save"
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </GlassCard>
+      </motion.div>
+
+      {/* Help & Support */}
+      <motion.div variants={fadeUp} initial="hidden" animate="visible">
+        <GlassCard>
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-cyan-500/10 flex items-center justify-center">
+                <HelpCircle className="h-5 w-5 text-cyan-600 dark:text-cyan-400" />
+              </div>
+              <div>
+                <SectionLabel>Help & Support</SectionLabel>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Need assistance?
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Button
+                variant="outline"
+                className="border-slate-500/50 hover:bg-slate-500/10 justify-start"
+                data-testid="button-docs"
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Documentation
+              </Button>
+              <Button
+                variant="outline"
+                className="border-slate-500/50 hover:bg-slate-500/10 justify-start"
+                data-testid="button-support"
+              >
+                <HelpCircle className="h-4 w-4 mr-2" />
+                Contact Support
+              </Button>
+            </div>
+          </div>
+        </GlassCard>
+      </motion.div>
+    </PageWrapper>
   );
 }

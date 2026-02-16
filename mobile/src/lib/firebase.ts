@@ -1,5 +1,12 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
+import {
+  getAuth,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  updateProfile,
+  sendPasswordResetEmail,
+} from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const firebaseConfig = {
@@ -21,11 +28,18 @@ export const signIn = async (email: string, password: string) => {
   return userCredential.user;
 };
 
-export const signUp = async (email: string, password: string) => {
+export const signUp = async (email: string, password: string, displayName?: string) => {
   const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+  if (displayName) {
+    await updateProfile(userCredential.user, { displayName });
+  }
   const token = await userCredential.user.getIdToken();
   await AsyncStorage.setItem('authToken', token);
   return userCredential.user;
+};
+
+export const resetPassword = async (email: string) => {
+  await sendPasswordResetEmail(auth, email);
 };
 
 export const signOut = async () => {

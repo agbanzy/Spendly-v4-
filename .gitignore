@@ -13,3 +13,5 @@ vite.config.ts.*
 uploads
 attached_assets/*.txt
 attached_assets/.env_*
+mobile/.env
+mobile/.expo/

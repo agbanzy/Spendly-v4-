@@ -1,33 +1,28 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { 
-  Building2, 
-  Plus, 
+import { PageWrapper, PageHeader, MetricCard, StatusBadge, EmptyState, GlassCard, fadeUp, stagger } from "@/components/ui-extended";
+import {
+  Building2,
+  Plus,
   Search,
   CheckCircle2,
   AlertCircle,
   DollarSign,
   Mail,
-  Phone,
   MapPin,
   Loader2,
-  MoreHorizontal,
   Send,
-  FileText,
-  TrendingUp,
-  Globe
+  TrendingUp
 } from "lucide-react";
 import type { Vendor, CompanySettings } from "@shared/schema";
 
@@ -111,335 +106,379 @@ export default function VendorsPage() {
     });
   };
 
-  const getStatusBadge = (status: Vendor["status"]) => {
+  const getStatusVariant = (status: Vendor["status"]): "success" | "secondary" | "warning" => {
     switch (status) {
       case "active":
-        return (
-          <Badge variant="default" className="bg-emerald-500">
-            <CheckCircle2 className="mr-1 h-3 w-3" />
-            Active
-          </Badge>
-        );
+        return "success";
       case "inactive":
-        return (
-          <Badge variant="secondary">
-            Inactive
-          </Badge>
-        );
+        return "secondary";
       case "pending":
-        return (
-          <Badge variant="outline">
-            <AlertCircle className="mr-1 h-3 w-3" />
-            Pending Approval
-          </Badge>
-        );
+        return "warning";
+      default:
+        return "secondary";
     }
   };
 
-  const getCategoryColor = (category: string) => {
-    const colors: Record<string, string> = {
-      "Cloud Services": "bg-indigo-100 text-indigo-600 dark:bg-indigo-900 dark:text-indigo-400",
-      "Design Tools": "bg-pink-100 text-pink-600 dark:bg-pink-900 dark:text-pink-400",
-      "Office Space": "bg-amber-100 text-amber-600 dark:bg-amber-900 dark:text-amber-400",
-      "Utilities": "bg-cyan-100 text-cyan-600 dark:bg-cyan-900 dark:text-cyan-400",
-      "Insurance": "bg-emerald-100 text-emerald-600 dark:bg-emerald-900 dark:text-emerald-400"
+  const getCategoryGradient = (category: string) => {
+    const gradients: Record<string, string> = {
+      "Cloud Services": "from-violet-500 to-violet-600",
+      "Software": "from-cyan-500 to-cyan-600",
+      "Design Tools": "from-rose-500 to-rose-600",
+      "Office Space": "from-amber-500 to-amber-600",
+      "Utilities": "from-emerald-500 to-emerald-600",
+      "Insurance": "from-violet-500 to-violet-600",
+      "Marketing": "from-rose-500 to-rose-600",
+      "Other": "from-slate-500 to-slate-600"
     };
-    return colors[category] || "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400";
+    return gradients[category] || "from-slate-500 to-slate-600";
   };
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" data-testid="text-vendors-title">Vendor Management</h1>
-          <p className="text-muted-foreground">Manage vendors and track payments</p>
-        </div>
-        <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-          <DialogTrigger asChild>
-            <Button data-testid="button-add-vendor">
-              <Plus className="mr-2 h-4 w-4" />
-              Add Vendor
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[500px]">
-            <DialogHeader>
-              <DialogTitle>Add New Vendor</DialogTitle>
-              <DialogDescription>
-                Enter the vendor details to add them to your list.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Vendor Name</Label>
-                <Input placeholder="e.g., Amazon Web Services" data-testid="input-vendor-name" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+    <PageWrapper>
+      <motion.div variants={fadeUp} initial="initial" animate="animate" className="space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+          <PageHeader
+            title="Vendor Management"
+            subtitle="Manage vendors and track payments"
+          />
+          <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+            <DialogTrigger asChild>
+              <Button data-testid="button-add-vendor" className="bg-violet-600 hover:bg-violet-700 w-full sm:w-auto">
+                <Plus className="mr-2 h-4 w-4" />
+                Add Vendor
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[500px] border-slate-200 dark:border-slate-700">
+              <DialogHeader>
+                <DialogTitle className="text-xl">Add New Vendor</DialogTitle>
+                <DialogDescription>
+                  Enter the vendor details to add them to your list.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
                 <div className="space-y-2">
-                  <Label>Email</Label>
-                  <Input type="email" placeholder="billing@vendor.com" />
+                  <Label className="text-slate-700 dark:text-slate-300">Vendor Name</Label>
+                  <Input placeholder="e.g., Amazon Web Services" data-testid="input-vendor-name" className="border-slate-200 dark:border-slate-700" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-slate-700 dark:text-slate-300">Email</Label>
+                    <Input type="email" placeholder="billing@vendor.com" className="border-slate-200 dark:border-slate-700" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-700 dark:text-slate-300">Phone</Label>
+                    <Input type="tel" placeholder="+1 (555) 123-4567" className="border-slate-200 dark:border-slate-700" />
+                  </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Phone</Label>
-                  <Input type="tel" placeholder="+1 (555) 123-4567" />
+                  <Label className="text-slate-700 dark:text-slate-300">Address</Label>
+                  <Input placeholder="City, State, Country" className="border-slate-200 dark:border-slate-700" />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-slate-700 dark:text-slate-300">Category</Label>
+                  <Select>
+                    <SelectTrigger className="border-slate-200 dark:border-slate-700">
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Cloud Services">Cloud Services</SelectItem>
+                      <SelectItem value="Software">Software</SelectItem>
+                      <SelectItem value="Office Space">Office Space</SelectItem>
+                      <SelectItem value="Utilities">Utilities</SelectItem>
+                      <SelectItem value="Insurance">Insurance</SelectItem>
+                      <SelectItem value="Marketing">Marketing</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-slate-700 dark:text-slate-300">Payment Terms</Label>
+                  <Select defaultValue="net30">
+                    <SelectTrigger className="border-slate-200 dark:border-slate-700">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="net15">Net 15</SelectItem>
+                      <SelectItem value="net30">Net 30</SelectItem>
+                      <SelectItem value="net45">Net 45</SelectItem>
+                      <SelectItem value="net60">Net 60</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label>Address</Label>
-                <Input placeholder="City, State, Country" />
-              </div>
-              <div className="space-y-2">
-                <Label>Category</Label>
-                <Select>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cloud">Cloud Services</SelectItem>
-                    <SelectItem value="software">Software</SelectItem>
-                    <SelectItem value="office">Office Space</SelectItem>
-                    <SelectItem value="utilities">Utilities</SelectItem>
-                    <SelectItem value="insurance">Insurance</SelectItem>
-                    <SelectItem value="marketing">Marketing</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Payment Terms</Label>
-                <Select defaultValue="net30">
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="net15">Net 15</SelectItem>
-                    <SelectItem value="net30">Net 30</SelectItem>
-                    <SelectItem value="net45">Net 45</SelectItem>
-                    <SelectItem value="net60">Net 60</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleAddVendor} disabled={isAdding} data-testid="button-save-vendor">
-                {isAdding ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Adding...
-                  </>
-                ) : (
-                  "Add Vendor"
-                )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card className="glass card-hover">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900 text-indigo-600">
-                <Building2 className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{totalVendors}</p>
-                <p className="text-sm text-muted-foreground">Total Vendors</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="glass card-hover">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900 text-emerald-600">
-                <CheckCircle2 className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{activeVendors}</p>
-                <p className="text-sm text-muted-foreground">Active Vendors</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="glass card-hover">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900 text-amber-600">
-                <AlertCircle className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{formatCurrency(totalPending)}</p>
-                <p className="text-sm text-muted-foreground">Pending Payments</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="glass card-hover">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-cyan-100 dark:bg-cyan-900 text-cyan-600">
-                <TrendingUp className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{currencySymbol}{(totalPaidThisMonth / 1000).toFixed(1)}K</p>
-                <p className="text-sm text-muted-foreground">Total Paid</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Tabs defaultValue="all" className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <TabsList>
-            <TabsTrigger value="all">All Vendors</TabsTrigger>
-            <TabsTrigger value="active">Active</TabsTrigger>
-            <TabsTrigger value="inactive">Inactive</TabsTrigger>
-          </TabsList>
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search vendors..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-              data-testid="input-search-vendors"
-            />
-          </div>
-        </div>
-
-        <TabsContent value="all">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {filteredVendors.map((vendor, index) => (
-              <Card key={vendor.id} className="hover-elevate" data-testid={`vendor-card-${index}`}>
-                <CardContent className="p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-12 w-12">
-                        <AvatarFallback className={getCategoryColor(vendor.category)}>
-                          {vendor.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <h3 className="font-semibold">{vendor.name}</h3>
-                        <p className="text-sm text-muted-foreground">{vendor.category}</p>
-                      </div>
-                    </div>
-                    {getStatusBadge(vendor.status)}
-                  </div>
-                  
-                  <div className="space-y-2 text-sm mb-4">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Mail className="h-4 w-4" />
-                      <span className="truncate">{vendor.email}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <MapPin className="h-4 w-4" />
-                      <span>{vendor.address}</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4 pt-4 border-t">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Total Paid</p>
-                      <p className="font-semibold">{formatCurrency(vendor.totalPaid)}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Pending</p>
-                      <p className={`font-semibold ${vendor.pendingPayments > 0 ? "text-amber-600" : ""}`}>
-                        ${vendor.pendingPayments.toLocaleString()}
-                      </p>
-                    </div>
-                  </div>
-
-                  {vendor.pendingPayments > 0 && (
-                    <Button 
-                      className="w-full mt-4" 
-                      onClick={() => handlePayVendor(vendor)}
-                      data-testid={`button-pay-vendor-${index}`}
-                    >
-                      <Send className="mr-2 h-4 w-4" />
-                      Pay ${vendor.pendingPayments.toLocaleString()}
-                    </Button>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsAddOpen(false)} className="border-slate-200 dark:border-slate-700">
+                  Cancel
+                </Button>
+                <Button onClick={handleAddVendor} disabled={isAdding} data-testid="button-save-vendor" className="bg-violet-600 hover:bg-violet-700">
+                  {isAdding ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Adding...
+                    </>
+                  ) : (
+                    "Add Vendor"
                   )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
 
-        <TabsContent value="active">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {filteredVendors.filter(v => v.status === "active").map((vendor) => (
-              <Card key={vendor.id} className="hover-elevate">
-                <CardContent className="p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-12 w-12">
-                        <AvatarFallback className={getCategoryColor(vendor.category)}>
-                          {vendor.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <h3 className="font-semibold">{vendor.name}</h3>
-                        <p className="text-sm text-muted-foreground">{vendor.category}</p>
-                      </div>
-                    </div>
-                    {getStatusBadge(vendor.status)}
-                  </div>
-                  <div className="grid grid-cols-2 gap-4 pt-4 border-t">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Total Paid</p>
-                      <p className="font-semibold">{formatCurrency(vendor.totalPaid)}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Pending</p>
-                      <p className="font-semibold">{formatCurrency(vendor.pendingPayments)}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
+        <motion.div
+          className="grid gap-4 md:grid-cols-2 lg:grid-cols-4"
+          variants={stagger}
+          initial="initial"
+          animate="animate"
+        >
+          <MetricCard
+            title="Total Vendors"
+            value={totalVendors.toString()}
+            icon={Building2}
+            color="violet"
+          />
+          <MetricCard
+            title="Active Vendors"
+            value={activeVendors.toString()}
+            icon={CheckCircle2}
+            color="emerald"
+          />
+          <MetricCard
+            title="Pending Payments"
+            value={formatCurrency(totalPending)}
+            icon={AlertCircle}
+            color="amber"
+          />
+          <MetricCard
+            title="Total Paid"
+            value={`${currencySymbol}${(totalPaidThisMonth / 1000).toFixed(1)}K`}
+            icon={TrendingUp}
+            color="cyan"
+          />
+        </motion.div>
 
-        <TabsContent value="inactive">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {filteredVendors.filter(v => v.status === "inactive").map((vendor) => (
-              <Card key={vendor.id} className="hover-elevate opacity-70">
-                <CardContent className="p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-12 w-12">
-                        <AvatarFallback className="bg-slate-100 text-slate-500">
-                          {vendor.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <h3 className="font-semibold">{vendor.name}</h3>
-                        <p className="text-sm text-muted-foreground">{vendor.category}</p>
-                      </div>
-                    </div>
-                    {getStatusBadge(vendor.status)}
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Last payment: {vendor.lastPayment}
-                  </p>
-                </CardContent>
-              </Card>
-            ))}
-            {filteredVendors.filter(v => v.status === "inactive").length === 0 && (
-              <div className="col-span-full p-8 text-center text-muted-foreground">
-                No inactive vendors.
+        <GlassCard className="border-slate-200 dark:border-slate-700">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4">
+            <TabsList className="bg-slate-100 dark:bg-slate-800">
+              <TabsTrigger value="all">All Vendors</TabsTrigger>
+              <TabsTrigger value="active">Active</TabsTrigger>
+              <TabsTrigger value="inactive">Inactive</TabsTrigger>
+            </TabsList>
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Input
+                placeholder="Search vendors..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900"
+                data-testid="input-search-vendors"
+              />
+            </div>
+          </div>
+
+          <Tabs defaultValue="all" className="w-full">
+            <TabsContent value="all" className="p-4">
+              {filteredVendors.length === 0 ? (
+                <EmptyState
+                  icon={Building2}
+                  title="No vendors found"
+                  subtitle="Add your first vendor to get started"
+                />
+              ) : (
+                <motion.div
+                  className="grid gap-4 md:grid-cols-2 lg:grid-cols-3"
+                  variants={stagger}
+                  initial="initial"
+                  animate="animate"
+                >
+                  {filteredVendors.map((vendor, index) => (
+                    <VendorCard
+                      key={vendor.id}
+                      vendor={vendor}
+                      index={index}
+                      onPay={handlePayVendor}
+                      getCategoryGradient={getCategoryGradient}
+                      getStatusVariant={getStatusVariant}
+                      formatCurrency={formatCurrency}
+                    />
+                  ))}
+                </motion.div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="active" className="p-4">
+              {filteredVendors.filter(v => v.status === "active").length === 0 ? (
+                <EmptyState
+                  icon={CheckCircle2}
+                  title="No active vendors"
+                  subtitle="All vendors are inactive or pending approval"
+                />
+              ) : (
+                <motion.div
+                  className="grid gap-4 md:grid-cols-2 lg:grid-cols-3"
+                  variants={stagger}
+                  initial="initial"
+                  animate="animate"
+                >
+                  {filteredVendors.filter(v => v.status === "active").map((vendor, index) => (
+                    <VendorCard
+                      key={vendor.id}
+                      vendor={vendor}
+                      index={index}
+                      onPay={handlePayVendor}
+                      getCategoryGradient={getCategoryGradient}
+                      getStatusVariant={getStatusVariant}
+                      formatCurrency={formatCurrency}
+                    />
+                  ))}
+                </motion.div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="inactive" className="p-4">
+              {filteredVendors.filter(v => v.status === "inactive").length === 0 ? (
+                <EmptyState
+                  icon={AlertCircle}
+                  title="No inactive vendors"
+                  subtitle="All vendors are active or pending approval"
+                />
+              ) : (
+                <motion.div
+                  className="grid gap-4 md:grid-cols-2 lg:grid-cols-3"
+                  variants={stagger}
+                  initial="initial"
+                  animate="animate"
+                >
+                  {filteredVendors.filter(v => v.status === "inactive").map((vendor, index) => (
+                    <VendorCard
+                      key={vendor.id}
+                      vendor={vendor}
+                      index={index}
+                      onPay={handlePayVendor}
+                      getCategoryGradient={getCategoryGradient}
+                      getStatusVariant={getStatusVariant}
+                      formatCurrency={formatCurrency}
+                      isInactive
+                    />
+                  ))}
+                </motion.div>
+              )}
+            </TabsContent>
+          </Tabs>
+        </GlassCard>
+      </motion.div>
+    </PageWrapper>
+  );
+}
+
+function VendorCard({
+  vendor,
+  index,
+  onPay,
+  getCategoryGradient,
+  getStatusVariant,
+  formatCurrency,
+  isInactive = false
+}: {
+  vendor: Vendor;
+  index: number;
+  onPay: (vendor: Vendor) => void;
+  getCategoryGradient: (category: string) => string;
+  getStatusVariant: (status: Vendor["status"]) => "success" | "secondary" | "warning";
+  formatCurrency: (amount: number | string) => string;
+  isInactive?: boolean;
+}) {
+  const initials = vendor.name
+    .split(" ")
+    .map(n => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <motion.div
+      variants={fadeUp}
+      whileHover={{ y: -4 }}
+      transition={{ duration: 0.2 }}
+    >
+      <GlassCard
+        className={`card-hover border-slate-200 dark:border-slate-700 ${isInactive ? "opacity-60" : ""}`}
+        data-testid={`vendor-card-${index}`}
+      >
+        <div className="p-6 space-y-4">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-3">
+              <Avatar className="h-14 w-14 border-2 border-slate-200 dark:border-slate-700">
+                <AvatarFallback className={`bg-gradient-to-br ${getCategoryGradient(vendor.category)} text-white font-semibold text-sm`}>
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0">
+                <h3 className="font-semibold text-slate-900 dark:text-slate-100 truncate">
+                  {vendor.name}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                  {vendor.category}
+                </p>
               </div>
-            )}
+            </div>
+            <StatusBadge variant={getStatusVariant(vendor.status)} className="ml-2 flex-shrink-0">
+              {vendor.status === "active"
+                ? "Active"
+                : vendor.status === "pending"
+                  ? "Pending"
+                  : "Inactive"}
+            </StatusBadge>
           </div>
-        </TabsContent>
-      </Tabs>
-    </div>
+
+          <div className="space-y-2 text-sm">
+            <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 truncate">
+              <Mail className="h-4 w-4 flex-shrink-0" />
+              <span className="truncate">{vendor.email}</span>
+            </div>
+            <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 truncate">
+              <MapPin className="h-4 w-4 flex-shrink-0" />
+              <span className="truncate">{vendor.address}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
+            <div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                Total Paid
+              </p>
+              <p className="font-semibold text-slate-900 dark:text-slate-100 text-sm mt-1">
+                {formatCurrency(vendor.totalPaid)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                Pending
+              </p>
+              <p
+                className={`font-semibold text-sm mt-1 ${
+                  vendor.pendingPayments > 0
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-slate-900 dark:text-slate-100"
+                }`}
+              >
+                {formatCurrency(vendor.pendingPayments)}
+              </p>
+            </div>
+          </div>
+
+          {vendor.pendingPayments > 0 && !isInactive && (
+            <Button
+              className="w-full mt-4 bg-violet-600 hover:bg-violet-700 text-white"
+              onClick={() => onPay(vendor)}
+              data-testid={`button-pay-vendor-${index}`}
+            >
+              <Send className="mr-2 h-4 w-4" />
+              Pay {formatCurrency(vendor.pendingPayments)}
+            </Button>
+          )}
+        </div>
+      </GlassCard>
+    </motion.div>
   );
 }

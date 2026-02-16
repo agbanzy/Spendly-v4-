@@ -4,10 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
-import { Wallet, Mail, Lock, Eye, EyeOff, ArrowRight, Loader2 } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, Sparkles } from "lucide-react";
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
@@ -23,7 +22,7 @@ export default function LoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!email || !password) {
       toast({
         title: "Error",
@@ -34,7 +33,7 @@ export default function LoginPage() {
     }
 
     setIsLoading(true);
-    
+
     try {
       await login(email, password);
       toast({
@@ -69,48 +68,73 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex">
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-indigo-600 to-indigo-800 p-12 flex-col justify-between">
-        <Link href="/">
-          <div className="flex items-center gap-2 text-white cursor-pointer">
-            <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl" />
-            <span className="font-bold text-2xl">Spendly</span>
-          </div>
-        </Link>
-        <div className="text-white">
-          <h1 className="text-4xl font-bold mb-4">Welcome back</h1>
-          <p className="text-xl text-white/80">
-            Log in to access your financial dashboard and manage your team's expenses.
-          </p>
-        </div>
-        <div className="flex items-center gap-4 text-white/60 text-sm">
-          <span>Bank-grade security</span>
-          <span>•</span>
-          <span>SOC 2 Compliant</span>
-          <span>•</span>
-          <span>GDPR Ready</span>
-        </div>
-      </div>
+      {/* Left panel — immersive brand area */}
+      <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
+        {/* Background */}
+        <div className="absolute inset-0 bg-gradient-to-br from-primary via-violet-600 to-purple-700" />
+        <div className="absolute inset-0 opacity-10 texture-grid" />
 
-      <div className="flex-1 flex items-center justify-center p-6 bg-background">
-        <div className="w-full max-w-md">
+        {/* Floating orbs */}
+        <div className="absolute top-1/4 -left-20 w-80 h-80 bg-white/10 rounded-full blur-3xl animate-float" />
+        <div className="absolute bottom-1/4 -right-20 w-60 h-60 bg-emerald-400/10 rounded-full blur-3xl animate-float-slow" />
+
+        <div className="relative z-10 p-12 flex flex-col justify-between w-full">
           <Link href="/">
-            <div className="lg:hidden flex items-center gap-2 justify-center mb-8 cursor-pointer">
-              <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl" />
-              <span className="font-bold text-2xl">Spendly</span>
+            <div className="flex items-center gap-3 text-white cursor-pointer group">
+              <div className="relative">
+                <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl shadow-lg" />
+                <div className="absolute -inset-1 bg-white/20 rounded-xl blur-sm opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
+              <span className="font-bold text-2xl tracking-tight">Spendly</span>
             </div>
           </Link>
 
-          <Card>
-            <CardHeader className="text-center">
-              <CardTitle className="text-2xl" data-testid="text-login-title">Sign in to your account</CardTitle>
-              <CardDescription>
+          <div className="space-y-6">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 text-white/80 text-sm">
+              <Sparkles className="h-3.5 w-3.5" />
+              Secure & trusted by 10,000+ teams
+            </div>
+            <h1 className="text-4xl md:text-5xl font-extrabold text-white leading-tight tracking-tight">
+              Welcome<br />back
+            </h1>
+            <p className="text-lg text-white/70 max-w-md leading-relaxed">
+              Access your financial dashboard and manage your team's expenses in real time.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-4 text-white/40 text-sm">
+            <span>Bank-grade security</span>
+            <span className="w-1 h-1 rounded-full bg-white/30" />
+            <span>SOC 2 Compliant</span>
+            <span className="w-1 h-1 rounded-full bg-white/30" />
+            <span>GDPR Ready</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Right panel — form */}
+      <div className="flex-1 flex items-center justify-center p-6 bg-background relative">
+        <div className="absolute inset-0 texture-mesh opacity-50" />
+
+        <div className="w-full max-w-md relative z-10">
+          <Link href="/">
+            <div className="lg:hidden flex items-center gap-2.5 justify-center mb-8 cursor-pointer">
+              <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl shadow-md" />
+              <span className="font-bold text-2xl tracking-tight">Spendly</span>
+            </div>
+          </Link>
+
+          <Card className="shadow-xl shadow-primary/5 border-border/50">
+            <CardHeader className="text-center pb-2">
+              <CardTitle className="text-2xl font-bold tracking-tight" data-testid="text-login-title">Sign in to your account</CardTitle>
+              <CardDescription className="text-muted-foreground">
                 Enter your credentials to access your dashboard
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <form onSubmit={handleLogin} className="space-y-4">
+            <CardContent className="pt-4">
+              <form onSubmit={handleLogin} className="space-y-5">
                 <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
+                  <Label htmlFor="email" className="text-sm font-medium">Email</Label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
@@ -119,7 +143,7 @@ export default function LoginPage() {
                       placeholder="you@company.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="pl-10"
+                      className="pl-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors"
                       data-testid="input-email"
                     />
                   </div>
@@ -127,9 +151,9 @@ export default function LoginPage() {
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <Label htmlFor="password">Password</Label>
+                    <Label htmlFor="password" className="text-sm font-medium">Password</Label>
                     <Link href="/forgot-password">
-                      <span className="text-sm text-indigo-600 hover:text-indigo-700 cursor-pointer" data-testid="link-forgot-password">
+                      <span className="text-sm text-primary hover:text-primary/80 cursor-pointer transition-colors" data-testid="link-forgot-password">
                         Forgot password?
                       </span>
                     </Link>
@@ -139,32 +163,32 @@ export default function LoginPage() {
                     <Input
                       id="password"
                       type={showPassword ? "text" : "password"}
-                      placeholder="••••••••"
+                      placeholder="Enter your password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="pl-10 pr-10"
+                      className="pl-10 pr-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors"
                       data-testid="input-password"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                     >
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
                 </div>
 
-                <Button type="submit" className="w-full" disabled={isLoading} data-testid="button-submit-login">
+                <Button type="submit" className="w-full h-11 text-sm font-medium shadow-md shadow-primary/20 gap-2" disabled={isLoading} data-testid="button-submit-login">
                   {isLoading ? (
                     <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2 className="h-4 w-4 animate-spin" />
                       Signing in...
                     </>
                   ) : (
                     <>
                       Sign in
-                      <ArrowRight className="ml-2 h-4 w-4" />
+                      <ArrowRight className="h-4 w-4" />
                     </>
                   )}
                 </Button>
@@ -173,7 +197,7 @@ export default function LoginPage() {
               <p className="text-center text-sm text-muted-foreground mt-6">
                 Don't have an account?{" "}
                 <Link href={inviteToken ? `/signup?invite=${inviteToken}` : "/signup"}>
-                  <span className="text-indigo-600 hover:text-indigo-700 font-medium cursor-pointer" data-testid="link-signup">
+                  <span className="text-primary hover:text-primary/80 font-medium cursor-pointer transition-colors" data-testid="link-signup">
                     Sign up
                   </span>
                 </Link>
@@ -183,9 +207,9 @@ export default function LoginPage() {
 
           <p className="text-center text-xs text-muted-foreground mt-6">
             By signing in, you agree to our{" "}
-            <Link href="/terms"><span className="underline hover:text-foreground cursor-pointer">Terms of Service</span></Link>
+            <Link href="/terms"><span className="underline hover:text-foreground cursor-pointer transition-colors">Terms of Service</span></Link>
             {" "}and{" "}
-            <Link href="/privacy"><span className="underline hover:text-foreground cursor-pointer">Privacy Policy</span></Link>
+            <Link href="/privacy"><span className="underline hover:text-foreground cursor-pointer transition-colors">Privacy Policy</span></Link>
           </p>
         </div>
       </div>

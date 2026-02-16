@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,10 +7,12 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import * as Clipboard from 'expo-clipboard';
 
 // Type definitions
 interface Balance {
@@ -19,6 +21,17 @@ interface Balance {
   usd: string | number;
   escrow: string | number;
   localCurrency: string;
+}
+
+interface Transaction {
+  id: string;
+  type: string;
+  description: string;
+  amount: string;
+  fee: string;
+  status: string;
+  date: string;
+  currency: string;
 }
 
 interface Expense {
@@ -30,6 +43,19 @@ interface Expense {
   date: string;
   currency: string;
   department?: string;
+}
+
+interface VirtualAccount {
+  id: string;
+  name: string;
+  accountNumber: string;
+  bankName: string;
+  bankCode: string;
+  currency: string;
+  balance: string;
+  type: string;
+  status: string;
+  createdAt: string;
 }
 
 interface KPIData {
@@ -74,7 +100,9 @@ interface InsightsResponse {
 }
 
 export default function DashboardScreen() {
-  // Fetch KPI data
+  const [showBalance, setShowBalance] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
   const {
     data: kpis,
     isLoading: kpisLoading,
@@ -84,7 +112,6 @@ export default function DashboardScreen() {
     queryFn: () => api.get<KPIData>('/api/analytics/kpis'),
   });
 
-  // Fetch balance data (single object, not array)
   const {
     data: balance,
     isLoading: balanceLoading,
@@ -94,17 +121,23 @@ export default function DashboardScreen() {
     queryFn: () => api.get<Balance>('/api/balances'),
   });
 
-  // Fetch expenses
   const {
-    data: expenses,
-    isLoading: expensesLoading,
-    refetch: refetchExpenses,
+    data: transactions,
+    isLoading: transactionsLoading,
+    refetch: refetchTransactions,
   } = useQuery({
-    queryKey: ['/api/expenses'],
-    queryFn: () => api.get<Expense[]>('/api/expenses'),
+    queryKey: ['/api/transactions'],
+    queryFn: () => api.get<Transaction[]>('/api/transactions'),
   });
 
-  // Fetch insights
+  const {
+    data: virtualAccounts,
+    refetch: refetchVirtualAccounts,
+  } = useQuery({
+    queryKey: ['/api/virtual-accounts'],
+    queryFn: () => api.get<VirtualAccount[]>('/api/virtual-accounts'),
+  });
+
   const {
     data: insightsResponse,
     isLoading: insightsLoading,
@@ -114,31 +147,30 @@ export default function DashboardScreen() {
     queryFn: () => api.get<InsightsResponse>('/api/analytics/insights'),
   });
 
-  const [refreshing, setRefreshing] = React.useState(false);
-
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([refetchKpis(), refetchBalance(), refetchExpenses(), refetchInsights()]);
+    await Promise.all([refetchKpis(), refetchBalance(), refetchTransactions(), refetchVirtualAccounts(), refetchInsights()]);
     setRefreshing(false);
   };
 
   const formatCurrency = (amount: number | string, currency: string = 'USD') => {
     const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+    if (isNaN(numAmount)) return `${currency} 0.00`;
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency,
     }).format(numAmount);
   };
 
-  const formatPercent = (value: number) => {
-    return `${value.toFixed(1)}%`;
-  };
+  const formatPercent = (value: number) => `${value.toFixed(1)}%`;
 
-  // Parse balance - the endpoint returns an object with local field
   const totalBalance = balance ? parseFloat(balance.local.toString()) : 0;
+  const usdBalance = balance ? parseFloat(balance.usd.toString()) : 0;
+  const escrowBalance = balance ? parseFloat(balance.escrow.toString()) : 0;
   const currencyCode = balance?.localCurrency || 'USD';
 
-  // Get top insight (highest severity)
+  const primaryVirtualAccount = virtualAccounts?.find((a: VirtualAccount) => a.status === 'active') || virtualAccounts?.[0];
+
   const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
   const topInsight = insightsResponse?.insights
     ?.sort(
@@ -148,9 +180,32 @@ export default function DashboardScreen() {
     )
     .slice(0, 1)[0];
 
-  const isLoading = kpisLoading || balanceLoading || expensesLoading || insightsLoading;
+  const getTransactionIcon = (type: string): keyof typeof Ionicons.glyphMap => {
+    const lowerType = type.toLowerCase();
+    if (lowerType.includes('deposit') || lowerType.includes('funding')) return 'arrow-down';
+    if (lowerType.includes('payout') || lowerType.includes('bill') || lowerType.includes('transfer')) return 'arrow-up';
+    return 'swap-horizontal';
+  };
 
-  if (isLoading && !kpis && !balance && !expenses && !insightsResponse) {
+  const getTransactionColor = (type: string): string => {
+    const lowerType = type.toLowerCase();
+    if (lowerType.includes('deposit') || lowerType.includes('funding')) return '#34D399';
+    if (lowerType.includes('payout') || lowerType.includes('bill') || lowerType.includes('transfer')) return '#F87171';
+    return '#818CF8';
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await Clipboard.setStringAsync(text);
+      Alert.alert('Copied', 'Account number copied to clipboard');
+    } catch {
+      Alert.alert('Error', 'Could not copy to clipboard');
+    }
+  };
+
+  const isLoading = kpisLoading || balanceLoading || transactionsLoading || insightsLoading;
+
+  if (isLoading && !kpis && !balance && !transactions && !insightsResponse) {
     return (
       <View style={[styles.container, styles.centerContent]}>
         <ActivityIndicator size="large" color="#818CF8" />
@@ -172,27 +227,98 @@ export default function DashboardScreen() {
       </View>
 
       {/* Balance Card */}
-      <View style={styles.balanceCard} testID="card-balance">
-        <Text style={styles.balanceLabel}>Total Wallet Balance</Text>
-        <Text style={styles.balanceAmount}>{formatCurrency(totalBalance, currencyCode)}</Text>
+      <View style={styles.balanceCard}>
+        <View style={styles.balanceHeader}>
+          <Text style={styles.balanceLabel}>Total Wallet Balance</Text>
+          <TouchableOpacity onPress={() => setShowBalance(!showBalance)}>
+            <Ionicons
+              name={showBalance ? 'eye-outline' : 'eye-off-outline'}
+              size={22}
+              color="#94A3B8"
+            />
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.balanceAmount}>
+          {showBalance ? formatCurrency(totalBalance, currencyCode) : '••••••••'}
+        </Text>
         <Text style={styles.currencyCode}>{currencyCode}</Text>
+
+        {/* Sub-balances */}
+        {(usdBalance > 0 || escrowBalance > 0) && (
+          <View style={styles.subBalancesRow}>
+            {usdBalance > 0 && (
+              <View style={styles.subBalanceCard}>
+                <Text style={styles.subBalanceLabel}>USD</Text>
+                <Text style={styles.subBalanceAmount}>
+                  {showBalance ? formatCurrency(usdBalance, 'USD') : '••••'}
+                </Text>
+              </View>
+            )}
+            {escrowBalance > 0 && (
+              <View style={styles.subBalanceCard}>
+                <Text style={styles.subBalanceLabel}>Escrow</Text>
+                <Text style={styles.subBalanceAmount}>
+                  {showBalance ? formatCurrency(escrowBalance, currencyCode) : '••••'}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
       </View>
+
+      {/* Virtual Account Card */}
+      {primaryVirtualAccount && (
+        <View style={styles.virtualAccountCard}>
+          <View style={styles.vaHeader}>
+            <View style={styles.vaIconContainer}>
+              <Ionicons name="business" size={20} color="#818CF8" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.vaTitle}>Your Virtual Account</Text>
+              <Text style={styles.vaName}>{primaryVirtualAccount.name || 'Spendly Account'}</Text>
+            </View>
+            <View style={[styles.vaStatusBadge, primaryVirtualAccount.status === 'active' ? styles.statusActive : styles.statusInactive]}>
+              <Text style={styles.vaStatusText}>{primaryVirtualAccount.status}</Text>
+            </View>
+          </View>
+          <View style={styles.vaDetailsGrid}>
+            <View style={styles.vaDetailItem}>
+              <Text style={styles.vaDetailLabel}>Bank</Text>
+              <Text style={styles.vaDetailValue}>{primaryVirtualAccount.bankName}</Text>
+            </View>
+            <View style={styles.vaDetailItem}>
+              <Text style={styles.vaDetailLabel}>Account Number</Text>
+              <View style={styles.vaAccountRow}>
+                <Text style={styles.vaAccountNumber}>{primaryVirtualAccount.accountNumber}</Text>
+                <TouchableOpacity onPress={() => copyToClipboard(primaryVirtualAccount.accountNumber)}>
+                  <Ionicons name="copy-outline" size={16} color="#818CF8" />
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View style={styles.vaDetailItem}>
+              <Text style={styles.vaDetailLabel}>Currency</Text>
+              <Text style={styles.vaDetailValue}>{primaryVirtualAccount.currency || 'NGN'}</Text>
+            </View>
+          </View>
+          <Text style={styles.vaHint}>Transfer funds to this account to add money to your wallet instantly.</Text>
+        </View>
+      )}
 
       {/* Quick Actions */}
       <View style={styles.quickActions}>
-        <TouchableOpacity style={styles.actionButton} testID="button-add-expense">
+        <TouchableOpacity style={styles.actionButton}>
           <View style={styles.actionIcon}>
             <Ionicons name="add" size={24} color="#FFFFFF" />
           </View>
           <Text style={styles.actionText}>Add Expense</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton} testID="button-send-money">
+        <TouchableOpacity style={styles.actionButton}>
           <View style={styles.actionIcon}>
             <Ionicons name="send" size={24} color="#FFFFFF" />
           </View>
           <Text style={styles.actionText}>Send Money</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton} testID="button-request">
+        <TouchableOpacity style={styles.actionButton}>
           <View style={styles.actionIcon}>
             <Ionicons name="download" size={24} color="#FFFFFF" />
           </View>
@@ -200,40 +326,27 @@ export default function DashboardScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* KPI Summary - 2x2 Grid */}
+      {/* KPI Summary */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle} testID="text-kpi-summary">
-          Financial Summary
-        </Text>
+        <Text style={styles.sectionTitle}>Financial Summary</Text>
         <View style={styles.kpiGrid}>
-          {/* Net Cash Flow */}
-          <View style={styles.kpiCard} testID="card-net-cash-flow">
+          <View style={styles.kpiCard}>
             <Text style={styles.kpiLabel}>Net Cash Flow</Text>
-            <Text style={[styles.kpiValue, kpis?.netCashFlow >= 0 ? styles.positive : styles.negative]}>
-              {formatCurrency(kpis?.netCashFlow || 0)}
+            <Text style={[styles.kpiValue, (kpis?.netCashFlow ?? 0) >= 0 ? styles.positive : styles.negative]}>
+              {showBalance ? formatCurrency(kpis?.netCashFlow || 0) : '••••'}
             </Text>
           </View>
-
-          {/* Pending Expenses */}
-          <View style={styles.kpiCard} testID="card-pending-expenses">
+          <View style={styles.kpiCard}>
             <Text style={styles.kpiLabel}>Pending Expenses</Text>
             <Text style={styles.kpiValue}>{kpis?.pendingExpenses || 0}</Text>
           </View>
-
-          {/* Overdue Bills */}
-          <View style={styles.kpiCard} testID="card-overdue-bills">
+          <View style={styles.kpiCard}>
             <Text style={styles.kpiLabel}>Overdue Bills</Text>
-            <Text style={[styles.kpiValue, styles.warning]}>
-              {kpis?.overdueBills || 0}
-            </Text>
+            <Text style={[styles.kpiValue, styles.warning]}>{kpis?.overdueBills || 0}</Text>
           </View>
-
-          {/* Budget Utilization */}
-          <View style={styles.kpiCard} testID="card-budget-utilization">
+          <View style={styles.kpiCard}>
             <Text style={styles.kpiLabel}>Budget Used</Text>
-            <Text style={styles.kpiValue}>
-              {formatPercent(kpis?.budgetUtilization || 0)}
-            </Text>
+            <Text style={styles.kpiValue}>{formatPercent(kpis?.budgetUtilization || 0)}</Text>
           </View>
         </View>
       </View>
@@ -250,7 +363,6 @@ export default function DashboardScreen() {
                 ? styles.severityHigh
                 : styles.severityMedium,
           ]}
-          testID="card-insight"
         >
           <View style={styles.insightHeader}>
             <Ionicons
@@ -261,58 +373,60 @@ export default function DashboardScreen() {
             <Text style={styles.insightTitle}>{topInsight.title}</Text>
           </View>
           <Text style={styles.insightSummary}>{topInsight.summary}</Text>
-          <Text style={styles.insightRecommendation}>💡 {topInsight.recommendation}</Text>
+          <Text style={styles.insightRecommendation}>{topInsight.recommendation}</Text>
         </View>
       )}
 
-      {/* Recent Expenses */}
+      {/* Recent Activity (Transactions) */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle} testID="text-recent-expenses">
-            Recent Expenses
-          </Text>
-          <TouchableOpacity testID="link-view-all">
+          <Text style={styles.sectionTitle}>Recent Activity</Text>
+          <TouchableOpacity>
             <Text style={styles.viewAll}>View All</Text>
           </TouchableOpacity>
         </View>
 
-        {expenses && expenses.length > 0 ? (
-          expenses.slice(0, 5).map((expense) => (
-            <View key={expense.id} style={styles.expenseItem} testID={`item-expense-${expense.id}`}>
-              <View style={styles.expenseIcon}>
-                <Ionicons name="receipt-outline" size={20} color="#818CF8" />
+        {transactions && transactions.length > 0 ? (
+          transactions.slice(0, 5).map((tx) => (
+            <View key={tx.id} style={styles.txItem}>
+              <View style={[styles.txIcon, { backgroundColor: getTransactionColor(tx.type) + '20' }]}>
+                <Ionicons
+                  name={getTransactionIcon(tx.type)}
+                  size={18}
+                  color={getTransactionColor(tx.type)}
+                />
               </View>
-              <View style={styles.expenseDetails}>
-                <Text style={styles.expenseMerchant}>{expense.merchant}</Text>
-                <Text style={styles.expenseCategory}>
-                  {expense.category}
-                  {expense.department ? ` • ${expense.department}` : ''}
+              <View style={styles.txDetails}>
+                <Text style={styles.txDescription} numberOfLines={1}>{tx.description}</Text>
+                <Text style={styles.txType}>{tx.type}</Text>
+              </View>
+              <View style={styles.txRight}>
+                <Text style={[styles.txAmount, { color: getTransactionColor(tx.type) }]}>
+                  {getTransactionColor(tx.type) === '#34D399' ? '+' : '-'}
+                  {formatCurrency(Math.abs(parseFloat(tx.amount)), tx.currency)}
                 </Text>
-              </View>
-              <View style={styles.expenseAmountContainer}>
-                <Text style={styles.expenseAmount}>-{formatCurrency(expense.amount, expense.currency)}</Text>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    expense.status === 'approved'
-                      ? styles.statusApproved
-                      : expense.status === 'pending'
-                        ? styles.statusPending
-                        : styles.statusRejected,
-                  ]}
-                  testID={`badge-status-${expense.id}`}
-                >
-                  <Text style={styles.statusText}>{expense.status}</Text>
+                <View style={[
+                  styles.statusBadge,
+                  tx.status?.toLowerCase() === 'completed' || tx.status?.toLowerCase() === 'success'
+                    ? styles.statusCompleted
+                    : tx.status?.toLowerCase() === 'pending' || tx.status?.toLowerCase() === 'processing'
+                      ? styles.statusPending
+                      : styles.statusFailed,
+                ]}>
+                  <Text style={styles.statusText}>{tx.status}</Text>
                 </View>
               </View>
             </View>
           ))
         ) : (
-          <Text style={styles.emptyText}>No recent expenses</Text>
+          <View style={styles.emptyContainer}>
+            <Ionicons name="swap-horizontal-outline" size={48} color="#334155" />
+            <Text style={styles.emptyText}>No transactions yet</Text>
+            <Text style={styles.emptySubtext}>Start by funding your wallet</Text>
+          </View>
         )}
       </View>
 
-      {/* Bottom padding */}
       <View style={{ height: 24 }} />
     </ScrollView>
   );
@@ -342,14 +456,20 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     marginTop: 4,
   },
+  // Balance Card
   balanceCard: {
     backgroundColor: '#1E293B',
     marginHorizontal: 20,
     borderRadius: 16,
     padding: 20,
-    marginBottom: 24,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: '#334155',
+  },
+  balanceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   balanceLabel: {
     fontSize: 14,
@@ -364,8 +484,113 @@ const styles = StyleSheet.create({
   currencyCode: {
     fontSize: 12,
     color: '#64748B',
-    marginTop: 8,
+    marginTop: 4,
   },
+  subBalancesRow: {
+    flexDirection: 'row',
+    marginTop: 16,
+    gap: 12,
+  },
+  subBalanceCard: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    padding: 12,
+  },
+  subBalanceLabel: {
+    fontSize: 12,
+    color: '#94A3B8',
+  },
+  subBalanceAmount: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#E2E8F0',
+    marginTop: 4,
+  },
+  // Virtual Account
+  virtualAccountCard: {
+    backgroundColor: '#1E293B',
+    marginHorizontal: 20,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  vaHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  vaIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: '#312E81',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  vaTitle: {
+    fontSize: 11,
+    color: '#94A3B8',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  vaName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginTop: 2,
+  },
+  vaStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  vaStatusText: {
+    fontSize: 10,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  vaDetailsGrid: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  vaDetailItem: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+    borderRadius: 10,
+    padding: 10,
+  },
+  vaDetailLabel: {
+    fontSize: 10,
+    color: '#94A3B8',
+    marginBottom: 4,
+  },
+  vaDetailValue: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  vaAccountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  vaAccountNumber: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    fontFamily: 'monospace',
+  },
+  vaHint: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 10,
+  },
+  // Quick Actions
   quickActions: {
     flexDirection: 'row',
     paddingHorizontal: 20,
@@ -395,6 +620,7 @@ const styles = StyleSheet.create({
     color: '#E2E8F0',
     fontWeight: '500',
   },
+  // Sections
   section: {
     paddingHorizontal: 20,
     marginBottom: 24,
@@ -409,6 +635,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#FFFFFF',
+    marginBottom: 12,
   },
   viewAll: {
     fontSize: 14,
@@ -423,7 +650,7 @@ const styles = StyleSheet.create({
   },
   kpiCard: {
     flex: 1,
-    minWidth: '48%',
+    minWidth: '45%',
     backgroundColor: '#1E293B',
     borderRadius: 12,
     padding: 16,
@@ -440,34 +667,19 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#FFFFFF',
   },
-  positive: {
-    color: '#10B981',
-  },
-  negative: {
-    color: '#EF4444',
-  },
-  warning: {
-    color: '#F59E0B',
-  },
-  // Insight Card
+  positive: { color: '#10B981' },
+  negative: { color: '#EF4444' },
+  warning: { color: '#F59E0B' },
+  // Insight
   insightCard: {
     backgroundColor: '#1E293B',
     borderRadius: 12,
     padding: 16,
     borderLeftWidth: 4,
   },
-  severityCritical: {
-    borderLeftColor: '#EF4444',
-    backgroundColor: '#7F1D1D',
-  },
-  severityHigh: {
-    borderLeftColor: '#F59E0B',
-    backgroundColor: '#78350F',
-  },
-  severityMedium: {
-    borderLeftColor: '#818CF8',
-    backgroundColor: '#1E1B4B',
-  },
+  severityCritical: { borderLeftColor: '#EF4444', backgroundColor: '#7F1D1D' },
+  severityHigh: { borderLeftColor: '#F59E0B', backgroundColor: '#78350F' },
+  severityMedium: { borderLeftColor: '#818CF8', backgroundColor: '#1E1B4B' },
   insightHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -491,8 +703,8 @@ const styles = StyleSheet.create({
     color: '#CBD5E1',
     fontStyle: 'italic',
   },
-  // Expenses
-  expenseItem: {
+  // Transactions
+  txItem: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#1E293B',
@@ -502,34 +714,33 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#334155',
   },
-  expenseIcon: {
+  txIcon: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#334155',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  expenseDetails: {
+  txDetails: {
     flex: 1,
     marginLeft: 12,
   },
-  expenseMerchant: {
+  txDescription: {
     fontSize: 14,
     color: '#FFFFFF',
     fontWeight: '500',
   },
-  expenseCategory: {
+  txType: {
     fontSize: 12,
     color: '#94A3B8',
     marginTop: 2,
+    textTransform: 'capitalize',
   },
-  expenseAmountContainer: {
+  txRight: {
     alignItems: 'flex-end',
   },
-  expenseAmount: {
+  txAmount: {
     fontSize: 14,
-    color: '#EF4444',
     fontWeight: '600',
   },
   statusBadge: {
@@ -538,25 +749,30 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     marginTop: 4,
   },
-  statusApproved: {
-    backgroundColor: '#065F46',
-  },
-  statusPending: {
-    backgroundColor: '#92400E',
-  },
-  statusRejected: {
-    backgroundColor: '#7F1D1D',
-  },
+  statusActive: { backgroundColor: '#065F46' },
+  statusInactive: { backgroundColor: '#4B5563' },
+  statusCompleted: { backgroundColor: '#065F46' },
+  statusPending: { backgroundColor: '#92400E' },
+  statusFailed: { backgroundColor: '#7F1D1D' },
   statusText: {
     fontSize: 10,
     color: '#FFFFFF',
     fontWeight: '600',
     textTransform: 'capitalize',
   },
+  // Empty
+  emptyContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
   emptyText: {
-    textAlign: 'center',
+    color: '#94A3B8',
+    fontSize: 16,
+    marginTop: 12,
+  },
+  emptySubtext: {
     color: '#64748B',
-    padding: 20,
-    fontSize: 14,
+    fontSize: 13,
+    marginTop: 4,
   },
 });

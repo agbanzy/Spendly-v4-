@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,12 +28,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
-import {
   Plus,
   Search,
   FileText,
@@ -58,9 +50,25 @@ import {
   Building2,
   Sparkles,
 } from "lucide-react";
+import { motion } from "framer-motion";
 import type { Bill, CompanySettings, Wallet } from "@shared/schema";
 import { getCurrencySymbol, formatCurrencyAmount, PAYMENT_LIMITS } from "@/lib/constants";
 import { PinVerificationDialog, usePinVerification } from "@/components/pin-verification-dialog";
+import {
+  PageWrapper,
+  PageHeader,
+  MetricCard,
+  StatusBadge,
+  AnimatedListItem,
+  EmptyState,
+  GlassCard,
+  FormField,
+  SuccessFeedback,
+  WarningFeedback,
+  InfoFeedback,
+  fadeUp,
+  stagger,
+} from "@/components/ui-extended";
 
 // Country-specific utility providers
 const utilityProvidersByRegion = {
@@ -595,288 +603,357 @@ export default function Bills() {
   ];
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <Badge variant="secondary" className="text-xs font-bold uppercase tracking-widest bg-primary/10 text-primary">
-              <Sparkles className="h-3 w-3 mr-1" />Bills & Utilities
-            </Badge>
-          </div>
-          <h1 className="text-3xl font-black tracking-tight" data-testid="text-bills-title">Bills & Payments</h1>
-          <p className="text-muted-foreground mt-1">Manage bills, utilities, and recurring payments.</p>
-        </div>
-        <Button onClick={() => { resetForm(); setEditingBill(null); setIsOpen(true); }} className="gap-2" data-testid="button-add-bill">
-          <Plus className="h-4 w-4" />
-          Add Bill
-        </Button>
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        {utilityServices.map((service) => (
-          <Card 
-            key={service.type}
-            className="card-hover cursor-pointer group border-2 border-transparent hover:border-primary/20 transition-all"
-            onClick={() => openUtilityDialog(service.type)}
-            data-testid={`button-utility-${service.type}`}
+    <PageWrapper>
+      <PageHeader
+        title="Bills & Payments"
+        subtitle="Manage bills, utilities, and recurring payments"
+        badge="Bills & Utilities"
+        badgeVariant="default"
+        icon={Sparkles}
+        actions={
+          <Button
+            onClick={() => {
+              resetForm();
+              setEditingBill(null);
+              setIsOpen(true);
+            }}
           >
-            <CardContent className="p-4 text-center">
-              <div className={`w-12 h-12 rounded-2xl ${service.color} flex items-center justify-center mx-auto mb-3 shadow-lg group-hover:scale-110 transition-transform`}>
-                <service.icon className="h-6 w-6 text-white" />
-              </div>
-              <p className="font-bold text-sm">{service.label}</p>
-              <p className="text-xs text-muted-foreground mt-1">{service.description}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+            <Plus className="h-4 w-4" />
+            Add Bill
+          </Button>
+        }
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="glass">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Total Bills</p>
-              <div className="p-2 bg-primary/10 rounded-xl">
-                <DollarSign className="h-4 w-4 text-primary" />
-              </div>
+      <motion.div
+        className="space-y-8"
+        initial="hidden"
+        animate="visible"
+        variants={stagger}
+      >
+        <motion.div variants={fadeUp}>
+          <h3 className="text-lg font-bold mb-4 text-slate-900 dark:text-slate-100">
+            Utility Services
+          </h3>
+          <div className="overflow-x-auto pb-2">
+            <div className="flex gap-3 min-w-min md:grid md:grid-cols-5 md:gap-4">
+              {utilityServices.map((service, idx) => (
+                <motion.button
+                  key={service.type}
+                  variants={fadeUp}
+                  onClick={() => openUtilityDialog(service.type)}
+                  data-testid={`button-utility-${service.type}`}
+                  className="flex-shrink-0 w-40 md:w-full group"
+                >
+                  <GlassCard className="p-4 text-center h-full hover:scale-105 transition-transform cursor-pointer">
+                    <div className={`w-14 h-14 rounded-xl ${service.color} flex items-center justify-center mx-auto mb-3 shadow-lg group-hover:shadow-xl group-hover:scale-110 transition-all`}>
+                      <service.icon className="h-6 w-6 text-white" />
+                    </div>
+                    <p className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                      {service.label}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      {service.description}
+                    </p>
+                  </GlassCard>
+                </motion.button>
+              ))}
             </div>
-            {isLoading ? <Skeleton className="h-8 w-24" /> : (
-              <p className="text-2xl font-black" data-testid="text-total-bills">{formatCurrency(totalBills)}</p>
-            )}
-          </CardContent>
-        </Card>
-        <Card className="glass">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Paid</p>
-              <div className="p-2 bg-emerald-100 dark:bg-emerald-900/30 rounded-xl">
-                <CheckCircle className="h-4 w-4 text-emerald-600" />
-              </div>
-            </div>
-            {isLoading ? <Skeleton className="h-8 w-24" /> : (
-              <p className="text-2xl font-black text-emerald-600">{formatCurrency(paidBills)}</p>
-            )}
-          </CardContent>
-        </Card>
-        <Card className="glass">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Unpaid</p>
-              <div className="p-2 bg-amber-100 dark:bg-amber-900/30 rounded-xl">
-                <Clock className="h-4 w-4 text-amber-600" />
-              </div>
-            </div>
-            {isLoading ? <Skeleton className="h-8 w-24" /> : (
-              <p className="text-2xl font-black text-amber-600">{formatCurrency(unpaidBills)}</p>
-            )}
-          </CardContent>
-        </Card>
-        <Card className={`glass ${overdueBills > 0 ? "border-red-200 dark:border-red-900" : ""}`}>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Overdue</p>
-              <div className={`p-2 rounded-xl ${overdueBills > 0 ? "bg-red-100 dark:bg-red-900/30" : "bg-muted"}`}>
-                <AlertTriangle className={`h-4 w-4 ${overdueBills > 0 ? "text-red-600" : "text-muted-foreground"}`} />
-              </div>
-            </div>
-            {isLoading ? <Skeleton className="h-8 w-24" /> : (
-              <p className={`text-2xl font-black ${overdueBills > 0 ? "text-red-600" : ""}`}>{overdueBills}</p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </motion.div>
 
-      <Card className="glass">
-        <CardContent className="p-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search bills..."
-              className="pl-10 bg-background/50"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              data-testid="input-search-bills"
+        <motion.div variants={fadeUp}>
+          <h3 className="text-lg font-bold mb-4 text-slate-900 dark:text-slate-100">
+            Summary
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <MetricCard
+              title="Total Bills"
+              value={isLoading ? <Skeleton className="h-8 w-24" /> : formatCurrency(totalBills)}
+              icon={DollarSign}
+              color="violet"
+              data-testid="text-total-bills"
+            />
+            <MetricCard
+              title="Paid"
+              value={isLoading ? <Skeleton className="h-8 w-24" /> : formatCurrency(paidBills)}
+              icon={CheckCircle}
+              color="emerald"
+            />
+            <MetricCard
+              title="Unpaid"
+              value={isLoading ? <Skeleton className="h-8 w-24" /> : formatCurrency(unpaidBills)}
+              icon={Clock}
+              color="amber"
+            />
+            <MetricCard
+              title="Overdue"
+              value={isLoading ? <Skeleton className="h-8 w-24" /> : overdueBills}
+              icon={AlertTriangle}
+              color={overdueBills > 0 ? "rose" : "cyan"}
             />
           </div>
-        </CardContent>
-      </Card>
+        </motion.div>
 
-      <Card className="glass overflow-hidden">
-        <CardHeader className="border-b bg-muted/30">
-          <CardTitle className="text-sm font-bold uppercase tracking-widest flex items-center gap-2">
-            <FileText className="h-4 w-4 text-primary" />
+        <motion.div variants={fadeUp}>
+          <GlassCard className="p-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Input
+                placeholder="Search bills by name or provider..."
+                className="pl-10 bg-background/50 border-slate-200 dark:border-slate-700"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                data-testid="input-search-bills"
+              />
+            </div>
+          </GlassCard>
+        </motion.div>
+
+        <motion.div variants={fadeUp}>
+          <h3 className="text-lg font-bold mb-4 text-slate-900 dark:text-slate-100">
             All Bills
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-6 space-y-4">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="flex items-center justify-between py-2">
-                  <div className="flex items-center gap-4">
-                    <Skeleton className="h-12 w-12 rounded-xl" />
-                    <div><Skeleton className="h-4 w-48 mb-2" /><Skeleton className="h-3 w-24" /></div>
-                  </div>
-                  <Skeleton className="h-5 w-24" />
-                </div>
-              ))}
-            </div>
-          ) : filteredBills && filteredBills.length > 0 ? (
-            <div className="divide-y divide-border">
-              {filteredBills.map((bill) => (
-                <div key={bill.id} className="flex items-center justify-between p-4 hover:bg-muted/50 transition-colors" data-testid={`bill-row-${bill.id}`}>
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
-                      <FileText className="h-5 w-5 text-primary" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold truncate">{bill.name}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs text-muted-foreground">{bill.provider}</span>
-                        <span className="text-xs text-muted-foreground">•</span>
-                        <Badge variant="outline" className="text-xs">{bill.category}</Badge>
+          </h3>
+          <GlassCard className="overflow-hidden">
+            {isLoading ? (
+              <div className="p-6 space-y-4">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="flex items-center justify-between py-2">
+                    <div className="flex items-center gap-4">
+                      <Skeleton className="h-12 w-12 rounded-xl" />
+                      <div>
+                        <Skeleton className="h-4 w-48 mb-2" />
+                        <Skeleton className="h-3 w-24" />
                       </div>
                     </div>
+                    <Skeleton className="h-5 w-24" />
                   </div>
-                  <div className="text-right flex items-center gap-4">
-                    <div>
-                      <p className="text-base font-bold">{formatCurrency(Number(bill.amount))}</p>
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
-                        <Calendar className="h-3 w-3" />
-                        <span>Due {new Date(bill.dueDate).toLocaleDateString()}</span>
-                      </div>
-                    </div>
-                    <Badge variant="secondary" className={`text-xs ${getStatusColor(bill.status)}`}>
-                      {getStatusIcon(bill.status)}<span className="ml-1">{bill.status}</span>
-                    </Badge>
-                    {bill.status === "Unpaid" && (
-                      <Button size="sm" onClick={() => payBillMutation.mutate(bill.id)} disabled={payBillMutation.isPending} data-testid={`button-pay-${bill.id}`}>
-                        Pay Now
-                      </Button>
-                    )}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon"><MoreVertical className="h-4 w-4" /></Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => openEditDialog(bill)}><Pencil className="h-4 w-4 mr-2" />Edit</DropdownMenuItem>
-                        <DropdownMenuItem className="text-red-600" onClick={() => deleteMutation.mutate(bill.id)}><Trash2 className="h-4 w-4 mr-2" />Delete</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="p-12 text-center">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center mx-auto mb-4">
-                <FileText className="h-8 w-8 text-primary" />
+                ))}
               </div>
-              <h3 className="text-lg font-bold mb-1">No bills yet</h3>
-              <p className="text-sm text-muted-foreground mb-4">Start by adding your first bill.</p>
-              <Button onClick={() => setIsOpen(true)}><Plus className="h-4 w-4 mr-2" />Add Bill</Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            ) : filteredBills && filteredBills.length > 0 ? (
+              <motion.div
+                className="divide-y divide-slate-200 dark:divide-slate-700"
+                initial="hidden"
+                animate="visible"
+                variants={stagger}
+              >
+                {filteredBills.map((bill, idx) => (
+                  <AnimatedListItem
+                    key={bill.id}
+                    delay={idx * 0.05}
+                    data-testid={`bill-row-${bill.id}`}
+                  >
+                    <div
+                      className={`flex items-center justify-between p-5 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors ${
+                        bill.status === "Overdue"
+                          ? "bg-rose-50/30 dark:bg-rose-900/10"
+                          : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-4 flex-1">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500/20 to-violet-500/5 flex items-center justify-center flex-shrink-0">
+                          <FileText className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+                            {bill.name}
+                          </p>
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                              {bill.provider}
+                            </span>
+                            <span className="text-xs text-slate-400">•</span>
+                            <span className="text-xs px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                              {bill.category}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-4 ml-4">
+                        <div className="text-right hidden sm:block">
+                          <p className="text-base font-bold text-slate-900 dark:text-slate-100">
+                            {formatCurrency(Number(bill.amount))}
+                          </p>
+                          <div className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 mt-1">
+                            <Calendar className="h-3 w-3" />
+                            <span>
+                              {new Date(bill.dueDate).toLocaleDateString()}
+                            </span>
+                          </div>
+                        </div>
+
+                        <StatusBadge status={bill.status} />
+
+                        {bill.status === "Unpaid" && (
+                          <Button
+                            size="sm"
+                            onClick={() => payBillMutation.mutate(bill.id)}
+                            disabled={payBillMutation.isPending}
+                            data-testid={`button-pay-${bill.id}`}
+                            className="bg-gradient-to-r from-violet-600 to-violet-700 hover:from-violet-700 hover:to-violet-800 text-white shadow-lg hover:shadow-xl transition-all"
+                          >
+                            {payBillMutation.isPending && (
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            )}
+                            Pay
+                          </Button>
+                        )}
+
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="hover:bg-slate-100 dark:hover:bg-slate-800"
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => openEditDialog(bill)}>
+                              <Pencil className="h-4 w-4 mr-2" />
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-rose-600 dark:text-rose-400 focus:bg-rose-50 dark:focus:bg-rose-900/20"
+                              onClick={() => deleteMutation.mutate(bill.id)}
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </div>
+                  </AnimatedListItem>
+                ))}
+              </motion.div>
+            ) : (
+              <EmptyState
+                icon={FileText}
+                title="No bills yet"
+                description="Start by adding your first bill to track payments."
+                action={{
+                  label: "Add Bill",
+                  icon: Plus,
+                  onClick: () => setIsOpen(true),
+                }}
+              />
+            )}
+          </GlassCard>
+        </motion.div>
+      </motion.div>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md bg-slate-950 dark:bg-slate-950 border-slate-800">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5 text-primary" />
+            <DialogTitle className="flex items-center gap-2 text-slate-100">
+              <div className="p-2 bg-gradient-to-br from-violet-600/20 to-violet-700/20 rounded-lg">
+                <FileText className="h-5 w-5 text-violet-500" />
+              </div>
               {editingBill ? "Edit Bill" : "Add New Bill"}
             </DialogTitle>
-            <DialogDescription>{editingBill ? "Update the bill details." : "Add a new recurring bill to track."}</DialogDescription>
+            <DialogDescription className="text-slate-400">
+              {editingBill
+                ? "Update the bill details."
+                : "Add a new recurring bill to track."}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">
-                Bill Name
-                {billFormErrors.name && <span className="text-red-500 text-xs ml-2">{billFormErrors.name}</span>}
-              </Label>
-              <Input 
-                id="name" 
-                value={formData.name} 
+            <FormField
+              label="Bill Name"
+              error={billFormErrors.name}
+              required
+            >
+              <Input
+                id="name"
+                value={formData.name}
                 onChange={(e) => {
                   setFormData({ ...formData, name: e.target.value });
-                  setBillFormErrors(prev => ({ ...prev, name: '' }));
-                }} 
-                placeholder="e.g., AWS Hosting" 
-                className={`bg-muted/50 ${billFormErrors.name ? 'border-red-500' : ''}`}
-                data-testid="input-bill-name" 
+                  setBillFormErrors((prev) => ({ ...prev, name: "" }));
+                }}
+                placeholder="e.g., AWS Hosting"
+                className="bg-muted/30 border-slate-700 text-slate-100 placeholder:text-slate-500"
+                data-testid="input-bill-name"
               />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="provider">
-                Provider
-                {billFormErrors.provider && <span className="text-red-500 text-xs ml-2">{billFormErrors.provider}</span>}
-              </Label>
-              <Input 
-                id="provider" 
-                value={formData.provider} 
+            </FormField>
+
+            <FormField
+              label="Provider"
+              error={billFormErrors.provider}
+              required
+            >
+              <Input
+                id="provider"
+                value={formData.provider}
                 onChange={(e) => {
                   setFormData({ ...formData, provider: e.target.value });
-                  setBillFormErrors(prev => ({ ...prev, provider: '' }));
-                }} 
-                placeholder="e.g., Amazon Web Services" 
-                className={`bg-muted/50 ${billFormErrors.provider ? 'border-red-500' : ''}`}
-                data-testid="input-bill-provider" 
+                  setBillFormErrors((prev) => ({ ...prev, provider: "" }));
+                }}
+                placeholder="e.g., Amazon Web Services"
+                className="bg-muted/30 border-slate-700 text-slate-100 placeholder:text-slate-500"
+                data-testid="input-bill-provider"
               />
-            </div>
+            </FormField>
+
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="amount">
-                  Amount ({currencySymbol})
-                  {billFormErrors.amount && <span className="text-red-500 text-xs ml-2">{billFormErrors.amount}</span>}
-                </Label>
-                <Input 
-                  id="amount" 
-                  type="number" 
-                  value={formData.amount} 
+              <FormField
+                label={`Amount (${currencySymbol})`}
+                error={billFormErrors.amount}
+                required
+              >
+                <Input
+                  id="amount"
+                  type="number"
+                  value={formData.amount}
                   onChange={(e) => {
                     setFormData({ ...formData, amount: e.target.value });
-                    setBillFormErrors(prev => ({ ...prev, amount: '' }));
-                  }} 
-                  placeholder="0.00" 
-                  className={`bg-muted/50 ${billFormErrors.amount ? 'border-red-500' : ''}`}
-                  data-testid="input-bill-amount" 
+                    setBillFormErrors((prev) => ({ ...prev, amount: "" }));
+                  }}
+                  placeholder="0.00"
+                  className="bg-muted/30 border-slate-700 text-slate-100 placeholder:text-slate-500"
+                  data-testid="input-bill-amount"
                 />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="dueDate">
-                  Due Date
-                  {billFormErrors.dueDate && <span className="text-red-500 text-xs ml-2">{billFormErrors.dueDate}</span>}
-                </Label>
-                <Input 
-                  id="dueDate" 
-                  type="date" 
-                  value={formData.dueDate} 
+              </FormField>
+
+              <FormField
+                label="Due Date"
+                error={billFormErrors.dueDate}
+                required
+              >
+                <Input
+                  id="dueDate"
+                  type="date"
+                  value={formData.dueDate}
                   onChange={(e) => {
                     setFormData({ ...formData, dueDate: e.target.value });
-                    setBillFormErrors(prev => ({ ...prev, dueDate: '' }));
-                  }} 
-                  className={`bg-muted/50 ${billFormErrors.dueDate ? 'border-red-500' : ''}`}
-                  data-testid="input-bill-due-date" 
+                    setBillFormErrors((prev) => ({ ...prev, dueDate: "" }));
+                  }}
+                  className="bg-muted/30 border-slate-700 text-slate-100"
+                  data-testid="input-bill-due-date"
                 />
-              </div>
+              </FormField>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="category">
-                Category
-                {billFormErrors.category && <span className="text-red-500 text-xs ml-2">{billFormErrors.category}</span>}
-              </Label>
-              <Select 
-                value={formData.category} 
+
+            <FormField
+              label="Category"
+              error={billFormErrors.category}
+              required
+            >
+              <Select
+                value={formData.category}
                 onValueChange={(value) => {
                   setFormData({ ...formData, category: value });
-                  setBillFormErrors(prev => ({ ...prev, category: '' }));
+                  setBillFormErrors((prev) => ({ ...prev, category: "" }));
                 }}
               >
-                <SelectTrigger className={`bg-muted/50 ${billFormErrors.category ? 'border-red-500' : ''}`} data-testid="select-bill-category">
+                <SelectTrigger
+                  className="bg-muted/30 border-slate-700 text-slate-100"
+                  data-testid="select-bill-category"
+                >
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="bg-slate-900 border-slate-800">
                   <SelectItem value="Software">Software</SelectItem>
                   <SelectItem value="Office">Office</SelectItem>
                   <SelectItem value="Utilities">Utilities</SelectItem>
@@ -885,12 +962,32 @@ export default function Bills() {
                   <SelectItem value="Other">Other</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
+            </FormField>
+
+            {Object.keys(billFormErrors).length > 0 && (
+              <WarningFeedback
+                title="Please fix the errors"
+                message="Check all required fields before submitting"
+              />
+            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsOpen(false)}>Cancel</Button>
-            <Button onClick={handleSubmit} disabled={createMutation.isPending || updateMutation.isPending} data-testid="button-submit-bill">
-              {(createMutation.isPending || updateMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            <Button
+              variant="outline"
+              onClick={() => setIsOpen(false)}
+              className="border-slate-700 text-slate-300 hover:bg-slate-800"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={createMutation.isPending || updateMutation.isPending}
+              data-testid="button-submit-bill"
+              className="bg-gradient-to-r from-violet-600 to-violet-700 hover:from-violet-700 hover:to-violet-800 text-white shadow-lg"
+            >
+              {(createMutation.isPending || updateMutation.isPending) && (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              )}
               {editingBill ? "Update Bill" : "Add Bill"}
             </Button>
           </DialogFooter>
@@ -898,17 +995,19 @@ export default function Bills() {
       </Dialog>
 
       <Dialog open={utilityDialogOpen} onOpenChange={setUtilityDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md bg-slate-950 dark:bg-slate-950 border-slate-800 max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {utilityType === "airtime" && <Phone className="h-5 w-5 text-green-500" />}
-              {utilityType === "data" && <Wifi className="h-5 w-5 text-blue-500" />}
-              {utilityType === "electricity" && <Zap className="h-5 w-5 text-yellow-500" />}
-              {utilityType === "cable" && <Tv className="h-5 w-5 text-purple-500" />}
-              {utilityType === "internet" && <Globe className="h-5 w-5 text-indigo-500" />}
+            <DialogTitle className="flex items-center gap-2 text-slate-100">
+              <div className="p-2 bg-gradient-to-br from-violet-600/20 to-violet-700/20 rounded-lg">
+                {utilityType === "airtime" && <Phone className="h-5 w-5 text-emerald-500" />}
+                {utilityType === "data" && <Wifi className="h-5 w-5 text-cyan-500" />}
+                {utilityType === "electricity" && <Zap className="h-5 w-5 text-amber-500" />}
+                {utilityType === "cable" && <Tv className="h-5 w-5 text-violet-500" />}
+                {utilityType === "internet" && <Globe className="h-5 w-5 text-cyan-500" />}
+              </div>
               Pay {utilityType.charAt(0).toUpperCase() + utilityType.slice(1)}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-slate-400">
               {utilityType === "airtime" && "Top up your mobile phone instantly"}
               {utilityType === "data" && "Purchase data bundles for your device"}
               {utilityType === "electricity" && "Pay your electricity bill securely"}
@@ -916,149 +1015,156 @@ export default function Bills() {
               {utilityType === "internet" && "Pay your internet service bill"}
             </DialogDescription>
           </DialogHeader>
+
           <div className="space-y-4 py-4">
-            <div className="p-3 bg-primary/10 rounded-xl flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <CreditCard className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium">Wallet Balance</span>
-              </div>
-              <span className="font-bold text-primary" data-testid="text-wallet-balance">
-                {formatCurrency(walletBalance)}
-              </span>
-            </div>
-            
-            <div className="space-y-2">
-              <Label>Select Provider {validationErrors.provider && <span className="text-red-500 text-xs ml-2">{validationErrors.provider}</span>}</Label>
+            <InfoFeedback
+              title="Wallet Balance"
+              message={formatCurrency(walletBalance)}
+              icon={CreditCard}
+            />
+
+            <FormField label="Select Provider" error={validationErrors.provider} required>
               <div className="grid grid-cols-3 gap-2">
                 {utilityProviders[utilityType]?.slice(0, 6).map((provider) => {
-                  const ProviderIcon = utilityType === "airtime" ? Phone 
-                    : utilityType === "data" ? Wifi 
-                    : utilityType === "electricity" ? Zap 
-                    : utilityType === "cable" ? Tv 
-                    : Globe;
+                  const ProviderIcon =
+                    utilityType === "airtime"
+                      ? Phone
+                      : utilityType === "data"
+                        ? Wifi
+                        : utilityType === "electricity"
+                          ? Zap
+                          : utilityType === "cable"
+                            ? Tv
+                            : Globe;
                   return (
-                    <button
+                    <motion.button
                       key={provider.id}
                       type="button"
                       onClick={() => {
                         setUtilityForm({ ...utilityForm, provider: provider.id });
-                        setValidationErrors(prev => ({ ...prev, provider: '' }));
+                        setValidationErrors((prev) => ({ ...prev, provider: "" }));
                       }}
+                      whileHover={{ scale: 1.05 }}
                       className={`p-3 rounded-xl border-2 text-center transition-all ${
-                        utilityForm.provider === provider.id 
-                          ? "border-primary bg-primary/10" 
+                        utilityForm.provider === provider.id
+                          ? "border-violet-500 bg-violet-600/20"
                           : validationErrors.provider
-                          ? "border-red-300 hover:border-red-400"
-                          : "border-border hover:border-primary/50"
+                            ? "border-rose-400/50 bg-rose-900/10 hover:border-rose-400"
+                            : "border-slate-700 bg-slate-800/50 hover:border-violet-500/50"
                       }`}
                       data-testid={`provider-${provider.id}`}
                     >
                       <ProviderIcon className={`h-5 w-5 mx-auto ${provider.color}`} />
-                      <p className="text-xs font-medium mt-1 truncate">{provider.name}</p>
-                    </button>
+                      <p className="text-xs font-medium mt-1 truncate text-slate-300">
+                        {provider.name}
+                      </p>
+                    </motion.button>
                   );
                 })}
               </div>
-            </div>
+            </FormField>
 
             {(utilityType === "airtime" || utilityType === "data") && (
-              <div className="space-y-2">
-                <Label htmlFor="phone">
-                  Phone Number
-                  {validationErrors.phoneNumber && <span className="text-red-500 text-xs ml-2">{validationErrors.phoneNumber}</span>}
-                </Label>
-                <Input 
-                  id="phone" 
-                  type="tel" 
-                  value={utilityForm.phoneNumber} 
+              <FormField
+                label="Phone Number"
+                error={validationErrors.phoneNumber}
+                required
+              >
+                <Input
+                  id="phone"
+                  type="tel"
+                  value={utilityForm.phoneNumber}
                   onChange={(e) => {
                     setUtilityForm({ ...utilityForm, phoneNumber: e.target.value });
-                    setValidationErrors(prev => ({ ...prev, phoneNumber: '' }));
-                  }} 
-                  placeholder={placeholders.phone} 
-                  className={`bg-muted/50 ${validationErrors.phoneNumber ? 'border-red-500' : ''}`}
+                    setValidationErrors((prev) => ({ ...prev, phoneNumber: "" }));
+                  }}
+                  placeholder={placeholders.phone}
+                  className="bg-muted/30 border-slate-700 text-slate-100 placeholder:text-slate-500"
                   data-testid="input-phone"
                 />
-              </div>
+              </FormField>
             )}
 
             {utilityType === "electricity" && (
-              <div className="space-y-2">
-                <Label htmlFor="meter">
-                  Meter Number
-                  {validationErrors.meterNumber && <span className="text-red-500 text-xs ml-2">{validationErrors.meterNumber}</span>}
-                </Label>
-                <Input 
-                  id="meter" 
-                  value={utilityForm.meterNumber} 
+              <FormField
+                label="Meter Number"
+                error={validationErrors.meterNumber}
+                required
+              >
+                <Input
+                  id="meter"
+                  value={utilityForm.meterNumber}
                   onChange={(e) => {
                     setUtilityForm({ ...utilityForm, meterNumber: e.target.value });
-                    setValidationErrors(prev => ({ ...prev, meterNumber: '' }));
-                  }} 
-                  placeholder={placeholders.meter} 
-                  className={`bg-muted/50 ${validationErrors.meterNumber ? 'border-red-500' : ''}`}
+                    setValidationErrors((prev) => ({ ...prev, meterNumber: "" }));
+                  }}
+                  placeholder={placeholders.meter}
+                  className="bg-muted/30 border-slate-700 text-slate-100 placeholder:text-slate-500"
                   data-testid="input-meter"
                 />
-              </div>
+              </FormField>
             )}
 
             {utilityType === "cable" && (
-              <div className="space-y-2">
-                <Label htmlFor="smartcard">
-                  Smart Card Number
-                  {validationErrors.smartCardNumber && <span className="text-red-500 text-xs ml-2">{validationErrors.smartCardNumber}</span>}
-                </Label>
-                <Input 
-                  id="smartcard" 
-                  value={utilityForm.smartCardNumber} 
+              <FormField
+                label="Smart Card Number"
+                error={validationErrors.smartCardNumber}
+                required
+              >
+                <Input
+                  id="smartcard"
+                  value={utilityForm.smartCardNumber}
                   onChange={(e) => {
                     setUtilityForm({ ...utilityForm, smartCardNumber: e.target.value });
-                    setValidationErrors(prev => ({ ...prev, smartCardNumber: '' }));
-                  }} 
-                  placeholder={placeholders.smartcard} 
-                  className={`bg-muted/50 ${validationErrors.smartCardNumber ? 'border-red-500' : ''}`}
+                    setValidationErrors((prev) => ({ ...prev, smartCardNumber: "" }));
+                  }}
+                  placeholder={placeholders.smartcard}
+                  className="bg-muted/30 border-slate-700 text-slate-100 placeholder:text-slate-500"
                   data-testid="input-smartcard"
                 />
-              </div>
+              </FormField>
             )}
 
             {utilityType === "internet" && (
-              <div className="space-y-2">
-                <Label htmlFor="account">
-                  Account Number
-                  {validationErrors.meterNumber && <span className="text-red-500 text-xs ml-2">{validationErrors.meterNumber}</span>}
-                </Label>
-                <Input 
-                  id="account" 
-                  value={utilityForm.meterNumber} 
+              <FormField
+                label="Account Number"
+                error={validationErrors.meterNumber}
+                required
+              >
+                <Input
+                  id="account"
+                  value={utilityForm.meterNumber}
                   onChange={(e) => {
                     setUtilityForm({ ...utilityForm, meterNumber: e.target.value });
-                    setValidationErrors(prev => ({ ...prev, meterNumber: '' }));
-                  }} 
-                  placeholder={placeholders.meter} 
-                  className={`bg-muted/50 ${validationErrors.meterNumber ? 'border-red-500' : ''}`}
+                    setValidationErrors((prev) => ({ ...prev, meterNumber: "" }));
+                  }}
+                  placeholder={placeholders.meter}
+                  className="bg-muted/30 border-slate-700 text-slate-100 placeholder:text-slate-500"
                   data-testid="input-account"
                 />
-              </div>
+              </FormField>
             )}
 
             {utilityType === "data" && (
-              <div className="space-y-2">
-                <Label>
-                  Select Data Plan
-                  {validationErrors.plan && <span className="text-red-500 text-xs ml-2">{validationErrors.plan}</span>}
-                </Label>
-                <Select 
-                  value={utilityForm.plan} 
+              <FormField
+                label="Select Data Plan"
+                error={validationErrors.plan}
+                required
+              >
+                <Select
+                  value={utilityForm.plan}
                   onValueChange={(value) => {
                     setUtilityForm({ ...utilityForm, plan: value });
-                    setValidationErrors(prev => ({ ...prev, plan: '' }));
+                    setValidationErrors((prev) => ({ ...prev, plan: "" }));
                   }}
                 >
-                  <SelectTrigger className={`bg-muted/50 ${validationErrors.plan ? 'border-red-500' : ''}`} data-testid="select-data-plan">
+                  <SelectTrigger
+                    className="bg-muted/30 border-slate-700 text-slate-100"
+                    data-testid="select-data-plan"
+                  >
                     <SelectValue placeholder="Choose a plan" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-slate-900 border-slate-800">
                     {dataPlanOptions.map((plan) => (
                       <SelectItem key={plan.value} value={plan.value}>
                         {plan.label} - {formatCurrency(plan.price)}
@@ -1066,26 +1172,29 @@ export default function Bills() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
+              </FormField>
             )}
 
             {utilityType === "cable" && (
-              <div className="space-y-2">
-                <Label>
-                  Select Package
-                  {validationErrors.plan && <span className="text-red-500 text-xs ml-2">{validationErrors.plan}</span>}
-                </Label>
-                <Select 
-                  value={utilityForm.plan} 
+              <FormField
+                label="Select Package"
+                error={validationErrors.plan}
+                required
+              >
+                <Select
+                  value={utilityForm.plan}
                   onValueChange={(value) => {
                     setUtilityForm({ ...utilityForm, plan: value });
-                    setValidationErrors(prev => ({ ...prev, plan: '' }));
+                    setValidationErrors((prev) => ({ ...prev, plan: "" }));
                   }}
                 >
-                  <SelectTrigger className={`bg-muted/50 ${validationErrors.plan ? 'border-red-500' : ''}`} data-testid="select-cable-plan">
+                  <SelectTrigger
+                    className="bg-muted/30 border-slate-700 text-slate-100"
+                    data-testid="select-cable-plan"
+                  >
                     <SelectValue placeholder="Choose a package" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-slate-900 border-slate-800">
                     {cablePlans.map((plan) => (
                       <SelectItem key={plan.value} value={plan.value}>
                         {plan.label} - {formatCurrency(plan.price)}/month
@@ -1093,89 +1202,132 @@ export default function Bills() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
+              </FormField>
             )}
 
-            {(utilityType === "airtime" || utilityType === "electricity" || utilityType === "internet") && (
-              <div className="space-y-2">
-                <Label htmlFor="utility-amount">
-                  Amount ({currencySymbol})
-                  {validationErrors.amount && <span className="text-red-500 text-xs ml-2">{validationErrors.amount}</span>}
-                </Label>
-                <Input 
-                  id="utility-amount" 
-                  type="number" 
-                  value={utilityForm.amount} 
+            {(utilityType === "airtime" ||
+              utilityType === "electricity" ||
+              utilityType === "internet") && (
+              <FormField
+                label={`Amount (${currencySymbol})`}
+                error={validationErrors.amount}
+                required
+              >
+                <Input
+                  id="utility-amount"
+                  type="number"
+                  value={utilityForm.amount}
                   onChange={(e) => {
                     setUtilityForm({ ...utilityForm, amount: e.target.value });
-                    setValidationErrors(prev => ({ ...prev, amount: '' }));
-                  }} 
-                  placeholder="0.00" 
-                  className={`bg-muted/50 ${validationErrors.amount ? 'border-red-500' : ''}`}
+                    setValidationErrors((prev) => ({ ...prev, amount: "" }));
+                  }}
+                  placeholder="0.00"
+                  className="bg-muted/30 border-slate-700 text-slate-100 placeholder:text-slate-500"
                   data-testid="input-utility-amount"
                 />
                 {utilityType === "airtime" && (
-                  <div className="grid grid-cols-4 gap-2 mt-2">
+                  <div className="grid grid-cols-4 gap-2 mt-3">
                     {[5, 10, 20, 50].map((amount) => (
-                      <Button 
-                        key={amount} 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={() => setUtilityForm({ ...utilityForm, amount: String(amount) })}
-                        className="text-xs"
+                      <Button
+                        key={amount}
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setUtilityForm({
+                            ...utilityForm,
+                            amount: String(amount),
+                          })
+                        }
+                        className="text-xs border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-slate-100 rounded-xl"
                       >
                         {formatCurrency(amount)}
                       </Button>
                     ))}
                   </div>
                 )}
-              </div>
+              </FormField>
             )}
 
-            <div className="p-4 bg-muted/50 rounded-xl space-y-2">
+            <div className="p-4 bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 rounded-xl space-y-2">
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Amount</span>
-                <span className="font-bold">
-                  {currencySymbol}{utilityType === "data" 
-                    ? (dataPlanOptions.find(p => p.value === utilityForm.plan)?.price || 0).toFixed(2)
+                <span className="text-slate-400">Amount</span>
+                <span className="font-bold text-slate-100">
+                  {currencySymbol}
+                  {utilityType === "data"
+                    ? (
+                        dataPlanOptions.find((p) => p.value === utilityForm.plan)
+                          ?.price || 0
+                      ).toFixed(2)
                     : utilityType === "cable"
-                    ? (cablePlans.find(p => p.value === utilityForm.plan)?.price || 0).toFixed(2)
-                    : parseFloat(utilityForm.amount || "0").toFixed(2)}
+                      ? (
+                          cablePlans.find((p) => p.value === utilityForm.plan)
+                            ?.price || 0
+                        ).toFixed(2)
+                      : parseFloat(utilityForm.amount || "0").toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Fee</span>
-                <span className="font-bold text-emerald-600">{currencySymbol}0.00</span>
+                <span className="text-slate-400">Fee</span>
+                <span className="font-bold text-emerald-400">{currencySymbol}0.00</span>
               </div>
-              <div className="border-t pt-2 flex justify-between">
-                <span className="font-bold">Total</span>
-                <span className="font-bold text-primary">
-                  {currencySymbol}{utilityType === "data" 
-                    ? (dataPlanOptions.find(p => p.value === utilityForm.plan)?.price || 0).toFixed(2)
+              <div className="border-t border-slate-700 pt-2 flex justify-between">
+                <span className="font-bold text-slate-200">Total</span>
+                <span className="font-bold text-violet-400">
+                  {currencySymbol}
+                  {utilityType === "data"
+                    ? (
+                        dataPlanOptions.find((p) => p.value === utilityForm.plan)
+                          ?.price || 0
+                      ).toFixed(2)
                     : utilityType === "cable"
-                    ? (cablePlans.find(p => p.value === utilityForm.plan)?.price || 0).toFixed(2)
-                    : parseFloat(utilityForm.amount || "0").toFixed(2)}
+                      ? (
+                          cablePlans.find((p) => p.value === utilityForm.plan)
+                            ?.price || 0
+                        ).toFixed(2)
+                      : parseFloat(utilityForm.amount || "0").toFixed(2)}
                 </span>
               </div>
             </div>
+
+            {Object.keys(validationErrors).length > 0 && (
+              <WarningFeedback
+                title="Please fix the errors"
+                message="Check all required fields before paying"
+              />
+            )}
           </div>
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setUtilityDialogOpen(false)}>Cancel</Button>
-            <Button 
-              onClick={handleUtilityPayment} 
+            <Button
+              variant="outline"
+              onClick={() => setUtilityDialogOpen(false)}
+              className="border-slate-700 text-slate-300 hover:bg-slate-800"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleUtilityPayment}
               disabled={
-                payUtilityMutation.isPending || 
+                payUtilityMutation.isPending ||
                 !utilityForm.provider ||
-                ((utilityType === "airtime" || utilityType === "data") && !utilityForm.phoneNumber) ||
+                ((utilityType === "airtime" || utilityType === "data") &&
+                  !utilityForm.phoneNumber) ||
                 (utilityType === "electricity" && !utilityForm.meterNumber) ||
                 (utilityType === "cable" && !utilityForm.smartCardNumber) ||
                 (utilityType === "internet" && !utilityForm.meterNumber) ||
-                ((utilityType === "data" || utilityType === "cable") && !utilityForm.plan) ||
-                ((utilityType === "airtime" || utilityType === "electricity" || utilityType === "internet") && !utilityForm.amount)
-              } 
+                ((utilityType === "data" || utilityType === "cable") &&
+                  !utilityForm.plan) ||
+                ((utilityType === "airtime" ||
+                  utilityType === "electricity" ||
+                  utilityType === "internet") &&
+                  !utilityForm.amount)
+              }
               data-testid="button-pay-utility"
+              className="bg-gradient-to-r from-violet-600 to-violet-700 hover:from-violet-700 hover:to-violet-800 text-white shadow-lg"
             >
-              {payUtilityMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {payUtilityMutation.isPending && (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              )}
               Pay Now
             </Button>
           </DialogFooter>
@@ -1187,6 +1339,7 @@ export default function Bills() {
         onOpenChange={setIsPinDialogOpen}
         onVerified={handlePinVerified}
       />
-    </div>
+    </motion.div>
+    </PageWrapper>
   );
 }
