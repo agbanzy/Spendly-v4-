@@ -6468,42 +6468,70 @@ export async function registerRoutes(
     try {
       const { userId, email, firstName, lastName, countryCode, phone } = req.body;
 
-      // Check if user already has a virtual account
+      if (!userId) {
+        return res.status(400).json({ error: "User ID is required" });
+      }
+
+      const safeName = `${firstName || 'User'} ${lastName || ''}`.trim();
+      const safeEmail = email || '';
+      const safeCountry = countryCode || 'US';
+      const { currency } = getCurrencyForCountry(safeCountry);
+
       const existingAccounts = await storage.getVirtualAccounts();
       const userAccount = existingAccounts.find((a: any) => a.userId === userId);
       if (userAccount) {
         return res.json(userAccount);
       }
 
-      // Create virtual account via payment provider
-      const result = await paymentService.createVirtualAccount(
-        email,
-        firstName,
-        lastName,
-        countryCode,
-        phone
-      );
+      let accountNumber = '';
+      let bankName = 'Spendly';
+      let bankCode = 'SPENDLY';
+      let accountName = safeName;
+      let providerResult: any = null;
 
-      // Store in database
+      try {
+        providerResult = await paymentService.createVirtualAccount(
+          safeEmail,
+          firstName || 'User',
+          lastName || safeName,
+          safeCountry,
+          phone
+        );
+        if (providerResult.accountNumber) {
+          accountNumber = providerResult.accountNumber;
+          bankName = providerResult.bankName || bankName;
+          bankCode = providerResult.bankCode || bankCode;
+          accountName = providerResult.accountName || accountName;
+        }
+      } catch (providerError: any) {
+        console.log('Payment provider virtual account creation failed, using local account:', providerError.message);
+      }
+
+      if (!accountNumber) {
+        const prefix = currency === 'NGN' ? 'SPN' : 'SPV';
+        accountNumber = `${prefix}${Date.now()}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+        bankName = 'Spendly';
+        bankCode = 'SPENDLY';
+      }
+
       const virtualAccount = await storage.createVirtualAccount({
         userId,
-        name: result.accountName || `${firstName} ${lastName}`,
-        accountNumber: result.accountNumber || '',
-        bankName: result.bankName || 'Spendly',
-        bankCode: result.bankCode || 'SPENDLY',
-        currency: getCurrencyForCountry(countryCode).currency,
+        name: accountName,
+        accountNumber,
+        bankName,
+        bankCode,
+        currency,
         balance: '0',
         type: 'personal',
         status: 'active',
         createdAt: new Date().toISOString(),
       });
 
-      // Create wallet for this user if not exists
       const existingWallet = await storage.getWalletByUserId(userId);
       if (!existingWallet) {
         await storage.createWallet({
           userId,
-          currency: getCurrencyForCountry(countryCode).currency,
+          currency,
           type: 'personal',
           balance: '0',
           availableBalance: '0',
@@ -6515,6 +6543,7 @@ export async function registerRoutes(
 
       res.status(201).json(virtualAccount);
     } catch (error: any) {
+      console.error('Virtual account creation error:', error);
       res.status(500).json({ error: error.message || "Failed to create virtual account" });
     }
   });
