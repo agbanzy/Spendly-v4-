@@ -104,7 +104,51 @@ class NotificationService {
   async send(options: SendNotificationOptions): Promise<void> {
     const { userId, type, title, message, data, channels = ['in_app'] } = options;
 
-    const settings = await storage.getNotificationSettings(userId);
+    let settings = await storage.getNotificationSettings(userId);
+    
+    // If no notification settings, try to auto-create from user profile
+    if (!settings) {
+      try {
+        const profile = await storage.getUserProfile(userId);
+        if (profile) {
+          const now = new Date().toISOString();
+          settings = await storage.createNotificationSettings({
+            userId,
+            emailEnabled: true,
+            smsEnabled: !!profile.phoneNumber,
+            pushEnabled: true,
+            inAppEnabled: true,
+            email: profile.email,
+            phone: profile.phoneNumber || null,
+            pushToken: null,
+            expenseNotifications: true,
+            paymentNotifications: true,
+            billNotifications: true,
+            budgetNotifications: true,
+            securityNotifications: true,
+            marketingNotifications: false,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      } catch (err) {
+        console.error('Failed to auto-create notification settings:', err);
+      }
+    }
+
+    // Fallback: if settings still missing email, look up from profile
+    let recipientEmail = settings?.email;
+    let recipientPhone = settings?.phone;
+    if (!recipientEmail || !recipientPhone) {
+      try {
+        const profile = await storage.getUserProfile(userId);
+        if (profile) {
+          if (!recipientEmail) recipientEmail = profile.email;
+          if (!recipientPhone) recipientPhone = profile.phoneNumber || undefined;
+        }
+      } catch (e) { /* ignore */ }
+    }
+
     const enabledChannels = this.getEnabledChannels(settings, channels, type);
 
     const now = new Date().toISOString();
@@ -127,9 +171,9 @@ class NotificationService {
 
     const promises: Promise<void>[] = [];
 
-    if (enabledChannels.includes('email') && settings?.email) {
+    if (enabledChannels.includes('email') && recipientEmail) {
       promises.push(this.sendEmail({
-        to: settings.email,
+        to: recipientEmail,
         subject: title,
         html: this.formatEmailHtml(title, message, data),
         text: message,
@@ -138,9 +182,9 @@ class NotificationService {
       }).catch(console.error));
     }
 
-    if (enabledChannels.includes('sms') && settings?.phone) {
+    if (enabledChannels.includes('sms') && recipientPhone) {
       promises.push(this.sendSms({
-        to: settings.phone,
+        to: recipientPhone,
         body: `${title}: ${message}`,
       }).then(() => {
         storage.updateNotification(created.id, { smsSent: true });
@@ -1404,6 +1448,98 @@ Date: ${config.date}`;
       console.error('Failed to send payment receipt email:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
+  }
+  async notifyExpenseReviewRequested(reviewerUserId: string, expense: {
+    id: string;
+    merchant: string;
+    amount: number;
+    currency?: string;
+    submitterName: string;
+    note?: string;
+  }): Promise<void> {
+    const cur = expense.currency || 'USD';
+    const sym = this.getCurrencySymbol(cur);
+    await this.send({
+      userId: reviewerUserId,
+      type: 'expense_review_request',
+      title: 'Expense Review Requested',
+      message: `${expense.submitterName} has requested your review on an expense of ${sym}${expense.amount.toLocaleString()} at ${expense.merchant}.${expense.note ? ` Note: ${expense.note}` : ''}`,
+      data: { expenseId: expense.id, actionUrl: '/expenses' },
+      channels: ['in_app', 'email', 'push'],
+    });
+  }
+
+  async notifyExpenseSubmittedForApproval(approverUserIds: string[], expense: {
+    id: string;
+    merchant: string;
+    amount: number;
+    currency?: string;
+    submitterName: string;
+    category?: string;
+  }): Promise<void> {
+    const cur = expense.currency || 'USD';
+    const sym = this.getCurrencySymbol(cur);
+    for (const approverId of approverUserIds) {
+      await this.send({
+        userId: approverId,
+        type: 'expense_pending_approval',
+        title: 'Expense Pending Your Approval',
+        message: `${expense.submitterName} submitted an expense of ${sym}${expense.amount.toLocaleString()} at ${expense.merchant}${expense.category ? ` (${expense.category})` : ''} for your approval.`,
+        data: { expenseId: expense.id, actionUrl: '/expenses' },
+        channels: ['in_app', 'email', 'push'],
+      });
+    }
+  }
+
+  async notifyWalletDeposit(userId: string, deposit: {
+    amount: number;
+    currency: string;
+    method: string;
+    reference?: string;
+  }): Promise<void> {
+    const sym = this.getCurrencySymbol(deposit.currency);
+    await this.send({
+      userId,
+      type: 'payment_received',
+      title: 'Wallet Funded Successfully',
+      message: `${sym}${deposit.amount.toLocaleString()} has been added to your ${deposit.currency} wallet via ${deposit.method}.${deposit.reference ? ` Ref: ${deposit.reference}` : ''}`,
+      data: { actionUrl: '/dashboard' },
+      channels: ['in_app', 'email', 'push'],
+    });
+  }
+
+  async notifyTransferSent(userId: string, transfer: {
+    amount: number;
+    currency: string;
+    recipientName: string;
+    reference?: string;
+  }): Promise<void> {
+    const sym = this.getCurrencySymbol(transfer.currency);
+    await this.send({
+      userId,
+      type: 'payment_sent',
+      title: 'Transfer Sent',
+      message: `${sym}${transfer.amount.toLocaleString()} has been sent to ${transfer.recipientName}.${transfer.reference ? ` Ref: ${transfer.reference}` : ''}`,
+      data: { actionUrl: '/transactions' },
+      channels: ['in_app', 'email', 'push'],
+    });
+  }
+
+  async notifyBillPaid(userId: string, bill: {
+    name: string;
+    amount: number;
+    currency: string;
+    provider: string;
+  }): Promise<void> {
+    const sym = this.getCurrencySymbol(bill.currency);
+    await this.send({
+      userId,
+      type: 'bill_paid',
+      title: 'Bill Payment Successful',
+      message: `Your ${bill.name} bill of ${sym}${bill.amount.toLocaleString()} to ${bill.provider} has been paid successfully.`,
+      data: { actionUrl: '/bills' },
+      channels: ['in_app', 'email', 'push'],
+    });
   }
 }
 

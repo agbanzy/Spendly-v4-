@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
-import { Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, User, Building2, CheckCircle2, Sparkles, Shield, Globe2, Zap } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, User, Building2, CheckCircle2, Sparkles, Shield, Globe2, Zap, Phone, MapPin } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -21,10 +22,25 @@ export default function SignupPage() {
   const searchParams = new URLSearchParams(window.location.search);
   const inviteToken = searchParams.get("invite");
 
+  const countries = [
+    { code: "US", name: "United States", dial: "+1" },
+    { code: "GB", name: "United Kingdom", dial: "+44" },
+    { code: "NG", name: "Nigeria", dial: "+234" },
+    { code: "GH", name: "Ghana", dial: "+233" },
+    { code: "KE", name: "Kenya", dial: "+254" },
+    { code: "ZA", name: "South Africa", dial: "+27" },
+    { code: "DE", name: "Germany", dial: "+49" },
+    { code: "FR", name: "France", dial: "+33" },
+    { code: "CA", name: "Canada", dial: "+1" },
+    { code: "AU", name: "Australia", dial: "+61" },
+  ];
+
   const [formData, setFormData] = useState({
     fullName: "",
     email: "",
     companyName: "",
+    phoneNumber: "",
+    country: "",
     password: "",
     confirmPassword: ""
   });
@@ -84,7 +100,10 @@ export default function SignupPage() {
     setIsLoading(true);
 
     try {
-      await signup(formData.fullName, formData.email, formData.password);
+      await signup(formData.fullName, formData.email, formData.password, {
+        phoneNumber: formData.phoneNumber || undefined,
+        country: formData.country || undefined,
+      });
       toast({ title: "Account created!", description: "Welcome to Spendly. Let's get you set up." });
       if (inviteToken) {
         setLocation(`/invite/${inviteToken}`);
@@ -224,6 +243,36 @@ export default function SignupPage() {
                       className="pl-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors"
                       data-testid="input-company"
                     />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="phoneNumber" className="text-sm font-medium">Phone Number</Label>
+                    <div className="relative">
+                      <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="phoneNumber" type="tel" placeholder="+1 555 000 0000"
+                        value={formData.phoneNumber}
+                        onChange={(e) => handleInputChange("phoneNumber", e.target.value)}
+                        className="pl-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors"
+                        data-testid="input-phone"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="country" className="text-sm font-medium">Country</Label>
+                    <Select value={formData.country} onValueChange={(val) => handleInputChange("country", val)}>
+                      <SelectTrigger className="h-11 bg-muted/30 border-border/50" data-testid="select-country">
+                        <SelectValue placeholder="Select country" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {countries.map((c) => (
+                          <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 

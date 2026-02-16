@@ -24,7 +24,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
-  signup: (name: string, email: string, password: string) => Promise<void>;
+  signup: (name: string, email: string, password: string, extra?: { phoneNumber?: string; country?: string }) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -82,9 +82,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(mapFirebaseUser(userCredential.user));
   };
 
-  const signup = async (name: string, email: string, password: string) => {
+  const signup = async (name: string, email: string, password: string, extra?: { phoneNumber?: string; country?: string }) => {
     const userCredential = await signUpWithEmail(email, password, name);
-    await ensureUserProfile(userCredential.user);
+    try {
+      await apiRequest("POST", "/api/user-profile", {
+        firebaseUid: userCredential.user.uid,
+        email: userCredential.user.email,
+        displayName: userCredential.user.displayName || name,
+        photoUrl: userCredential.user.photoURL || null,
+        phoneNumber: extra?.phoneNumber || null,
+        country: extra?.country || null,
+      });
+    } catch (error) {
+      console.error("Failed to sync user profile:", error);
+    }
     setUser(mapFirebaseUser(userCredential.user));
   };
 

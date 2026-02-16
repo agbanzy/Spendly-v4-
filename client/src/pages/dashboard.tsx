@@ -324,15 +324,18 @@ export default function Dashboard() {
   });
 
   const [isGeneratingVirtualAccount, setIsGeneratingVirtualAccount] = useState(false);
+  const [vaPhonePrompt, setVaPhonePrompt] = useState(false);
+  const [vaPhone, setVaPhone] = useState("");
   
   const generateVirtualAccountMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (phoneOverride?: string) => {
       if (!user?.id || !userProfile) {
         throw new Error("User profile not found. Please complete onboarding first.");
       }
 
-      if (!userProfile.phoneNumber) {
-        throw new Error("Phone number is required. Please update your phone number in Settings before generating a virtual account.");
+      const phone = phoneOverride || userProfile.phoneNumber;
+      if (!phone) {
+        throw new Error("PHONE_REQUIRED");
       }
       
       const displayName = userProfile.displayName || user.email?.split('@')[0] || "User";
@@ -346,20 +349,28 @@ export default function Dashboard() {
         firstName,
         lastName,
         countryCode: userProfile.country || countryCode,
-        phone: userProfile.phoneNumber || "",
+        phone,
       });
       
       return res.json();
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/virtual-accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/user-profile", user?.id] });
       toast({ 
         title: "Virtual Account Created!", 
         description: `Your account number: ${data.accountNumber} at ${data.bankName}` 
       });
       setIsGeneratingVirtualAccount(false);
+      setVaPhonePrompt(false);
+      setVaPhone("");
     },
     onError: (error: any) => {
+      if (error.message === "PHONE_REQUIRED") {
+        setVaPhonePrompt(true);
+        setIsGeneratingVirtualAccount(false);
+        return;
+      }
       toast({ 
         title: "Failed to create virtual account", 
         description: error.message || "Please try again later",
@@ -372,6 +383,21 @@ export default function Dashboard() {
   const handleGenerateVirtualAccount = () => {
     setIsGeneratingVirtualAccount(true);
     generateVirtualAccountMutation.mutate();
+  };
+
+  const handleVaPhoneSubmit = async () => {
+    if (!vaPhone.trim()) {
+      toast({ title: "Please enter your phone number", variant: "destructive" });
+      return;
+    }
+    if (user?.id) {
+      try {
+        await apiRequest("PATCH", `/api/user-profile/${user.id}`, { phoneNumber: vaPhone.trim() });
+        queryClient.invalidateQueries({ queryKey: ["/api/user-profile", user.id] });
+      } catch (e) { /* profile update failed, still try with override */ }
+    }
+    setIsGeneratingVirtualAccount(true);
+    generateVirtualAccountMutation.mutate(vaPhone.trim());
   };
 
   const validateAccount = async () => {
@@ -734,6 +760,31 @@ export default function Dashboard() {
                 <AlertCircle className="h-3 w-3" />
                 Complete your profile in onboarding to generate a virtual account.
               </p>
+            )}
+            {vaPhonePrompt && (
+              <div className="mt-4 p-4 rounded-lg bg-muted/50 border space-y-3">
+                <p className="text-sm font-medium">Phone number required for virtual account</p>
+                <p className="text-xs text-muted-foreground">Please enter your phone number to create a virtual account. This will also be saved to your profile.</p>
+                <div className="flex gap-2">
+                  <Input 
+                    placeholder="+234 800 000 0000" 
+                    value={vaPhone}
+                    onChange={(e) => setVaPhone(e.target.value)}
+                    className="flex-1"
+                    data-testid="input-va-phone"
+                  />
+                  <Button 
+                    onClick={handleVaPhoneSubmit}
+                    disabled={isGeneratingVirtualAccount}
+                    data-testid="button-va-phone-submit"
+                  >
+                    {isGeneratingVirtualAccount ? <Loader2 className="h-4 w-4 animate-spin" /> : "Continue"}
+                  </Button>
+                  <Button variant="ghost" onClick={() => { setVaPhonePrompt(false); setVaPhone(""); }}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
             )}
           </CardContent>
         </Card>

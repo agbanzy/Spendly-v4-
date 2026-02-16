@@ -439,6 +439,56 @@ export async function registerRoutes(
         attachments: attachments || [],
         taggedReviewers: taggedReviewers || [],
       });
+
+      // Notify the submitter
+      const submitterUid = (req as any).user?.uid || userId || '1';
+      if (status === 'PENDING') {
+        notificationService.notifyExpenseSubmitted(submitterUid, {
+          id: expense.id,
+          merchant,
+          amount: expenseAmount,
+          currency,
+        }).catch(console.error);
+      }
+
+      // Notify tagged reviewers for review
+      if (taggedReviewers && taggedReviewers.length > 0) {
+        const submitterProfile = await storage.getUserProfile(submitterUid);
+        const submitterName = submitterProfile?.displayName || user || 'A team member';
+        for (const reviewerId of taggedReviewers) {
+          notificationService.notifyExpenseReviewRequested(reviewerId, {
+            id: expense.id,
+            merchant,
+            amount: expenseAmount,
+            currency,
+            submitterName,
+            note: note || undefined,
+          }).catch(console.error);
+        }
+      }
+
+      // If pending, also notify managers/admins for approval
+      if (status === 'PENDING') {
+        const teamMembers = await storage.getTeamMembers();
+        const approvers = teamMembers.filter((m: any) => 
+          ['Owner', 'Admin', 'Manager'].includes(m.role) && m.userId
+        );
+        if (approvers.length > 0) {
+          const submitterProfile = await storage.getUserProfile(submitterUid);
+          const submitterName = submitterProfile?.displayName || user || 'A team member';
+          notificationService.notifyExpenseSubmittedForApproval(
+            approvers.map((a: any) => a.userId).filter(Boolean),
+            {
+              id: expense.id,
+              merchant,
+              amount: expenseAmount,
+              currency,
+              submitterName,
+              category,
+            }
+          ).catch(console.error);
+        }
+      }
       
       res.status(201).json({ ...expense, autoApproved });
     } catch (error) {
@@ -2679,6 +2729,17 @@ export async function registerRoutes(
           description: `Bill payment - ${bill.name}`,
           currency: billCurrency,
         });
+
+        // Send bill payment notification
+        const billPayerUid = (req as any).user?.uid;
+        if (billPayerUid) {
+          notificationService.notifyBillPaid(billPayerUid, {
+            name: bill.name,
+            amount: parseFloat(String(bill.amount)),
+            currency: billCurrency,
+            provider: bill.provider || 'Provider',
+          }).catch(console.error);
+        }
         
         res.json({ success: true, message: "Bill paid successfully from wallet" });
       } else {
@@ -2835,6 +2896,14 @@ export async function registerRoutes(
         description: `Wallet deposit confirmed - DEP-${idempotencyKey}`,
         currency: depositCurrency,
       });
+
+      // Send deposit notification
+      notificationService.notifyWalletDeposit(userId, {
+        amount,
+        currency: depositCurrency,
+        method: sessionId ? 'Stripe Checkout' : paymentIntentId ? 'Card Payment' : 'Paystack',
+        reference: idempotencyKey,
+      }).catch(console.error);
 
       res.json({ success: true, amount, currency: depositCurrency, message: `${depositCurrency} ${amount} deposited successfully` });
     } catch (error: any) {
@@ -4513,13 +4582,20 @@ export async function registerRoutes(
   // Create user profile
   app.post("/api/user-profile", async (req, res) => {
     try {
-      const { firebaseUid, email, displayName, photoUrl } = req.body;
+      const { firebaseUid, email, displayName, photoUrl, phoneNumber, country } = req.body;
       if (!firebaseUid || !email) {
         return res.status(400).json({ error: "firebaseUid and email are required" });
       }
       
       const existing = await storage.getUserProfile(firebaseUid);
       if (existing) {
+        if ((phoneNumber || country) && (!existing.phoneNumber || !existing.country)) {
+          const updated = await storage.updateUserProfile(firebaseUid, {
+            ...(phoneNumber && !existing.phoneNumber ? { phoneNumber } : {}),
+            ...(country && !existing.country ? { country } : {}),
+          });
+          if (updated) return res.json(updated);
+        }
         return res.json(existing);
       }
       
@@ -4529,13 +4605,13 @@ export async function registerRoutes(
         email,
         displayName: displayName || null,
         photoUrl: photoUrl || null,
-        phoneNumber: null,
+        phoneNumber: phoneNumber || null,
         dateOfBirth: null,
         nationality: null,
         address: null,
         city: null,
         state: null,
-        country: null,
+        country: country || null,
         postalCode: null,
         kycStatus: 'not_started',
         onboardingCompleted: false,
@@ -4543,6 +4619,31 @@ export async function registerRoutes(
         createdAt: now,
         updatedAt: now,
       });
+      
+      // Create notification settings for the new user with their email
+      try {
+        const now2 = new Date().toISOString();
+        await storage.createNotificationSettings({
+          userId: firebaseUid,
+          emailEnabled: true,
+          smsEnabled: !!phoneNumber,
+          pushEnabled: true,
+          inAppEnabled: true,
+          email: email,
+          phone: phoneNumber || null,
+          pushToken: null,
+          expenseNotifications: true,
+          paymentNotifications: true,
+          billNotifications: true,
+          budgetNotifications: true,
+          securityNotifications: true,
+          marketingNotifications: false,
+          createdAt: now2,
+          updatedAt: now2,
+        });
+      } catch (nsErr) {
+        console.error('Failed to create notification settings:', nsErr);
+      }
       
       // Send welcome email to new user
       notificationService.sendWelcomeEmail({
