@@ -159,6 +159,15 @@ export default function Transactions() {
   const { data: settings } = useQuery<CompanySettings>({ queryKey: ["/api/settings"] });
   const { data: balances } = useQuery<CompanyBalances>({ queryKey: ["/api/balances"] });
   const { data: transactions, isLoading } = useQuery<Transaction[]>({ queryKey: ["/api/transactions"] });
+  const { data: userProfile } = useQuery({
+    queryKey: ["/api/user-profile", user?.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/user-profile/${user?.id}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!user?.id,
+  });
 
   const countryCode = settings?.countryCode || "US";
   const isPaystack = isPaystackRegion(countryCode);
@@ -200,7 +209,7 @@ export default function Transactions() {
             amount: numAmount,
             currency,
             countryCode,
-            email: user?.email || "",
+            email: user?.email || userProfile?.email || "",
             metadata: { type: "wallet_funding" }
           });
           const data = await res.json();
