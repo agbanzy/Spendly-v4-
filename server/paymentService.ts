@@ -171,19 +171,71 @@ export const paymentService = {
     }
   },
 
-  async createVirtualAccount(customerEmail: string, firstName: string, lastName: string, countryCode: string, phone?: string) {
+  async createVirtualAccount(customerEmail: string, firstName: string, lastName: string, countryCode: string, phone?: string, bvn?: string, bankAccountNumber?: string, bankCode?: string) {
     const provider = getPaymentProvider(countryCode);
     
     if (provider === 'paystack') {
-      const customer = await paystackClient.createCustomer(customerEmail, firstName, lastName, phone);
-      const account = await paystackClient.createVirtualAccount(customer.data.customer_code);
-      return {
-        provider: 'paystack',
-        accountNumber: account.data.account_number,
-        bankName: account.data.bank.name,
-        accountName: account.data.account_name,
-        customerCode: customer.data.customer_code,
-      };
+      const safePhone = phone || '';
+      const safeLastName = lastName || firstName || 'User';
+      
+      try {
+        const result = await paystackClient.assignDedicatedAccount({
+          email: customerEmail,
+          firstName: firstName || 'User',
+          lastName: safeLastName,
+          phone: safePhone,
+          preferredBank: 'wema-bank',
+          country: countryCode || 'NG',
+          bvn,
+          accountNumber: bankAccountNumber,
+          bankCode,
+        });
+
+        const accountData = result.data || {};
+        return {
+          provider: 'paystack',
+          accountNumber: accountData.account_number || '',
+          bankName: accountData.bank?.name || 'Wema Bank',
+          bankCode: accountData.bank?.slug || 'wema-bank',
+          accountName: accountData.account_name || `${firstName} ${safeLastName}`,
+          customerCode: accountData.customer?.customer_code || '',
+          status: accountData.assignment?.assignee_type ? 'assigned' : 'pending',
+        };
+      } catch (assignError: any) {
+        console.log('Assign dedicated account failed, trying two-step approach:', assignError.message);
+        
+        const customer = await paystackClient.createCustomer(customerEmail, firstName || 'User', safeLastName, safePhone);
+        const customerCode = customer.data?.customer_code;
+        
+        if (!customerCode) {
+          throw new Error('Failed to create Paystack customer');
+        }
+
+        try {
+          const account = await paystackClient.createVirtualAccount(customerCode);
+          return {
+            provider: 'paystack',
+            accountNumber: account.data?.account_number || '',
+            bankName: account.data?.bank?.name || 'Wema Bank',
+            bankCode: account.data?.bank?.slug || 'wema-bank',
+            accountName: account.data?.account_name || `${firstName} ${safeLastName}`,
+            customerCode,
+            status: 'active',
+          };
+        } catch (dvaError: any) {
+          console.log('DVA creation also failed:', dvaError.message);
+          return {
+            provider: 'paystack',
+            accountNumber: '',
+            bankName: 'Wema Bank',
+            bankCode: 'wema-bank',
+            accountName: `${firstName} ${safeLastName}`,
+            customerCode,
+            status: 'pending_validation',
+            message: 'Account pending - customer validation required. Complete BVN verification to get a dedicated NUBAN.',
+          };
+        }
+      }
     } else {
       return {
         provider: 'stripe',

@@ -91,12 +91,67 @@ export const paystackClient = {
     });
   },
 
+  async assignDedicatedAccount(params: {
+    email: string;
+    firstName: string;
+    lastName: string;
+    phone: string;
+    preferredBank?: string;
+    country?: string;
+    bvn?: string;
+    accountNumber?: string;
+    bankCode?: string;
+    middleName?: string;
+  }) {
+    const payload: any = {
+      email: params.email,
+      first_name: params.firstName,
+      last_name: params.lastName,
+      phone: params.phone,
+      preferred_bank: params.preferredBank || 'wema-bank',
+      country: params.country || 'NG',
+    };
+    if (params.bvn) payload.bvn = params.bvn;
+    if (params.accountNumber) payload.account_number = params.accountNumber;
+    if (params.bankCode) payload.bank_code = params.bankCode;
+    if (params.middleName) payload.middle_name = params.middleName;
+    return paystackRequest('/dedicated_account/assign', 'POST', payload);
+  },
+
+  async fetchDedicatedAccountProviders() {
+    return paystackRequest('/dedicated_account/available_providers');
+  },
+
   async createCustomer(email: string, firstName: string, lastName: string, phone?: string) {
     return paystackRequest('/customer', 'POST', {
       email,
       first_name: firstName,
       last_name: lastName,
       phone,
+    });
+  },
+
+  async validateCustomer(customerCode: string, params: {
+    type: string;
+    value: string;
+    country: string;
+    bvn: string;
+    bankCode: string;
+    accountNumber: string;
+    firstName: string;
+    lastName: string;
+    middleName?: string;
+  }) {
+    return paystackRequest(`/customer/${customerCode}/identification`, 'POST', {
+      type: params.type || 'bank_account',
+      value: params.value || params.bvn,
+      country: params.country || 'NG',
+      bvn: params.bvn,
+      bank_code: params.bankCode,
+      account_number: params.accountNumber,
+      first_name: params.firstName,
+      last_name: params.lastName,
+      middle_name: params.middleName,
     });
   },
 

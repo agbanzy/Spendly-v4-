@@ -357,10 +357,18 @@ export default function Dashboard() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/virtual-accounts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/user-profile", user?.id] });
-      toast({ 
-        title: "Virtual Account Created!", 
-        description: `Your account number: ${data.accountNumber} at ${data.bankName}` 
-      });
+      
+      if (data.status === 'pending' || data.accountNumber?.startsWith('PENDING')) {
+        toast({ 
+          title: "Account Setup In Progress", 
+          description: data.message || "Your dedicated bank account is being activated. Complete BVN verification to receive your NUBAN.",
+        });
+      } else {
+        toast({ 
+          title: "Virtual Account Created!", 
+          description: `Your account number: ${data.accountNumber} at ${data.bankName}` 
+        });
+      }
       setIsGeneratingVirtualAccount(false);
       setVaPhonePrompt(false);
       setVaPhone("");
@@ -950,23 +958,40 @@ export default function Dashboard() {
                 <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Bank Transfer Details</p>
                 {primaryVirtualAccount ? (
                   <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-muted-foreground">Bank Name</span>
-                      <span className="text-sm font-bold">{primaryVirtualAccount.bankName || 'Wema Bank'}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-muted-foreground">Account Number</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold font-mono">{primaryVirtualAccount.accountNumber}</span>
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(primaryVirtualAccount.accountNumber)}>
-                          <Copy className="h-3 w-3" />
+                    {primaryVirtualAccount.status === 'pending' || primaryVirtualAccount.accountNumber?.startsWith('PENDING') ? (
+                      <div className="text-center py-2 space-y-2">
+                        <div className="flex items-center justify-center gap-2 text-amber-600">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span className="text-sm font-medium">Account Activation Pending</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Complete BVN verification in KYC settings to activate your dedicated bank account (NUBAN).
+                        </p>
+                        <Button variant="outline" size="sm" onClick={() => setLocation('/settings')}>
+                          Complete Verification
                         </Button>
                       </div>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-muted-foreground">Account Name</span>
-                      <span className="text-sm font-bold">{primaryVirtualAccount.name || 'Spendly Account'}</span>
-                    </div>
+                    ) : (
+                      <>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-muted-foreground">Bank Name</span>
+                          <span className="text-sm font-bold">{primaryVirtualAccount.bankName || 'Wema Bank'}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-muted-foreground">Account Number</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold font-mono">{primaryVirtualAccount.accountNumber}</span>
+                            <Button variant="ghost" size="icon" onClick={() => copyToClipboard(primaryVirtualAccount.accountNumber)} data-testid="button-copy-account-number">
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-muted-foreground">Account Name</span>
+                          <span className="text-sm font-bold">{primaryVirtualAccount.name || 'Spendly Account'}</span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <div className="text-center py-4">

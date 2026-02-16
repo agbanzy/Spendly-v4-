@@ -6466,7 +6466,7 @@ export async function registerRoutes(
   
   app.post("/api/virtual-accounts/create", async (req, res) => {
     try {
-      const { userId, email, firstName, lastName, countryCode, phone } = req.body;
+      const { userId, email, firstName, lastName, countryCode, phone, bvn, bankAccountNumber, bankCode: userBankCode } = req.body;
 
       if (!userId) {
         return res.status(400).json({ error: "User ID is required" });
@@ -6487,43 +6487,50 @@ export async function registerRoutes(
       let bankName = 'Spendly';
       let bankCode = 'SPENDLY';
       let accountName = safeName;
-      let providerResult: any = null;
+      let accountStatus = 'active';
+      let providerMessage = '';
 
       try {
-        providerResult = await paymentService.createVirtualAccount(
+        const providerResult = await paymentService.createVirtualAccount(
           safeEmail,
           firstName || 'User',
           lastName || safeName,
           safeCountry,
-          phone
+          phone,
+          bvn,
+          bankAccountNumber,
+          userBankCode
         );
+        
         if (providerResult.accountNumber) {
           accountNumber = providerResult.accountNumber;
           bankName = providerResult.bankName || bankName;
           bankCode = providerResult.bankCode || bankCode;
           accountName = providerResult.accountName || accountName;
+          accountStatus = 'active';
+        } else if (providerResult.status === 'pending_validation') {
+          accountStatus = 'pending';
+          providerMessage = providerResult.message || 'Account pending validation';
         }
       } catch (providerError: any) {
-        console.log('Payment provider virtual account creation failed, using local account:', providerError.message);
+        console.log('Payment provider virtual account creation failed:', providerError.message);
       }
 
-      if (!accountNumber) {
-        const prefix = currency === 'NGN' ? 'SPN' : 'SPV';
-        accountNumber = `${prefix}${Date.now()}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
-        bankName = 'Spendly';
-        bankCode = 'SPENDLY';
+      if (!accountNumber && accountStatus !== 'pending') {
+        accountStatus = 'pending';
+        providerMessage = 'Your dedicated bank account is being set up. Complete BVN verification in settings to activate it.';
       }
 
       const virtualAccount = await storage.createVirtualAccount({
         userId,
         name: accountName,
-        accountNumber,
-        bankName,
-        bankCode,
+        accountNumber: accountNumber || `PENDING-${Date.now()}`,
+        bankName: accountNumber ? bankName : 'Pending Activation',
+        bankCode: accountNumber ? bankCode : 'PENDING',
         currency,
         balance: '0',
         type: 'personal',
-        status: 'active',
+        status: accountStatus,
         createdAt: new Date().toISOString(),
       });
 
@@ -6541,7 +6548,12 @@ export async function registerRoutes(
         });
       }
 
-      res.status(201).json(virtualAccount);
+      const response: any = { ...virtualAccount };
+      if (providerMessage) {
+        response.message = providerMessage;
+      }
+
+      res.status(201).json(response);
     } catch (error: any) {
       console.error('Virtual account creation error:', error);
       res.status(500).json({ error: error.message || "Failed to create virtual account" });
