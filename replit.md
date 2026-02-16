@@ -78,6 +78,14 @@ Without these, the auth middleware bypasses token verification in development. I
 ### AWS SES Note
 SES is currently in **sandbox mode**. Only verified email addresses can receive emails. To send to any address, request production access in the AWS SES console.
 
+## Mobile App Configuration (React Native / Expo)
+- **Location**: `mobile/` directory with Expo managed workflow
+- **API Base URL**: Configured via `EXPO_PUBLIC_API_URL` env var, defaults to `https://spendlymanager.com`
+- **Firebase Config**: Uses `EXPO_PUBLIC_FIREBASE_*` env vars (API_KEY, AUTH_DOMAIN, PROJECT_ID, STORAGE_BUCKET, MESSAGING_SENDER_ID, APP_ID) - same Firebase project as web
+- **Auth Flow**: Firebase email/password + token stored in AsyncStorage, sent as Bearer token to backend
+- **User Sync**: On login/register, profile synced to backend via POST `/api/user-profile`
+- **Bundle IDs**: iOS `com.spendly.app`, Android `com.spendly.app`
+
 ## External Dependencies
 - **Firebase**: Authentication (email/password, Google Sign-in) and Firebase Admin SDK.
 - **Stripe**: Payment gateway for virtual cards and Stripe Identity for KYC.
