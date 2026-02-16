@@ -440,7 +440,7 @@ export default function Dashboard() {
   const showOnboardingPrompt = user && !userProfile;
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500 texture-mesh min-h-screen">
+    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8 min-h-screen animate-slide-up">
       {showOnboardingPrompt && (
         <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/50 dark:to-purple-950/50">
           <CardContent className="p-4 flex items-center justify-between flex-wrap gap-4">
@@ -561,9 +561,9 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <Card className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-white border-0 overflow-hidden relative">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-primary/10 rounded-full blur-[100px]" />
-        <div className="absolute bottom-0 left-0 w-64 h-64 bg-purple-500/10 rounded-full blur-[80px]" />
+      <Card className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-white border-0 overflow-hidden relative shadow-2xl shadow-primary/5">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-primary/10 rounded-full blur-[100px] animate-float" />
+        <div className="absolute bottom-0 left-0 w-64 h-64 bg-purple-500/10 rounded-full blur-[80px] animate-float-slow" />
         <CardContent className="p-8 md:p-12">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
             <div className="space-y-3">

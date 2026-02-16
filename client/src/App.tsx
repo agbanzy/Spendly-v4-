@@ -45,14 +45,18 @@ import InvitePage from "@/pages/invite";
 
 function AuthLoading() {
   return (
-    <div className="h-screen w-full flex items-center justify-center bg-background">
-      <div className="flex flex-col items-center gap-4">
-        <div className="h-12 w-12 rounded-xl bg-indigo-600 flex items-center justify-center animate-pulse">
-          <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-          </svg>
+    <div className="h-screen w-full flex items-center justify-center bg-background texture-mesh">
+      <div className="flex flex-col items-center gap-4 animate-scale-in">
+        <div className="relative">
+          <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center shadow-lg shadow-primary/25 animate-pulse-glow">
+            <img src="/spendly-logo.png" alt="Spendly" className="h-8 w-8 rounded-lg" />
+          </div>
+          <div className="absolute -inset-2 bg-primary/10 rounded-3xl blur-xl" />
         </div>
-        <p className="text-muted-foreground">Loading...</p>
+        <div className="flex items-center gap-2 text-muted-foreground text-sm">
+          <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+          Loading Spendly...
+        </div>
       </div>
     </div>
   );
@@ -128,13 +132,15 @@ function AppLayout() {
       <div className="flex h-screen w-full overflow-hidden">
         <AppSidebar />
         <SidebarInset className="flex flex-col flex-1 overflow-hidden">
-          <header className="flex items-center justify-between gap-4 p-3 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10">
-            <div className="flex items-center gap-2">
-              <SidebarTrigger data-testid="button-sidebar-toggle" />
+          <header className="flex items-center justify-between gap-4 h-14 px-4 border-b bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10">
+            <div className="flex items-center gap-3">
+              <SidebarTrigger className="hover:bg-muted/50 transition-colors" data-testid="button-sidebar-toggle" />
             </div>
-            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+            </div>
           </header>
-          <main className="flex-1 overflow-auto">
+          <main className="flex-1 overflow-auto texture-mesh">
             <AppRouter />
           </main>
         </SidebarInset>

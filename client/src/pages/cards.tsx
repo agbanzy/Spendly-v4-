@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent } from "@/components/ui/card";
+import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,6 +30,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  PageWrapper,
+  PageHeader,
+  MetricCard,
+  StatusBadge,
+  EmptyState,
+  fadeUp,
+  stagger,
+} from "@/components/ui-extended";
+import {
   Plus,
   CreditCard,
   MoreVertical,
@@ -42,15 +50,17 @@ import {
   Loader2,
   PlayCircle,
   PauseCircle,
+  Wifi,
 } from "lucide-react";
 import type { VirtualCard, CompanySettings } from "@shared/schema";
 
 const cardGradients: Record<string, string> = {
-  indigo: "bg-gradient-to-br from-indigo-500 to-purple-600",
-  emerald: "bg-gradient-to-br from-emerald-500 to-teal-600",
-  rose: "bg-gradient-to-br from-rose-500 to-pink-600",
-  amber: "bg-gradient-to-br from-amber-500 to-orange-600",
-  slate: "bg-gradient-to-br from-slate-700 to-slate-900",
+  indigo: "bg-gradient-to-br from-violet-500 via-violet-600 to-indigo-700",
+  emerald: "bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700",
+  rose: "bg-gradient-to-br from-rose-500 via-rose-600 to-pink-700",
+  amber: "bg-gradient-to-br from-amber-500 via-amber-600 to-orange-700",
+  slate: "bg-gradient-to-br from-slate-700 via-slate-800 to-zinc-900",
+  cyan: "bg-gradient-to-br from-cyan-500 via-cyan-600 to-blue-700",
 };
 
 export default function Cards() {
@@ -211,159 +221,346 @@ export default function Cards() {
   const totalBalance = cards?.reduce((sum, c) => sum + parseFloat(String(c.balance) || '0'), 0) || 0;
   const activeCards = cards?.filter((c) => c.status === "Active").length || 0;
 
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1,
+        delayChildren: 0.2,
+      },
+    },
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: {
+      opacity: 1,
+      y: 0,
+      transition: {
+        duration: 0.5,
+        ease: "easeOut",
+      },
+    },
+  };
+
   return (
-    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 texture-mesh min-h-screen">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <PageWrapper>
+      <PageHeader
+        title="Virtual Cards"
+        subtitle="Manage your corporate virtual cards with advanced controls"
+        actions={
+          <Button
+            onClick={() => {
+              resetForm();
+              setEditingCard(null);
+              setIsOpen(true);
+            }}
+            className="gap-2"
+            data-testid="button-issue-card"
+          >
+            <Plus className="h-4 w-4" />
+            Issue New Card
+          </Button>
+        }
+      />
+
+      <motion.div
+        className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
+        <motion.div variants={itemVariants}>
+          <MetricCard
+            title="Total Balance"
+            value={isLoading ? <Skeleton className="h-8 w-32" /> : formatCurrency(totalBalance)}
+            subtitle="Across all cards"
+            icon={CreditCard}
+            color="violet"
+            trend="neutral"
+            trendLabel=""
+            data-testid="text-total-card-balance"
+          />
+        </motion.div>
+
+        <motion.div variants={itemVariants}>
+          <MetricCard
+            title="Active Cards"
+            value={isLoading ? <Skeleton className="h-8 w-16" /> : activeCards}
+            subtitle="Ready to use"
+            icon={CreditCard}
+            color="emerald"
+            trend="neutral"
+            trendLabel=""
+          />
+        </motion.div>
+
+        <motion.div variants={itemVariants}>
+          <MetricCard
+            title="Total Cards"
+            value={isLoading ? <Skeleton className="h-8 w-16" /> : cards?.length || 0}
+            subtitle="Virtual cards issued"
+            icon={CreditCard}
+            color="cyan"
+            trend="neutral"
+            trendLabel=""
+          />
+        </motion.div>
+      </motion.div>
+
+      <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-black tracking-tight" data-testid="text-cards-title">Virtual Cards</h1>
-          <p className="text-muted-foreground mt-1">Manage your corporate virtual cards.</p>
-        </div>
-        <Button onClick={() => { resetForm(); setEditingCard(null); setIsOpen(true); }} data-testid="button-issue-card">
-          <Plus className="h-4 w-4 mr-2" />Issue New Card
-        </Button>
-      </div>
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+            Your Cards
+          </h2>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="glass card-hover">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Total Balance</p>
-              <div className="p-2 bg-gradient-to-br from-primary/20 to-primary/5 rounded-xl">
-                <CreditCard className="h-4 w-4 text-primary" />
-              </div>
-            </div>
-            {isLoading ? <Skeleton className="h-8 w-32" /> : <p className="text-2xl font-black" data-testid="text-total-card-balance">{formatCurrency(totalBalance)}</p>}
-            <p className="text-xs text-muted-foreground mt-1">Across all cards</p>
-          </CardContent>
-        </Card>
+          {isLoading ? (
+            <motion.div
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+              variants={containerVariants}
+              initial="hidden"
+              animate="visible"
+            >
+              {[1, 2, 3].map((i) => (
+                <motion.div key={i} variants={itemVariants}>
+                  <Skeleton className="h-56 rounded-2xl" />
+                </motion.div>
+              ))}
+            </motion.div>
+          ) : cards && cards.length > 0 ? (
+            <motion.div
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+              variants={containerVariants}
+              initial="hidden"
+              animate="visible"
+            >
+              {cards.map((card) => (
+                <motion.div
+                  key={card.id}
+                  variants={itemVariants}
+                  data-testid={`card-${card.id}`}
+                >
+                  <motion.div
+                    className={`relative rounded-2xl overflow-hidden shadow-2xl group cursor-pointer`}
+                    whileHover={{ y: -4, rotateY: -3 }}
+                    style={{
+                      transformStyle: "preserve-3d",
+                      perspective: 1000,
+                    }}
+                  >
+                    <div
+                      className={`relative h-56 p-6 text-white ${
+                        cardGradients[card.color] || cardGradients.slate
+                      } overflow-hidden`}
+                    >
+                      <div className="absolute inset-0 opacity-20">
+                        <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full bg-white/10 blur-3xl" />
+                        <div className="absolute -bottom-20 -left-20 w-60 h-60 rounded-full bg-white/10 blur-3xl" />
+                      </div>
 
-        <Card className="glass card-hover">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Active Cards</p>
-              <div className="p-2 bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 rounded-xl">
-                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-              </div>
-            </div>
-            {isLoading ? <Skeleton className="h-8 w-16" /> : <p className="text-2xl font-black text-emerald-600">{activeCards}</p>}
-            <p className="text-xs text-muted-foreground mt-1">Ready to use</p>
-          </CardContent>
-        </Card>
-
-        <Card className="glass card-hover">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Total Cards</p>
-              <div className="p-2 bg-gradient-to-br from-slate-500/20 to-slate-500/5 rounded-xl">
-                <CreditCard className="h-4 w-4 text-muted-foreground" />
-              </div>
-            </div>
-            {isLoading ? <Skeleton className="h-8 w-16" /> : <p className="text-2xl font-black">{cards?.length || 0}</p>}
-            <p className="text-xs text-muted-foreground mt-1">Virtual cards issued</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="space-y-4">
-        <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Your Cards</h3>
-
-        {isLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-52 rounded-2xl" />)}
-          </div>
-        ) : cards && cards.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {cards.map((card) => (
-              <div key={card.id} className={`relative rounded-2xl p-6 text-white ${cardGradients[card.color] || cardGradients.slate} shadow-xl overflow-hidden`} data-testid={`card-${card.id}`}>
-                <div className="absolute inset-0 opacity-10">
-                  <div className="absolute top-10 -right-10 w-40 h-40 border-8 border-white rounded-full" />
-                  <div className="absolute -bottom-10 -left-10 w-32 h-32 border-8 border-white rounded-full" />
-                </div>
-
-                <div className="relative z-10">
-                  <div className="flex items-start justify-between mb-8">
-                    <div>
-                      <p className="text-xs font-bold opacity-80 uppercase tracking-widest">{card.name}</p>
                       {card.status === "Frozen" && (
-                        <Badge className="mt-2 bg-white/20 text-white border-0"><Snowflake className="h-3 w-3 mr-1" />Frozen</Badge>
+                        <div className="absolute inset-0 bg-white/15 backdrop-blur-sm z-20" />
                       )}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-white/10" onClick={() => toggleShowNumber(card.id)}>
-                        {showNumbers[card.id] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </Button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-white hover:bg-white/10"><MoreVertical className="h-4 w-4" /></Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => openFundDialog(card)}><Plus className="h-4 w-4 mr-2" />Fund Card</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => openEditDialog(card)}><Pencil className="h-4 w-4 mr-2" />Edit</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => toggleStatusMutation.mutate({ id: card.id, status: card.status === "Active" ? "Frozen" : "Active" })}>
-                            {card.status === "Active" ? <><PauseCircle className="h-4 w-4 mr-2" />Freeze Card</> : <><PlayCircle className="h-4 w-4 mr-2" />Activate Card</>}
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem className="text-red-600" onClick={() => deleteMutation.mutate(card.id)}><Trash2 className="h-4 w-4 mr-2" />Delete</DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </div>
 
-                  <div className="mb-6">
-                    <p className="text-xl font-mono tracking-wider">
-                      {showNumbers[card.id] ? `4532 •••• •••• ${card.last4}` : `•••• •••• •••• ${card.last4}`}
-                    </p>
-                  </div>
+                      <div className="relative z-10 h-full flex flex-col justify-between">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <p className="text-xs font-semibold opacity-75 uppercase tracking-widest mb-2">
+                              {card.name}
+                            </p>
+                            {card.status === "Active" && (
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
+                                <span className="text-xs font-medium text-emerald-200">Active</span>
+                              </div>
+                            )}
+                          </div>
 
-                  <div className="flex items-end justify-between">
-                    <div>
-                      <p className="text-xs opacity-60 uppercase">Balance</p>
-                      <p className="text-xl font-bold">{formatCurrency(card.balance, card.currency)}</p>
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-white hover:bg-white/20"
+                              onClick={() => toggleShowNumber(card.id)}
+                            >
+                              {showNumbers[card.id] ? (
+                                <EyeOff className="h-4 w-4" />
+                              ) : (
+                                <Eye className="h-4 w-4" />
+                              )}
+                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-white hover:bg-white/20"
+                                >
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="rounded-xl">
+                                <DropdownMenuItem onClick={() => openFundDialog(card)}>
+                                  <Plus className="h-4 w-4 mr-2" />
+                                  Fund Card
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => openEditDialog(card)}>
+                                  <Pencil className="h-4 w-4 mr-2" />
+                                  Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    toggleStatusMutation.mutate({
+                                      id: card.id,
+                                      status:
+                                        card.status === "Active"
+                                          ? "Frozen"
+                                          : "Active",
+                                    })
+                                  }
+                                >
+                                  {card.status === "Active" ? (
+                                    <>
+                                      <PauseCircle className="h-4 w-4 mr-2" />
+                                      Freeze Card
+                                    </>
+                                  ) : (
+                                    <>
+                                      <PlayCircle className="h-4 w-4 mr-2" />
+                                      Activate Card
+                                    </>
+                                  )}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-red-500"
+                                  onClick={() => deleteMutation.mutate(card.id)}
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </div>
+
+                        <div className="space-y-4">
+                          <div>
+                            <div className="flex items-center gap-2 mb-3">
+                              <div className="w-8 h-6 rounded bg-white/20 backdrop-blur flex items-center justify-center">
+                                <Wifi className="h-3 w-3 text-white rotate-90" />
+                              </div>
+                              <span className="text-xs opacity-60">
+                                {card.type}
+                              </span>
+                            </div>
+                            <p className="text-lg font-mono tracking-[0.15em] font-semibold">
+                              {showNumbers[card.id]
+                                ? `4532 •••• •••• ${card.last4}`
+                                : `•••• •••• •••• ${card.last4}`}
+                            </p>
+                          </div>
+
+                          <div className="flex items-end justify-between pt-2">
+                            <div>
+                              <p className="text-xs opacity-60 uppercase tracking-wider">
+                                Balance
+                              </p>
+                              <p className="text-lg font-bold">
+                                {formatCurrency(
+                                  card.balance,
+                                  card.currency
+                                )}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xs opacity-60 uppercase tracking-wider">
+                                Limit
+                              </p>
+                              <p className="text-sm font-semibold">
+                                {formatCurrency(
+                                  card.limit,
+                                  card.currency
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs opacity-60 uppercase">Limit</p>
-                      <p className="text-sm font-bold">{formatCurrency(card.limit, card.currency)}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-lg font-bold uppercase">{card.type}</p>
-                      <span className="text-xs opacity-60">{card.currency}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <Card>
-            <CardContent className="p-12 text-center">
-              <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
-                <CreditCard className="h-8 w-8 text-muted-foreground" />
-              </div>
-              <h3 className="text-lg font-bold mb-1">No cards yet</h3>
-              <p className="text-sm text-muted-foreground mb-4">Issue your first virtual card to get started.</p>
-              <Button onClick={() => setIsOpen(true)}><Plus className="h-4 w-4 mr-2" />Issue New Card</Button>
-            </CardContent>
-          </Card>
-        )}
+                  </motion.div>
+                </motion.div>
+              ))}
+            </motion.div>
+          ) : (
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+              <EmptyState
+                icon={CreditCard}
+                title="No cards yet"
+                description="Issue your first virtual card to get started"
+                action={
+                  <Button
+                    onClick={() => setIsOpen(true)}
+                    className="gap-2"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Issue New Card
+                  </Button>
+                }
+              />
+            </motion.div>
+          )}
+        </div>
       </div>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>{editingCard ? "Edit Card" : "Issue New Card"}</DialogTitle>
-            <DialogDescription>{editingCard ? "Update the card details." : "Create a new virtual card for your team."}</DialogDescription>
+            <DialogTitle>
+              {editingCard ? "Edit Card" : "Issue New Card"}
+            </DialogTitle>
+            <DialogDescription>
+              {editingCard
+                ? "Update the card details"
+                : "Create a new virtual card for your team"}
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-5 py-4">
             <div className="space-y-2">
-              <Label htmlFor="name">Card Name</Label>
-              <Input id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="e.g., Marketing Team" data-testid="input-card-name" />
+              <Label htmlFor="name" className="text-sm font-medium">
+                Card Name
+              </Label>
+              <Input
+                id="name"
+                value={formData.name}
+                onChange={(e) =>
+                  setFormData({ ...formData, name: e.target.value })
+                }
+                placeholder="e.g., Marketing Team"
+                className="bg-muted/30 border-border/50 rounded-xl h-11"
+                data-testid="input-card-name"
+              />
             </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="currency">Currency</Label>
-                <Select value={formData.currency} onValueChange={(value) => setFormData({ ...formData, currency: value })}>
-                  <SelectTrigger data-testid="select-card-currency"><SelectValue /></SelectTrigger>
-                  <SelectContent>
+                <Label htmlFor="currency" className="text-sm font-medium">
+                  Currency
+                </Label>
+                <Select
+                  value={formData.currency}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, currency: value })
+                  }
+                >
+                  <SelectTrigger
+                    className="bg-muted/30 border-border/50 rounded-xl h-11"
+                    data-testid="select-card-currency"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl">
                     <SelectItem value="USD">USD ($)</SelectItem>
                     <SelectItem value="EUR">EUR (€)</SelectItem>
                     <SelectItem value="GBP">GBP (£)</SelectItem>
@@ -375,40 +572,98 @@ export default function Cards() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="limit">Spending Limit ({currencySymbols[formData.currency] || '$'})</Label>
-                <Input id="limit" type="number" value={formData.limit} onChange={(e) => setFormData({ ...formData, limit: e.target.value })} placeholder="0.00" data-testid="input-card-limit" />
+                <Label htmlFor="limit" className="text-sm font-medium">
+                  Spending Limit
+                </Label>
+                <Input
+                  id="limit"
+                  type="number"
+                  value={formData.limit}
+                  onChange={(e) =>
+                    setFormData({ ...formData, limit: e.target.value })
+                  }
+                  placeholder="0.00"
+                  className="bg-muted/30 border-border/50 rounded-xl h-11"
+                  data-testid="input-card-limit"
+                />
               </div>
             </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="type">Card Type</Label>
-                <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })}>
-                  <SelectTrigger data-testid="select-card-type"><SelectValue /></SelectTrigger>
-                  <SelectContent>
+                <Label htmlFor="type" className="text-sm font-medium">
+                  Card Type
+                </Label>
+                <Select
+                  value={formData.type}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, type: value })
+                  }
+                >
+                  <SelectTrigger
+                    className="bg-muted/30 border-border/50 rounded-xl h-11"
+                    data-testid="select-card-type"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl">
                     <SelectItem value="Visa">Visa</SelectItem>
                     <SelectItem value="Mastercard">Mastercard</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="color">Card Color</Label>
-                <Select value={formData.color} onValueChange={(value) => setFormData({ ...formData, color: value })}>
-                  <SelectTrigger data-testid="select-card-color"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="indigo">Indigo</SelectItem>
-                    <SelectItem value="emerald">Emerald</SelectItem>
-                    <SelectItem value="rose">Rose</SelectItem>
-                    <SelectItem value="amber">Amber</SelectItem>
-                    <SelectItem value="slate">Slate</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="color" className="text-sm font-medium">
+                  Card Color
+                </Label>
+                <div className="flex gap-2 pt-1">
+                  {[
+                    "indigo",
+                    "emerald",
+                    "rose",
+                    "amber",
+                    "slate",
+                    "cyan",
+                  ].map((color) => (
+                    <button
+                      key={color}
+                      onClick={() =>
+                        setFormData({ ...formData, color })
+                      }
+                      className={`w-8 h-8 rounded-full transition-all duration-200 ${
+                        cardGradients[color]
+                      } ${
+                        formData.color === color
+                          ? "ring-2 ring-offset-2 ring-offset-background ring-primary scale-110"
+                          : "ring-1 ring-border/50 hover:scale-105"
+                      }`}
+                      title={color}
+                      data-testid={`color-${color}`}
+                    />
+                  ))}
+                </div>
               </div>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsOpen(false)}>Cancel</Button>
-            <Button onClick={handleSubmit} disabled={createMutation.isPending || updateMutation.isPending} data-testid="button-submit-card">
-              {(createMutation.isPending || updateMutation.isPending) && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+          <DialogFooter className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setIsOpen(false)}
+              className="rounded-xl"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={
+                createMutation.isPending || updateMutation.isPending
+              }
+              className="gap-2 rounded-xl"
+              data-testid="button-submit-card"
+            >
+              {(createMutation.isPending || updateMutation.isPending) && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
               {editingCard ? "Update Card" : "Issue Card"}
             </Button>
           </DialogFooter>
@@ -416,56 +671,79 @@ export default function Cards() {
       </Dialog>
 
       <Dialog open={isFundOpen} onOpenChange={setIsFundOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>Fund Card</DialogTitle>
             <DialogDescription>
-              {fundingCard && `Add funds to ${fundingCard.name} (****${fundingCard.last4})`}
+              {fundingCard &&
+                `Add funds to ${fundingCard.name} (****${fundingCard.last4})`}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-5 py-4">
             {fundingCard && (
               <>
-                <div className="p-4 rounded-lg bg-muted">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Current Balance</span>
-                    <span className="font-bold">{formatCurrency(fundingCard.balance, fundingCard.currency)}</span>
+                <div className="p-4 rounded-xl bg-muted/40 border border-border/50 backdrop-blur-sm">
+                  <div className="flex justify-between items-center mb-3">
+                    <span className="text-sm font-medium text-muted-foreground">
+                      Current Balance
+                    </span>
+                    <span className="font-semibold">
+                      {formatCurrency(
+                        fundingCard.balance,
+                        fundingCard.currency
+                      )}
+                    </span>
                   </div>
-                  <div className="flex justify-between items-center mt-2">
-                    <span className="text-sm text-muted-foreground">Card Currency</span>
+                  <div className="flex justify-between items-center pt-3 border-t border-border/30">
+                    <span className="text-sm font-medium text-muted-foreground">
+                      Card Currency
+                    </span>
                     <span className="font-medium">{fundingCard.currency}</span>
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="fundAmount">Amount ({currencySymbols[fundingCard.currency] || fundingCard.currency})</Label>
+                  <Label htmlFor="fundAmount" className="text-sm font-medium">
+                    Amount to Add
+                  </Label>
                   <Input
                     id="fundAmount"
                     type="number"
                     value={fundAmount}
                     onChange={(e) => setFundAmount(e.target.value)}
-                    placeholder="Enter amount to fund"
+                    placeholder="Enter amount"
+                    className="bg-muted/30 border-border/50 rounded-xl h-11"
                     data-testid="input-fund-amount"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Funds will be deducted from your {fundingCard.currency} wallet.
+                    Funds will be deducted from your {fundingCard.currency}{" "}
+                    wallet.
                   </p>
                 </div>
               </>
             )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsFundOpen(false)}>Cancel</Button>
-            <Button 
-              onClick={handleFundCard} 
+          <DialogFooter className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setIsFundOpen(false)}
+              className="rounded-xl"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleFundCard}
               disabled={fundCardMutation.isPending || !fundAmount}
+              className="gap-2 rounded-xl"
               data-testid="button-confirm-fund"
             >
-              {fundCardMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {fundCardMutation.isPending && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
               Fund Card
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageWrapper>
   );
 }
