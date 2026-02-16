@@ -7,6 +7,7 @@ import { ReactNode, forwardRef } from "react";
 import { motion, type Variants } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -132,9 +133,10 @@ export function MetricCard({
   trendLabel,
   loading = false,
   className = "",
+  ...rest
 }: {
   title: string;
-  value: string | number;
+  value: ReactNode;
   subtitle?: string;
   icon: LucideIcon;
   color?: keyof typeof metricColorMap;
@@ -142,6 +144,7 @@ export function MetricCard({
   trendLabel?: string;
   loading?: boolean;
   className?: string;
+  [key: string]: any;
 }) {
   const colors = metricColorMap[color];
 
@@ -206,10 +209,14 @@ export function StatusBadge({
   status,
   label,
   className = "",
+  variant,
+  ...rest
 }: {
   status: keyof typeof statusConfig | string;
   label?: string;
   className?: string;
+  variant?: string;
+  [key: string]: any;
 }) {
   const key = status.toLowerCase().replace(/\s/g, "") as keyof typeof statusConfig;
   const config = statusConfig[key] || statusConfig.pending;
@@ -231,20 +238,25 @@ export function AnimatedListItem({
   children,
   className = "",
   index = 0,
+  delay,
+  ...rest
 }: {
   children: ReactNode;
   className?: string;
   index?: number;
+  delay?: number;
+  [key: string]: any;
 }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.04, duration: 0.3, ease: [0.25, 0.4, 0.25, 1] }}
+      transition={{ delay: delay ?? index * 0.04, duration: 0.3, ease: [0.25, 0.4, 0.25, 1] }}
       className={cn(
-        "flex items-center justify-between p-4 hover:bg-muted/40 transition-all duration-200 group/row",
+        "group/row",
         className
       )}
+      {...rest}
     >
       {children}
     </motion.div>
@@ -288,16 +300,26 @@ export function EmptyState({
   icon: Icon,
   title,
   description,
+  subtitle,
   action,
   color = "primary",
 }: {
   icon: LucideIcon;
   title: string;
   description?: string;
-  action?: ReactNode;
+  subtitle?: string;
+  action?: ReactNode | { label: string; icon?: LucideIcon; onClick: () => void };
   color?: keyof typeof metricColorMap;
 }) {
   const colors = metricColorMap[color];
+  const desc = description || subtitle;
+
+  const actionElement = action && typeof action === "object" && "label" in action ? (
+    <Button onClick={action.onClick} className="gap-2">
+      {action.icon && <action.icon className="h-4 w-4" />}
+      {action.label}
+    </Button>
+  ) : action;
 
   return (
     <motion.div
@@ -310,8 +332,8 @@ export function EmptyState({
         <Icon className={cn("h-8 w-8", colors.icon)} />
       </div>
       <h3 className="text-lg font-bold mb-1">{title}</h3>
-      {description && <p className="text-sm text-muted-foreground max-w-sm mb-4">{description}</p>}
-      {action}
+      {desc && <p className="text-sm text-muted-foreground max-w-sm mb-4">{desc}</p>}
+      {actionElement}
     </motion.div>
   );
 }
@@ -322,7 +344,7 @@ export function EmptyState({
 
 interface FormFieldProps {
   label: string;
-  id: string;
+  id?: string;
   error?: string;
   success?: string;
   hint?: string;
@@ -460,54 +482,54 @@ export function GlassCard({
 // TOAST FEEDBACK VARIANTS — For success/error states
 // ═══════════════════════════════════════════
 
-export function SuccessFeedback({ message }: { message: string }) {
+export function SuccessFeedback({ message, title, icon: CustomIcon }: { message: string; title?: string; icon?: LucideIcon }) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
       className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-700 dark:text-emerald-400 text-sm flex items-center gap-2"
     >
-      <CheckCircle2 className="h-4 w-4 shrink-0" />
-      <span>{message}</span>
+      {CustomIcon ? <CustomIcon className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
+      <span>{title ? <strong>{title}: </strong> : null}{message}</span>
     </motion.div>
   );
 }
 
-export function ErrorFeedback({ message }: { message: string }) {
+export function ErrorFeedback({ message, title, icon: CustomIcon }: { message: string; title?: string; icon?: LucideIcon }) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
       className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-700 dark:text-rose-400 text-sm flex items-center gap-2"
     >
-      <XCircle className="h-4 w-4 shrink-0" />
-      <span>{message}</span>
+      {CustomIcon ? <CustomIcon className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
+      <span>{title ? <strong>{title}: </strong> : null}{message}</span>
     </motion.div>
   );
 }
 
-export function WarningFeedback({ message }: { message: string }) {
+export function WarningFeedback({ message, title, icon: CustomIcon }: { message: string; title?: string; icon?: LucideIcon }) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
       className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-700 dark:text-amber-400 text-sm flex items-center gap-2"
     >
-      <AlertTriangle className="h-4 w-4 shrink-0" />
-      <span>{message}</span>
+      {CustomIcon ? <CustomIcon className="h-4 w-4 shrink-0" /> : <AlertTriangle className="h-4 w-4 shrink-0" />}
+      <span>{title ? <strong>{title}: </strong> : null}{message}</span>
     </motion.div>
   );
 }
 
-export function InfoFeedback({ message }: { message: string }) {
+export function InfoFeedback({ message, title, icon: CustomIcon }: { message: string; title?: string; icon?: LucideIcon }) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
       className="p-3 bg-primary/8 border border-primary/15 rounded-xl text-primary text-sm flex items-center gap-2"
     >
-      <AlertCircle className="h-4 w-4 shrink-0" />
-      <span>{message}</span>
+      {CustomIcon ? <CustomIcon className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
+      <span>{title ? <strong>{title}: </strong> : null}{message}</span>
     </motion.div>
   );
 }

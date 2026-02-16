@@ -1339,7 +1339,6 @@ export default function Bills() {
         onOpenChange={setIsPinDialogOpen}
         onVerified={handlePinVerified}
       />
-    </motion.div>
     </PageWrapper>
   );
 }
