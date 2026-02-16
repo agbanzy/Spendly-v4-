@@ -216,6 +216,7 @@ export async function optionalAuth(req: Request, res: Response, next: NextFuncti
     try {
       const decodedToken = await firebaseAuth.verifyIdToken(token);
       req.user = {
+        uid: decodedToken.uid,
         firebaseUid: decodedToken.uid,
         email: decodedToken.email || '',
         displayName: decodedToken.name,

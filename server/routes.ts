@@ -1343,11 +1343,18 @@ export async function registerRoutes(
       }
 
       const { name, industry, size, website, country, currency } = result.data;
-      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      let slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      if (!slug) {
+        slug = `company-${Date.now()}`;
+      }
       
       const existing = await storage.getCompanyBySlug(slug);
       if (existing) {
-        return res.status(400).json({ error: "A company with a similar name already exists" });
+        slug = `${slug}-${Date.now().toString(36)}`;
+        const existingAgain = await storage.getCompanyBySlug(slug);
+        if (existingAgain) {
+          return res.status(400).json({ error: "A company with a similar name already exists. Please choose a different name." });
+        }
       }
 
       const userId = (req as any).user?.uid || (req as any).user?.id;

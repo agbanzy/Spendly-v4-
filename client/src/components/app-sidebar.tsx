@@ -156,8 +156,8 @@ function CompanySwitcher() {
       const res = await apiRequest("POST", "/api/companies", { name });
       return res.json();
     },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
+    onSuccess: async (data) => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
       switchCompany(data.id);
       toast({ title: "Business created", description: `${data.name} has been created successfully.` });
       setIsCreateOpen(false);

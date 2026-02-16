@@ -51,19 +51,18 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   }, [isLoading, companies]);
 
   const switchCompany = (companyId: string) => {
-    if (companies.some(c => c.id === companyId)) {
-      setCurrentCompanyId(companyId);
-      localStorage.setItem("spendly-active-company", companyId);
-      queryClient.invalidateQueries({ queryKey: ["/api/team"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/expenses"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/vendors"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/payroll"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/bills"] });
-    }
+    setCurrentCompanyId(companyId);
+    localStorage.setItem("spendly-active-company", companyId);
+    queryClient.invalidateQueries({ queryKey: ["/api/team"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/expenses"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/vendors"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/payroll"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/bills"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/balances"] });
   };
 
   const currentCompany = currentCompanyId
