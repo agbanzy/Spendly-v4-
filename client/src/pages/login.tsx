@@ -8,6 +8,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import { Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, Sparkles } from "lucide-react";
 
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function LoginPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -16,21 +18,39 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [touched, setTouched] = useState<{ email?: boolean; password?: boolean }>({});
 
   const searchParams = new URLSearchParams(window.location.search);
   const inviteToken = searchParams.get("invite");
 
+  const validateField = (field: "email" | "password", value: string) => {
+    if (field === "email") {
+      if (!value.trim()) return "Email is required.";
+      if (!emailRegex.test(value)) return "Please enter a valid email.";
+    }
+    if (field === "password") {
+      if (!value) return "Password is required.";
+      if (value.length < 6) return "Password must be at least 6 characters.";
+    }
+    return undefined;
+  };
+
+  const handleBlur = (field: "email" | "password") => {
+    setTouched(prev => ({ ...prev, [field]: true }));
+    const value = field === "email" ? email : password;
+    setErrors(prev => ({ ...prev, [field]: validateField(field, value) }));
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!email || !password) {
-      toast({
-        title: "Error",
-        description: "Please enter your email and password.",
-        variant: "destructive"
-      });
-      return;
-    }
+    const emailError = validateField("email", email);
+    const passwordError = validateField("password", password);
+    setErrors({ email: emailError, password: passwordError });
+    setTouched({ email: true, password: true });
+
+    if (emailError || passwordError) return;
 
     setIsLoading(true);
 
@@ -142,15 +162,17 @@ export default function LoginPage() {
                       type="email"
                       placeholder="you@company.com"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="pl-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors"
+                      onChange={(e) => { setEmail(e.target.value); if (touched.email) setErrors(prev => ({ ...prev, email: validateField("email", e.target.value) })); }}
+                      onBlur={() => handleBlur("email")}
+                      className={`pl-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors ${touched.email && errors.email ? "border-destructive" : ""}`}
                       data-testid="input-email"
                     />
                   </div>
+                  {touched.email && errors.email && <p className="text-xs text-destructive" data-testid="text-email-error">{errors.email}</p>}
                 </div>
 
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-1">
                     <Label htmlFor="password" className="text-sm font-medium">Password</Label>
                     <Link href="/forgot-password">
                       <span className="text-sm text-primary hover:text-primary/80 cursor-pointer transition-colors" data-testid="link-forgot-password">
@@ -165,8 +187,9 @@ export default function LoginPage() {
                       type={showPassword ? "text" : "password"}
                       placeholder="Enter your password"
                       value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="pl-10 pr-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors"
+                      onChange={(e) => { setPassword(e.target.value); if (touched.password) setErrors(prev => ({ ...prev, password: validateField("password", e.target.value) })); }}
+                      onBlur={() => handleBlur("password")}
+                      className={`pl-10 pr-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors ${touched.password && errors.password ? "border-destructive" : ""}`}
                       data-testid="input-password"
                     />
                     <button
@@ -177,6 +200,7 @@ export default function LoginPage() {
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
+                  {touched.password && errors.password && <p className="text-xs text-destructive" data-testid="text-password-error">{errors.password}</p>}
                 </div>
 
                 <Button type="submit" className="w-full h-11 text-sm font-medium shadow-md shadow-primary/20 gap-2" disabled={isLoading} data-testid="button-submit-login">

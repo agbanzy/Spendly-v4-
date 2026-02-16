@@ -77,6 +77,7 @@ import {
 } from "@/components/ui-extended";
 import { motion } from "framer-motion";
 import type { TeamMember, Department, CompanySettings } from "@shared/schema";
+import { useCompany } from "@/lib/company-context";
 
 const roleColors: Record<string, { bg: string; text: string; badge: string }> = {
   OWNER: { bg: "bg-violet-50 dark:bg-violet-950/30", text: "text-violet-700 dark:text-violet-400", badge: "bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400" },
@@ -160,21 +161,21 @@ export default function Team() {
     queryKey: ["/api/departments"],
   });
 
-  const { data: myCompanies } = useQuery<any[]>({
-    queryKey: ["/api/companies"],
-  });
-
-  const currentCompany = myCompanies?.[0];
+  const { currentCompany } = useCompany();
 
   const { data: invitations, isLoading: invitationsLoading } = useQuery<any[]>({
-    queryKey: [`/api/companies/${currentCompany?.id}/invitations`],
+    queryKey: ["/api/companies/invitations", currentCompany?.id],
+    queryFn: async () => {
+      if (!currentCompany?.id) return [];
+      const res = await fetch(`/api/companies/${currentCompany.id}/invitations`);
+      if (!res.ok) throw new Error("Failed to fetch invitations");
+      return res.json();
+    },
     enabled: !!currentCompany?.id,
   });
 
   const invalidateInvitations = () => {
-    if (currentCompany?.id) {
-      queryClient.invalidateQueries({ queryKey: [`/api/companies/${currentCompany.id}/invitations`] });
-    }
+    queryClient.invalidateQueries({ queryKey: ["/api/companies/invitations"] });
     queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
     queryClient.invalidateQueries({ queryKey: ["/api/team"] });
   };
@@ -899,7 +900,7 @@ export default function Team() {
           <DialogHeader>
             <DialogTitle>{editingMember ? "Edit Team Member" : "Add Team Member"}</DialogTitle>
             <DialogDescription>
-              {editingMember ? "Update the team member's details." : "Add a new member to your team."}
+              {editingMember ? "Update the team member's details." : "Add a new member to your team. Members can be added to multiple departments."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">

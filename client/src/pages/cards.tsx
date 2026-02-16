@@ -208,7 +208,7 @@ export default function Cards() {
 
   const handleSubmit = () => {
     if (editingCard) {
-      updateMutation.mutate({ id: editingCard.id, data: { name: formData.name, limit: parseFloat(formData.limit), type: formData.type as 'Visa' | 'Mastercard', color: formData.color, currency: formData.currency } });
+      updateMutation.mutate({ id: editingCard.id, data: { name: formData.name, limit: formData.limit, type: formData.type as 'Visa' | 'Mastercard', color: formData.color, currency: formData.currency } });
     } else {
       createMutation.mutate(formData);
     }

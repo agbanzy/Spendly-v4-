@@ -80,6 +80,7 @@ export interface IStorage {
   getTeam(): Promise<TeamMember[]>;
   getTeamMember(id: string): Promise<TeamMember | undefined>;
   getTeamMemberByEmail(email: string): Promise<TeamMember | undefined>;
+  getTeamMembersByEmail(email: string): Promise<TeamMember[]>;
   createTeamMember(member: Omit<TeamMember, 'id'>): Promise<TeamMember>;
   updateTeamMember(id: string, member: Partial<Omit<TeamMember, 'id'>>): Promise<TeamMember | undefined>;
   deleteTeamMember(id: string): Promise<boolean>;
@@ -503,6 +504,10 @@ export class DatabaseStorage implements IStorage {
   async getTeamMemberByEmail(email: string): Promise<TeamMember | undefined> {
     const result = await db.select().from(teamMembers).where(eq(teamMembers.email, email)).limit(1);
     return result[0];
+  }
+
+  async getTeamMembersByEmail(email: string): Promise<TeamMember[]> {
+    return db.select().from(teamMembers).where(eq(teamMembers.email, email));
   }
 
   // ==================== TRANSFER TRACKING FOR SECURITY ====================

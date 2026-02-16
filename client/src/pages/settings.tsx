@@ -277,11 +277,9 @@ export default function Settings() {
 
   const isPaystack = isPaystackRegion(formData.countryCode || 'US');
 
-  const sectionVariants = stagger(0.1);
-
   return (
     <PageWrapper>
-      <motion.div initial="hidden" animate="visible" variants={sectionVariants}>
+      <motion.div initial="hidden" animate="visible" variants={stagger}>
         <PageHeader
           title="Settings"
           subtitle="Manage your account, company preferences, and payment settings."

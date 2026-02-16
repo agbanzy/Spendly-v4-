@@ -140,10 +140,7 @@ export default function InvoicesPage() {
 
   const createInvoiceMutation = useMutation({
     mutationFn: async (invoiceData: { client: string; clientEmail: string; amount: number; dueDate: string; items: { description: string; quantity: number; rate: number }[] }) => {
-      return apiRequest("/api/invoices", {
-        method: "POST",
-        body: JSON.stringify(invoiceData)
-      });
+      return apiRequest("POST", "/api/invoices", invoiceData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
@@ -162,9 +159,9 @@ export default function InvoicesPage() {
     }
   });
 
-  const totalOutstanding = invoices.filter(i => i.status === "pending" || i.status === "overdue").reduce((sum, i) => sum + i.amount, 0);
-  const totalOverdue = invoices.filter(i => i.status === "overdue").reduce((sum, i) => sum + i.amount, 0);
-  const totalPaid = invoices.filter(i => i.status === "paid").reduce((sum, i) => sum + i.amount, 0);
+  const totalOutstanding = invoices.filter(i => i.status === "pending" || i.status === "overdue").reduce((sum, i) => sum + parseFloat(String(i.amount) || '0'), 0);
+  const totalOverdue = invoices.filter(i => i.status === "overdue").reduce((sum, i) => sum + parseFloat(String(i.amount) || '0'), 0);
+  const totalPaid = invoices.filter(i => i.status === "paid").reduce((sum, i) => sum + parseFloat(String(i.amount) || '0'), 0);
 
   const filteredInvoices = invoices.filter(invoice =>
     invoice.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -240,8 +237,8 @@ export default function InvoicesPage() {
       draft: { variant: "secondary" as const, label: "Draft", icon: FileText }
     };
 
-    const config = statusConfig[status];
-    return <StatusBadge variant={config.variant} label={config.label} icon={config.icon} />;
+    const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.pending;
+    return <StatusBadge status={status} variant={config.variant} label={config.label} icon={config.icon} />;
   };
 
   return (

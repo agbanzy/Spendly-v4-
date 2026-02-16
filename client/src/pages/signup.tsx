@@ -9,6 +9,10 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import { Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, User, Building2, CheckCircle2, Sparkles, Shield, Globe2, Zap } from "lucide-react";
 
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type SignupField = "fullName" | "email" | "password" | "confirmPassword" | "terms";
+
 export default function SignupPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -27,28 +31,55 @@ export default function SignupPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [errors, setErrors] = useState<Partial<Record<SignupField, string>>>({});
+  const [touched, setTouched] = useState<Partial<Record<SignupField, boolean>>>({});
+
+  const validateField = (field: SignupField, value?: string): string | undefined => {
+    switch (field) {
+      case "fullName":
+        if (!(value || formData.fullName).trim()) return "Full name is required.";
+        if ((value || formData.fullName).trim().length < 2) return "Name must be at least 2 characters.";
+        return undefined;
+      case "email":
+        if (!(value || formData.email).trim()) return "Email is required.";
+        if (!emailRegex.test(value || formData.email)) return "Please enter a valid email.";
+        return undefined;
+      case "password":
+        if (!(value || formData.password)) return "Password is required.";
+        if ((value || formData.password).length < 6) return "Password must be at least 6 characters.";
+        return undefined;
+      case "confirmPassword":
+        if (!(value || formData.confirmPassword)) return "Please confirm your password.";
+        if ((value || formData.confirmPassword) !== formData.password) return "Passwords do not match.";
+        return undefined;
+      case "terms":
+        if (!agreedToTerms) return "You must agree to the terms.";
+        return undefined;
+    }
+  };
+
+  const handleBlur = (field: SignupField) => {
+    setTouched(prev => ({ ...prev, [field]: true }));
+    setErrors(prev => ({ ...prev, [field]: validateField(field) }));
+  };
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+    if (touched[field as SignupField]) {
+      setErrors(prev => ({ ...prev, [field]: validateField(field as SignupField, value) }));
+    }
   };
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.fullName || !formData.email || !formData.password) {
-      toast({ title: "Error", description: "Please fill in all required fields.", variant: "destructive" });
-      return;
-    }
+    const allFields: SignupField[] = ["fullName", "email", "password", "confirmPassword", "terms"];
+    const newErrors: Partial<Record<SignupField, string>> = {};
+    allFields.forEach(f => { newErrors[f] = validateField(f); });
+    setErrors(newErrors);
+    setTouched({ fullName: true, email: true, password: true, confirmPassword: true, terms: true });
 
-    if (formData.password !== formData.confirmPassword) {
-      toast({ title: "Error", description: "Passwords do not match.", variant: "destructive" });
-      return;
-    }
-
-    if (!agreedToTerms) {
-      toast({ title: "Error", description: "Please agree to the terms and conditions.", variant: "destructive" });
-      return;
-    }
+    if (Object.values(newErrors).some(Boolean)) return;
 
     setIsLoading(true);
 

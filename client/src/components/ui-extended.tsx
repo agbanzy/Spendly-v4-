@@ -482,54 +482,54 @@ export function GlassCard({
 // TOAST FEEDBACK VARIANTS — For success/error states
 // ═══════════════════════════════════════════
 
-export function SuccessFeedback({ message, title, icon: CustomIcon }: { message: string; title?: string; icon?: LucideIcon }) {
+export function SuccessFeedback({ message, title, icon: CustomIcon, children, className }: { message?: string; title?: string; icon?: LucideIcon; children?: ReactNode; className?: string }) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-700 dark:text-emerald-400 text-sm flex items-center gap-2"
+      className={cn("p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-700 dark:text-emerald-400 text-sm flex items-center gap-2", className)}
     >
       {CustomIcon ? <CustomIcon className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
-      <span>{title ? <strong>{title}: </strong> : null}{message}</span>
+      <span>{title ? <strong>{title}: </strong> : null}{children || message}</span>
     </motion.div>
   );
 }
 
-export function ErrorFeedback({ message, title, icon: CustomIcon }: { message: string; title?: string; icon?: LucideIcon }) {
+export function ErrorFeedback({ message, title, icon: CustomIcon, children, className }: { message?: string; title?: string; icon?: LucideIcon; children?: ReactNode; className?: string }) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-700 dark:text-rose-400 text-sm flex items-center gap-2"
+      className={cn("p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-700 dark:text-rose-400 text-sm flex items-center gap-2", className)}
     >
       {CustomIcon ? <CustomIcon className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
-      <span>{title ? <strong>{title}: </strong> : null}{message}</span>
+      <span>{title ? <strong>{title}: </strong> : null}{children || message}</span>
     </motion.div>
   );
 }
 
-export function WarningFeedback({ message, title, icon: CustomIcon }: { message: string; title?: string; icon?: LucideIcon }) {
+export function WarningFeedback({ message, title, icon: CustomIcon, children, className }: { message?: string; title?: string; icon?: LucideIcon; children?: ReactNode; className?: string }) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-700 dark:text-amber-400 text-sm flex items-center gap-2"
+      className={cn("p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-700 dark:text-amber-400 text-sm flex items-center gap-2", className)}
     >
       {CustomIcon ? <CustomIcon className="h-4 w-4 shrink-0" /> : <AlertTriangle className="h-4 w-4 shrink-0" />}
-      <span>{title ? <strong>{title}: </strong> : null}{message}</span>
+      <span>{title ? <strong>{title}: </strong> : null}{children || message}</span>
     </motion.div>
   );
 }
 
-export function InfoFeedback({ message, title, icon: CustomIcon }: { message: string; title?: string; icon?: LucideIcon }) {
+export function InfoFeedback({ message, title, icon: CustomIcon, children, className }: { message?: string; title?: string; icon?: LucideIcon; children?: ReactNode; className?: string }) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="p-3 bg-primary/8 border border-primary/15 rounded-xl text-primary text-sm flex items-center gap-2"
+      className={cn("p-3 bg-primary/8 border border-primary/15 rounded-xl text-primary text-sm flex items-center gap-2", className)}
     >
       {CustomIcon ? <CustomIcon className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
-      <span>{title ? <strong>{title}: </strong> : null}{message}</span>
+      <span>{title ? <strong>{title}: </strong> : null}{children || message}</span>
     </motion.div>
   );
 }

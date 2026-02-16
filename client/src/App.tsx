@@ -9,6 +9,7 @@ import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/s
 import { AppSidebar } from "@/components/app-sidebar";
 import { QuickActions } from "@/components/quick-actions";
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { CompanyProvider } from "@/lib/company-context";
 import NotFound from "@/pages/not-found";
 
 import LandingPage from "@/pages/landing";
@@ -211,7 +212,9 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <AuthProvider>
-            <AppContent />
+            <CompanyProvider>
+              <AppContent />
+            </CompanyProvider>
           </AuthProvider>
           <Toaster />
         </TooltipProvider>

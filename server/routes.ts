@@ -1598,10 +1598,10 @@ export async function registerRoutes(
       }
       const { name, email, role, department } = result.data;
 
-      // Check for duplicate email
-      const existingMember = await storage.getTeamMemberByEmail(email);
-      if (existingMember) {
-        return res.status(400).json({ error: "Team member with this email already exists" });
+      const existingMembers = await storage.getTeamMembersByEmail(email);
+      const sameDepMember = existingMembers?.find(m => m.department === (department || 'General'));
+      if (sameDepMember) {
+        return res.status(400).json({ error: "This person is already in this department" });
       }
 
       const member = await storage.createTeamMember({
@@ -2610,7 +2610,7 @@ export async function registerRoutes(
         res.json({ success: true, message: "Bill paid successfully from wallet" });
       } else {
         const paymentResult = await paymentService.createPaymentIntent(
-          bill.amount,
+          parseFloat(String(bill.amount)),
           bill.currency || 'USD',
           countryCode,
           { billId, type: 'bill_payment' }

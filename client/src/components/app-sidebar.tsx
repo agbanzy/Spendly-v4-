@@ -1,5 +1,10 @@
+import { useState } from "react";
 import { useLocation, Link } from "wouter";
 import { useAuth } from "@/lib/auth";
+import { useCompany } from "@/lib/company-context";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import {
   LayoutDashboard,
   Receipt,
@@ -20,6 +25,10 @@ import {
   ScrollText,
   Lock,
   Database,
+  ChevronDown,
+  Check,
+  Plus,
+  Loader2,
 } from "lucide-react";
 import {
   Sidebar,
@@ -33,6 +42,24 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -117,6 +144,192 @@ function NavGroup({
   );
 }
 
+function CompanySwitcher() {
+  const { currentCompany, companies, switchCompany, isLoading } = useCompany();
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [newCompanyName, setNewCompanyName] = useState("");
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const createCompanyMutation = useMutation({
+    mutationFn: async (name: string) => {
+      const res = await apiRequest("POST", "/api/companies", { name });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
+      switchCompany(data.id);
+      toast({ title: "Business created", description: `${data.name} has been created successfully.` });
+      setIsCreateOpen(false);
+      setNewCompanyName("");
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to create business", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const companyInitials = (name: string) =>
+    name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-3 px-1 py-1.5">
+        <div className="h-8 w-8 rounded-lg bg-muted animate-pulse" />
+        <div className="flex-1">
+          <div className="h-3.5 w-20 rounded bg-muted animate-pulse mb-1" />
+          <div className="h-2.5 w-14 rounded bg-muted animate-pulse" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentCompany) {
+    return (
+      <>
+        <button
+          onClick={() => setIsCreateOpen(true)}
+          className="flex items-center gap-3 w-full px-1 py-1.5 rounded-lg hover:bg-muted/50 transition-colors"
+          data-testid="button-create-first-business"
+        >
+          <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+            <Plus className="h-4 w-4 text-primary" />
+          </div>
+          <div className="flex-1 text-left">
+            <p className="text-sm font-medium">Create a business</p>
+            <p className="text-[10px] text-muted-foreground">Get started</p>
+          </div>
+        </button>
+
+        <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Create New Business</DialogTitle>
+              <DialogDescription>Set up a new business to manage your finances.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="company-name">Business Name</Label>
+                <Input
+                  id="company-name"
+                  placeholder="e.g., Acme Corp"
+                  value={newCompanyName}
+                  onChange={(e) => setNewCompanyName(e.target.value)}
+                  data-testid="input-new-company-name"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsCreateOpen(false)}>Cancel</Button>
+              <Button
+                onClick={() => newCompanyName.trim() && createCompanyMutation.mutate(newCompanyName.trim())}
+                disabled={!newCompanyName.trim() || createCompanyMutation.isPending}
+                data-testid="button-confirm-create-business"
+              >
+                {createCompanyMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Create Business
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            className="flex items-center gap-3 w-full px-1 py-1.5 rounded-lg hover:bg-muted/50 transition-colors"
+            data-testid="button-company-switcher"
+          >
+            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary/20 to-purple-500/20 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+              {currentCompany.logo ? (
+                <img src={currentCompany.logo} alt="" className="h-8 w-8 rounded-lg object-cover" />
+              ) : (
+                companyInitials(currentCompany.name)
+              )}
+            </div>
+            <div className="flex-1 text-left min-w-0">
+              <p className="text-sm font-semibold truncate">{currentCompany.name}</p>
+              <p className="text-[10px] text-muted-foreground capitalize">{currentCompany.role.toLowerCase()}</p>
+            </div>
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-[--radix-dropdown-menu-trigger-width] min-w-56">
+          {companies.map((company) => (
+            <DropdownMenuItem
+              key={company.id}
+              onClick={() => switchCompany(company.id)}
+              className="flex items-center gap-3 py-2"
+              data-testid={`company-option-${company.id}`}
+            >
+              <div className="h-7 w-7 rounded-md bg-gradient-to-br from-primary/15 to-purple-500/15 flex items-center justify-center text-[10px] font-bold text-primary shrink-0">
+                {company.logo ? (
+                  <img src={company.logo} alt="" className="h-7 w-7 rounded-md object-cover" />
+                ) : (
+                  companyInitials(company.name)
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{company.name}</p>
+                <p className="text-[10px] text-muted-foreground capitalize">{company.role.toLowerCase()}</p>
+              </div>
+              {company.id === currentCompany.id && (
+                <Check className="h-4 w-4 text-primary shrink-0" />
+              )}
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() => setIsCreateOpen(true)}
+            className="flex items-center gap-3 py-2"
+            data-testid="button-add-new-business"
+          >
+            <div className="h-7 w-7 rounded-md border border-dashed border-muted-foreground/30 flex items-center justify-center shrink-0">
+              <Plus className="h-3.5 w-3.5 text-muted-foreground" />
+            </div>
+            <span className="text-sm text-muted-foreground">Add new business</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create New Business</DialogTitle>
+            <DialogDescription>Set up a new business to manage your finances separately.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="company-name-2">Business Name</Label>
+              <Input
+                id="company-name-2"
+                placeholder="e.g., Acme Corp"
+                value={newCompanyName}
+                onChange={(e) => setNewCompanyName(e.target.value)}
+                data-testid="input-new-company-name"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => newCompanyName.trim() && createCompanyMutation.mutate(newCompanyName.trim())}
+              disabled={!newCompanyName.trim() || createCompanyMutation.isPending}
+              data-testid="button-confirm-create-business"
+            >
+              {createCompanyMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Create Business
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 export function AppSidebar() {
   const [location, setLocation] = useLocation();
   const { user, logout } = useAuth();
@@ -151,6 +364,15 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent className="py-2">
+        <SidebarGroup>
+          <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/60 px-4 mb-1">
+            Business
+          </SidebarGroupLabel>
+          <SidebarGroupContent className="px-2">
+            <CompanySwitcher />
+          </SidebarGroupContent>
+        </SidebarGroup>
+
         <NavGroup label="Overview" items={mainMenuItems} location={location} />
         <NavGroup label="Finance" items={financeItems} location={location} />
         <NavGroup label="Manage" items={managementItems} location={location} />
