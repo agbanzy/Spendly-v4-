@@ -35,7 +35,7 @@ const receiptStorage = multer.diskStorage({
 
 const upload = multer({ 
   storage: receiptStorage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf'];
     if (allowedTypes.includes(file.mimetype)) {
@@ -45,6 +45,58 @@ const upload = multer({
     }
   }
 });
+
+function getDateRangeFilter(dateRange: string): { startDate: Date; endDate: Date } {
+  const now = new Date();
+  const endDate = new Date(now);
+  let startDate = new Date(now);
+
+  switch (dateRange) {
+    case 'last_7_days':
+      startDate.setDate(now.getDate() - 7);
+      break;
+    case 'last_30_days':
+      startDate.setDate(now.getDate() - 30);
+      break;
+    case 'last_90_days':
+      startDate.setDate(now.getDate() - 90);
+      break;
+    case 'this_month':
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      break;
+    case 'last_month':
+      startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      endDate.setDate(0);
+      break;
+    case 'this_quarter':
+      const quarter = Math.floor(now.getMonth() / 3);
+      startDate = new Date(now.getFullYear(), quarter * 3, 1);
+      break;
+    case 'this_year':
+      startDate = new Date(now.getFullYear(), 0, 1);
+      break;
+    default:
+      startDate.setDate(now.getDate() - 30);
+  }
+
+  return { startDate, endDate };
+}
+
+function escapeCSV(field: any): string {
+  if (field === null || field === undefined) return '';
+  const str = String(field);
+  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+function filterByDateRange(items: any[], dateField: string, startDate: Date, endDate: Date): any[] {
+  return items.filter(item => {
+    const itemDate = new Date(item[dateField]);
+    return itemDate >= startDate && itemDate <= endDate;
+  });
+}
 
 async function getAuditUserName(req: any): Promise<string> {
   try {
