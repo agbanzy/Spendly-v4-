@@ -67,7 +67,7 @@ export default function InvoicesScreen() {
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Record<string, unknown> }) =>
-      api.put<Invoice>(`/api/invoices/${id}`, data),
+      api.patch<Invoice>(`/api/invoices/${id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
       closeModal();
@@ -156,8 +156,17 @@ export default function InvoicesScreen() {
 
     const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
 
+    if (form.clientEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.clientEmail.trim())) {
+      Alert.alert('Validation', 'Please enter a valid email address.');
+      return;
+    }
+    if (items.some(item => isNaN(item.amount) || item.amount <= 0)) {
+      Alert.alert('Validation', 'All item amounts must be greater than zero.');
+      return;
+    }
+
     const payload: Record<string, unknown> = {
-      clientName: form.clientName.trim(),
+      client: form.clientName.trim(),
       clientEmail: form.clientEmail.trim() || undefined,
       dueDate: form.dueDate || undefined,
       items,

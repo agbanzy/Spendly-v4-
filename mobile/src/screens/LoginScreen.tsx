@@ -45,14 +45,14 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
   const { login } = useAuth();
 
   const handleLogin = async () => {
-    if (!email || !password) {
+    if (!email.trim() || !password) {
       Alert.alert('Error', 'Please enter email and password');
       return;
     }
 
     setLoading(true);
     try {
-      await login(email, password);
+      await login(email.trim(), password);
     } catch (error: any) {
       const errorCode = error?.code || '';
       Alert.alert('Login Failed', getFirebaseErrorMessage(errorCode));

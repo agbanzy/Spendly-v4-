@@ -48,8 +48,13 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
   const { register } = useAuth();
 
   const handleSignup = async () => {
-    if (!fullName || !email || !password || !confirmPassword) {
+    if (!fullName.trim() || !email.trim() || !password || !confirmPassword) {
       Alert.alert('Error', 'Please fill in all required fields');
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      Alert.alert('Error', 'Please enter a valid email address');
       return;
     }
 
@@ -70,7 +75,7 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
 
     setLoading(true);
     try {
-      await register(email, password, fullName);
+      await register(email.trim(), password, fullName.trim());
     } catch (error: any) {
       const errorCode = error?.code || '';
       Alert.alert('Registration Failed', getFirebaseErrorMessage(errorCode));

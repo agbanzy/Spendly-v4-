@@ -57,7 +57,7 @@ export default function BudgetScreen() {
 
   const updateBudget = useMutation({
     mutationFn: (data: { id: number; name?: string; category: string; limit: number; period: string }) =>
-      api.put(`/api/budgets/${data.id}`, { name: data.name, category: data.category, limit: data.limit, period: data.period }),
+      api.patch(`/api/budgets/${data.id}`, { name: data.name, category: data.category, limit: data.limit, period: data.period }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/budgets'] });
       closeModal();
@@ -118,13 +118,14 @@ export default function BudgetScreen() {
   };
 
   const handleSubmit = () => {
-    if (!budgetLimit || parseFloat(budgetLimit) <= 0) {
-      Alert.alert('Error', 'Please enter a valid budget limit');
+    const parsedLimit = parseFloat(budgetLimit);
+    if (!budgetLimit || isNaN(parsedLimit) || parsedLimit <= 0) {
+      Alert.alert('Error', 'Please enter a valid budget limit greater than zero');
       return;
     }
 
     const data = {
-      name: budgetName || undefined,
+      name: budgetName.trim() || undefined,
       category: budgetCategory,
       limit: parseFloat(budgetLimit),
       period: budgetPeriod,

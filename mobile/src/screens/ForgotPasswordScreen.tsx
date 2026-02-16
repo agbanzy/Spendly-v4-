@@ -37,14 +37,18 @@ export default function ForgotPasswordScreen({ navigation }: ForgotPasswordScree
   const { resetPassword } = useAuth();
 
   const handleResetPassword = async () => {
-    if (!email) {
+    if (!email.trim()) {
       Alert.alert('Error', 'Please enter your email address');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      Alert.alert('Error', 'Please enter a valid email address');
       return;
     }
 
     setLoading(true);
     try {
-      await resetPassword(email);
+      await resetPassword(email.trim());
       setSent(true);
     } catch (error: any) {
       const errorCode = error?.code || '';

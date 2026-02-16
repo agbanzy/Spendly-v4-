@@ -153,6 +153,7 @@ export default function WalletScreen() {
     mutationFn: async (data: { amount: string; accountNumber: string; bankName: string }) => {
       return api.post('/api/wallet/payout', {
         amount: parseFloat(data.amount),
+        countryCode: 'US',
         recipientDetails: {
           accountNumber: data.accountNumber,
           bankCode: '',
@@ -180,6 +181,7 @@ export default function WalletScreen() {
     mutationFn: async (data: { amount: string; accountNumber: string; bankName: string; note: string }) => {
       return api.post('/api/payment/transfer', {
         amount: parseFloat(data.amount),
+        countryCode: 'US',
         reason: data.note || 'Money transfer',
         recipientDetails: {
           accountNumber: data.accountNumber,
@@ -205,43 +207,46 @@ export default function WalletScreen() {
   });
 
   const handleFund = () => {
-    if (!fundAmount || parseFloat(fundAmount) <= 0) {
-      Alert.alert('Error', 'Please enter a valid amount');
+    const parsed = parseFloat(fundAmount);
+    if (!fundAmount || isNaN(parsed) || parsed <= 0) {
+      Alert.alert('Error', 'Please enter a valid amount greater than zero');
       return;
     }
     fundMutation.mutate(fundAmount);
   };
 
   const handleWithdraw = () => {
-    if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
-      Alert.alert('Error', 'Please enter a valid amount');
+    const parsed = parseFloat(withdrawAmount);
+    if (!withdrawAmount || isNaN(parsed) || parsed <= 0) {
+      Alert.alert('Error', 'Please enter a valid amount greater than zero');
       return;
     }
-    if (!withdrawAccountNumber) {
+    if (!withdrawAccountNumber.trim()) {
       Alert.alert('Error', 'Please enter your account number');
       return;
     }
-    if (parseFloat(withdrawAmount) > parseFloat(balance?.local || '0')) {
+    if (parsed > parseFloat(balance?.local || '0')) {
       Alert.alert('Error', 'Insufficient balance');
       return;
     }
-    withdrawMutation.mutate({ amount: withdrawAmount, accountNumber: withdrawAccountNumber, bankName: withdrawBankName });
+    withdrawMutation.mutate({ amount: withdrawAmount, accountNumber: withdrawAccountNumber.trim(), bankName: withdrawBankName.trim() });
   };
 
   const handleSend = () => {
-    if (!sendAmount || parseFloat(sendAmount) <= 0) {
-      Alert.alert('Error', 'Please enter a valid amount');
+    const parsed = parseFloat(sendAmount);
+    if (!sendAmount || isNaN(parsed) || parsed <= 0) {
+      Alert.alert('Error', 'Please enter a valid amount greater than zero');
       return;
     }
-    if (!sendAccountNumber) {
+    if (!sendAccountNumber.trim()) {
       Alert.alert('Error', 'Please enter recipient account number');
       return;
     }
-    if (parseFloat(sendAmount) > parseFloat(balance?.local || '0')) {
+    if (parsed > parseFloat(balance?.local || '0')) {
       Alert.alert('Error', 'Insufficient balance');
       return;
     }
-    sendMutation.mutate({ amount: sendAmount, accountNumber: sendAccountNumber, bankName: sendBankName, note: sendNote });
+    sendMutation.mutate({ amount: sendAmount, accountNumber: sendAccountNumber.trim(), bankName: sendBankName.trim(), note: sendNote.trim() });
   };
 
   const isLoading = balanceLoading || virtualAccountsLoading || transactionsLoading;

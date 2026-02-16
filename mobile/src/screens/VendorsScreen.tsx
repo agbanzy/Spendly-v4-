@@ -68,7 +68,7 @@ export default function VendorsScreen() {
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Record<string, unknown> }) =>
-      api.put<Vendor>(`/api/vendors/${id}`, data),
+      api.patch<Vendor>(`/api/vendors/${id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vendors'] });
       closeModal();
@@ -120,6 +120,10 @@ export default function VendorsScreen() {
     }
     if (!form.email.trim()) {
       Alert.alert('Validation', 'Please enter a vendor email.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      Alert.alert('Validation', 'Please enter a valid email address.');
       return;
     }
 

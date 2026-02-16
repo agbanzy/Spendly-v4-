@@ -73,7 +73,7 @@ export default function BillsScreen() {
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Record<string, unknown> }) =>
-      api.put<Bill>(`/api/bills/${id}`, data),
+      api.patch<Bill>(`/api/bills/${id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bills'] });
       closeModal();
@@ -125,11 +125,20 @@ export default function BillsScreen() {
       Alert.alert('Validation', 'Please fill in name, provider, and amount.');
       return;
     }
+    const parsedAmount = parseFloat(form.amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      Alert.alert('Validation', 'Please enter a valid amount greater than zero.');
+      return;
+    }
+    if (form.dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(form.dueDate)) {
+      Alert.alert('Validation', 'Please enter date in YYYY-MM-DD format.');
+      return;
+    }
 
     const payload: Record<string, unknown> = {
       name: form.name.trim(),
       provider: form.provider.trim(),
-      amount: parseFloat(form.amount),
+      amount: parsedAmount,
       dueDate: form.dueDate || undefined,
       recurring: form.recurring,
       frequency: form.recurring ? form.frequency : undefined,

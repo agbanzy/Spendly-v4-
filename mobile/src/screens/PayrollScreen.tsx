@@ -109,16 +109,31 @@ export default function PayrollScreen() {
       Alert.alert('Validation', 'Please enter the employee name.');
       return;
     }
-    if (!salary.trim() || isNaN(Number(salary))) {
-      Alert.alert('Validation', 'Please enter a valid salary amount.');
+    const parsedSalary = Number(salary);
+    if (!salary.trim() || isNaN(parsedSalary) || parsedSalary <= 0) {
+      Alert.alert('Validation', 'Please enter a valid salary amount greater than zero.');
+      return;
+    }
+    if (employeeEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(employeeEmail.trim())) {
+      Alert.alert('Validation', 'Please enter a valid email address.');
+      return;
+    }
+    const parsedBonus = Number(bonus) || 0;
+    const parsedDeductions = Number(deductions) || 0;
+    if (parsedBonus < 0 || parsedDeductions < 0) {
+      Alert.alert('Validation', 'Bonus and deductions cannot be negative.');
+      return;
+    }
+    if (payDate.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(payDate.trim())) {
+      Alert.alert('Validation', 'Please enter pay date in YYYY-MM-DD format.');
       return;
     }
     createPayrollMutation.mutate({
       employeeName: employeeName.trim(),
       employeeEmail: employeeEmail.trim(),
-      salary: Number(salary),
-      bonus: Number(bonus) || 0,
-      deductions: Number(deductions) || 0,
+      salary: parsedSalary,
+      bonus: parsedBonus,
+      deductions: parsedDeductions,
       department: department.trim(),
       payDate: payDate.trim() || new Date().toISOString(),
     });

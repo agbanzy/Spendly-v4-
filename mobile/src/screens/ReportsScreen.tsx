@@ -61,10 +61,9 @@ export default function ReportsScreen() {
 
   const createReportMutation = useMutation({
     mutationFn: (data: {
-      title: string;
+      name: string;
       type: string;
-      startDate: string;
-      endDate: string;
+      dateRange: string;
     }) => api.post('/api/reports', data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['reports'] });
@@ -112,11 +111,18 @@ export default function ReportsScreen() {
       Alert.alert('Validation', 'Please enter an end date.');
       return;
     }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate.trim()) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate.trim())) {
+      Alert.alert('Validation', 'Please enter dates in YYYY-MM-DD format.');
+      return;
+    }
+    if (new Date(startDate.trim()) >= new Date(endDate.trim())) {
+      Alert.alert('Validation', 'End date must be after start date.');
+      return;
+    }
     createReportMutation.mutate({
-      title: reportName.trim(),
+      name: reportName.trim(),
       type: reportType,
-      startDate: startDate.trim(),
-      endDate: endDate.trim(),
+      dateRange: `${startDate.trim()} - ${endDate.trim()}`,
     });
   };
 

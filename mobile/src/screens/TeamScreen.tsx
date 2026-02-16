@@ -59,7 +59,7 @@ export default function TeamScreen() {
 
   const updateRoleMutation = useMutation({
     mutationFn: ({ id, role }: { id: number; role: string }) =>
-      api.put(`/api/team/${id}`, { role }),
+      api.patch(`/api/team/${id}`, { role }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['team'] });
       setRoleModalVisible(false);
@@ -96,6 +96,10 @@ export default function TeamScreen() {
   const handleInvite = () => {
     if (!inviteEmail.trim()) {
       Alert.alert('Validation', 'Please enter an email address.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteEmail.trim())) {
+      Alert.alert('Validation', 'Please enter a valid email address.');
       return;
     }
     inviteMutation.mutate({

@@ -47,7 +47,7 @@ export default function ExpensesScreen() {
 
   const createExpense = useMutation({
     mutationFn: (data: { description: string; amount: number; category: string; merchant?: string }) =>
-      api.post('/api/expenses', data),
+      api.post('/api/expenses', { merchant: data.description, amount: data.amount, category: data.category, note: data.merchant || undefined }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       closeModal();
@@ -60,7 +60,7 @@ export default function ExpensesScreen() {
 
   const updateExpense = useMutation({
     mutationFn: (data: { id: number; description: string; amount: number; category: string; merchant?: string }) =>
-      api.put(`/api/expenses/${data.id}`, { description: data.description, amount: data.amount, category: data.category, merchant: data.merchant }),
+      api.patch(`/api/expenses/${data.id}`, { merchant: data.description, amount: data.amount, category: data.category, note: data.merchant || undefined }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       closeModal();
@@ -121,8 +121,13 @@ export default function ExpensesScreen() {
   };
 
   const handleSubmit = () => {
-    if (!description || !amount) {
+    if (!description.trim() || !amount.trim()) {
       Alert.alert('Error', 'Please fill in all required fields');
+      return;
+    }
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      Alert.alert('Error', 'Please enter a valid amount greater than zero');
       return;
     }
 
