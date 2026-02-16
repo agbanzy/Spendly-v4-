@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -38,7 +39,8 @@ import {
   Copy,
   Banknote,
   Trash2,
-  TrendingUp
+  TrendingUp,
+  MoreVertical
 } from "lucide-react";
 import type { Invoice, CompanySettings } from "@shared/schema";
 
@@ -154,6 +156,67 @@ export default function InvoicesPage() {
       toast({
         title: "Error",
         description: "Failed to create invoice. Please try again.",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const deleteInvoiceMutation = useMutation({
+    mutationFn: async (invoiceId: number) => {
+      return apiRequest("DELETE", `/api/invoices/${invoiceId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      toast({
+        title: "Invoice deleted",
+        description: "The invoice has been deleted successfully."
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete invoice. Please try again.",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const markAsPaidMutation = useMutation({
+    mutationFn: async (invoiceId: number) => {
+      return apiRequest("PATCH", `/api/invoices/${invoiceId}`, { status: "paid" });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      toast({
+        title: "Invoice marked as paid",
+        description: "The invoice status has been updated to paid."
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update invoice status. Please try again.",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const sendInvoiceMutation = useMutation({
+    mutationFn: async (invoiceId: number) => {
+      return apiRequest("POST", `/api/invoices/${invoiceId}/send`);
+    },
+    onSuccess: (_data, invoiceId) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      const invoice = invoices.find(i => i.id === invoiceId);
+      toast({
+        title: "Invoice sent",
+        description: `Invoice ${invoice?.invoiceNumber || ''} has been sent successfully.`
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to send invoice. Please try again.",
         variant: "destructive"
       });
     }
@@ -574,34 +637,53 @@ export default function InvoicesPage() {
                               </p>
                             </div>
                             {getStatusBadge(invoice.status)}
-                            <div className="flex items-center gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 hover:bg-slate-200 dark:hover:bg-slate-700"
-                                onClick={() => handleViewInvoice(invoice)}
-                                data-testid={`button-view-invoice-${invoice.id}`}
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                              {invoice.status !== "paid" && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-8 w-8 hover:bg-slate-200 dark:hover:bg-slate-700"
-                                  onClick={() => handleSendInvoice(invoice)}
+                                  data-testid={`button-invoice-actions-${invoice.id}`}
                                 >
-                                  <Mail className="h-4 w-4" />
+                                  <MoreVertical className="h-4 w-4" />
                                 </Button>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 hover:bg-slate-200 dark:hover:bg-slate-700"
-                              >
-                                <Download className="h-4 w-4" />
-                              </Button>
-                            </div>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={() => handleViewInvoice(invoice)}
+                                  data-testid={`button-view-invoice-${invoice.id}`}
+                                >
+                                  <Eye className="mr-2 h-4 w-4" />
+                                  View
+                                </DropdownMenuItem>
+                                {invoice.status !== "paid" && (
+                                  <DropdownMenuItem
+                                    onClick={() => sendInvoiceMutation.mutate(invoice.id)}
+                                    data-testid={`button-send-invoice-${invoice.id}`}
+                                  >
+                                    <Mail className="mr-2 h-4 w-4" />
+                                    Send Invoice
+                                  </DropdownMenuItem>
+                                )}
+                                {invoice.status !== "paid" && (
+                                  <DropdownMenuItem
+                                    onClick={() => markAsPaidMutation.mutate(invoice.id)}
+                                    data-testid={`button-mark-paid-invoice-${invoice.id}`}
+                                  >
+                                    <CheckCircle className="mr-2 h-4 w-4" />
+                                    Mark as Paid
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  onClick={() => deleteInvoiceMutation.mutate(invoice.id)}
+                                  data-testid={`button-delete-invoice-${invoice.id}`}
+                                >
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </div>
                       </GlassCard>
@@ -647,34 +729,53 @@ export default function InvoicesPage() {
                                   {formatCurrency(invoice.amount)}
                                 </p>
                                 {getStatusBadge(invoice.status)}
-                                <div className="flex items-center gap-1">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 hover:bg-slate-200 dark:hover:bg-slate-700"
-                                    onClick={() => handleViewInvoice(invoice)}
-                                    data-testid={`button-view-invoice-${invoice.id}`}
-                                  >
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
-                                  {status !== "paid" && (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
                                     <Button
                                       variant="ghost"
                                       size="icon"
-                                      className="h-8 w-8 hover:bg-slate-200 dark:hover:bg-slate-700"
-                                      onClick={() => handleSendInvoice(invoice)}
+                                      data-testid={`button-invoice-actions-${status}-${invoice.id}`}
                                     >
-                                      <Mail className="h-4 w-4" />
+                                      <MoreVertical className="h-4 w-4" />
                                     </Button>
-                                  )}
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 hover:bg-slate-200 dark:hover:bg-slate-700"
-                                  >
-                                    <Download className="h-4 w-4" />
-                                  </Button>
-                                </div>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem
+                                      onClick={() => handleViewInvoice(invoice)}
+                                      data-testid={`button-view-invoice-${status}-${invoice.id}`}
+                                    >
+                                      <Eye className="mr-2 h-4 w-4" />
+                                      View
+                                    </DropdownMenuItem>
+                                    {status !== "paid" && (
+                                      <DropdownMenuItem
+                                        onClick={() => sendInvoiceMutation.mutate(invoice.id)}
+                                        data-testid={`button-send-invoice-${status}-${invoice.id}`}
+                                      >
+                                        <Mail className="mr-2 h-4 w-4" />
+                                        Send Invoice
+                                      </DropdownMenuItem>
+                                    )}
+                                    {status !== "paid" && (
+                                      <DropdownMenuItem
+                                        onClick={() => markAsPaidMutation.mutate(invoice.id)}
+                                        data-testid={`button-mark-paid-invoice-${status}-${invoice.id}`}
+                                      >
+                                        <CheckCircle className="mr-2 h-4 w-4" />
+                                        Mark as Paid
+                                      </DropdownMenuItem>
+                                    )}
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      className="text-destructive focus:text-destructive"
+                                      onClick={() => deleteInvoiceMutation.mutate(invoice.id)}
+                                      data-testid={`button-delete-invoice-${status}-${invoice.id}`}
+                                    >
+                                      <Trash2 className="mr-2 h-4 w-4" />
+                                      Delete
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               </div>
                             </div>
                           </GlassCard>

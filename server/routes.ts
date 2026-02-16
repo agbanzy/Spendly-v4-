@@ -1034,18 +1034,20 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/virtual-accounts", async (req, res) => {
+  app.post("/api/virtual-accounts", requireAuth, async (req, res) => {
     try {
       const { name, currency, type } = req.body;
+      const userId = (req as any).user?.uid || (req as any).user?.id;
+      
       if (!name) {
         return res.status(400).json({ error: "Account name is required" });
       }
       
-      // Generate account number
       const accountNumber = `VA${Date.now()}${Math.floor(Math.random() * 1000)}`;
       const bankCode = currency === 'NGN' ? 'PAYSTACK' : 'STRIPE';
       
       const account = await storage.createVirtualAccount({
+        userId: userId || null,
         name,
         accountNumber,
         bankName: bankCode === 'PAYSTACK' ? 'Wema Bank' : 'Stripe Treasury',
@@ -1088,9 +1090,9 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Virtual account not found" });
       }
       
-      // Update balance
-      const newBalance = account.balance + amount;
-      await storage.updateVirtualAccount(req.params.id, { balance: newBalance });
+      const currentBalance = parseFloat(String(account.balance || 0));
+      const newBalance = currentBalance + amount;
+      await storage.updateVirtualAccount(req.params.id, { balance: String(newBalance) });
       
       // Create transaction record
       await storage.createTransaction({
@@ -2285,32 +2287,69 @@ export async function registerRoutes(
     }
   });
 
-  // Stripe payment confirmation endpoint
-  app.post("/api/stripe/confirm-payment", async (req, res) => {
+  const processedConfirmPayments = new Set<string>();
+  
+  app.post("/api/stripe/confirm-payment", requireAuth, async (req, res) => {
     try {
       const { sessionId } = req.body;
       if (!sessionId) {
         return res.status(400).json({ error: "Session ID required" });
       }
 
+      if (processedConfirmPayments.has(sessionId)) {
+        return res.json({ success: true, status: 'completed', duplicate: true });
+      }
+
+      const userId = (req as any).user?.uid || (req as any).user?.id;
       const { getUncachableStripeClient } = await import('./stripeClient');
       const stripe = await getUncachableStripeClient();
       
       const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+      const sessionUserId = (session.metadata as any)?.userId;
+      if (sessionUserId && sessionUserId !== userId) {
+        return res.status(403).json({ error: "This payment session does not belong to your account" });
+      }
       
       if (session.payment_status === 'paid') {
         const amount = (session.amount_total || 0) / 100;
-        const balances = await storage.getBalances();
-        const currentUsd = parseFloat(String(balances.usd || 0));
-        await storage.updateBalances({ usd: String(currentUsd + amount) });
+        const currency = session.currency?.toUpperCase() || 'USD';
+
+        const existingTx = await storage.getTransactionByReference(`STRIPE-${sessionId}`);
+        if (existingTx) {
+          return res.json({ success: true, status: 'completed', duplicate: true });
+        }
+
+        processedConfirmPayments.add(sessionId);
+        
+        if (userId) {
+          const userWallet = await storage.getWalletByUserId(userId, currency);
+          if (userWallet) {
+            await storage.creditWallet(
+              userWallet.id,
+              amount,
+              'deposit',
+              `Card payment via Stripe - ${sessionId}`,
+              `STRIPE-${sessionId}`,
+              { provider: 'stripe', sessionId }
+            );
+          } else {
+            await storage.createWallet({
+              userId,
+              currency,
+              balance: String(amount),
+              status: 'active',
+            });
+          }
+        }
         
         await storage.createTransaction({
           type: 'Funding',
           amount: String(amount),
           fee: "0",
           status: 'Completed',
-          description: 'Card payment via Stripe',
-          currency: session.currency?.toUpperCase() || 'USD',
+          description: `Card payment via Stripe - ${sessionId}`,
+          currency,
           date: new Date().toISOString().split('T')[0],
         });
         
@@ -2587,14 +2626,48 @@ export async function registerRoutes(
       }
 
       if (paymentMethod === 'wallet') {
-        const balances = await storage.getBalances();
-        const currentUsd = parseFloat(String(balances.usd || 0));
         const billAmount = parseFloat(String(bill.amount || 0));
-        if (currentUsd < billAmount) {
-          return res.status(400).json({ error: "Insufficient wallet balance" });
+        const billCurrency = bill.currency || 'USD';
+        
+        const userId = (req as any).user?.uid || (req as any).user?.id;
+        let deducted = false;
+        
+        if (userId) {
+          const userWallet = await storage.getWalletByUserId(userId, billCurrency);
+          if (userWallet) {
+            const walletBalance = parseFloat(String(userWallet.balance || 0));
+            if (walletBalance < billAmount) {
+              return res.status(400).json({ error: "Insufficient wallet balance", available: walletBalance, required: billAmount });
+            }
+            await storage.debitWallet(
+              userWallet.id,
+              billAmount,
+              'bill_payment',
+              `Bill payment - ${bill.name}`,
+              `BILL-${billId}-${Date.now()}`,
+              { billId }
+            );
+            deducted = true;
+          }
         }
         
-        await storage.updateBalances({ usd: String(currentUsd - billAmount) });
+        if (!deducted) {
+          const balances = await storage.getBalances();
+          let balanceField: string;
+          if (billCurrency === 'USD') {
+            balanceField = 'usd';
+          } else if (billCurrency === balances.localCurrency) {
+            balanceField = 'local';
+          } else {
+            return res.status(400).json({ error: `No company balance available for ${billCurrency}. Please fund a wallet in this currency first.` });
+          }
+          const currentBalance = parseFloat(String((balances as any)[balanceField] || 0));
+          if (currentBalance < billAmount) {
+            return res.status(400).json({ error: "Insufficient wallet balance", available: currentBalance, required: billAmount, currency: billCurrency });
+          }
+          await storage.updateBalances({ [balanceField]: String(currentBalance - billAmount) });
+        }
+        
         await storage.updateBill(billId, { status: 'Paid' });
         
         await storage.createTransaction({
@@ -2604,7 +2677,7 @@ export async function registerRoutes(
           status: 'Completed',
           date: new Date().toISOString().split('T')[0],
           description: `Bill payment - ${bill.name}`,
-          currency: bill.currency || 'USD',
+          currency: billCurrency,
         });
         
         res.json({ success: true, message: "Bill paid successfully from wallet" });
@@ -2635,21 +2708,24 @@ export async function registerRoutes(
     email: z.string().email().optional(),
   });
 
-  app.post("/api/wallet/deposit", async (req, res) => {
+  app.post("/api/wallet/deposit", requireAuth, async (req, res) => {
     try {
       const result = depositSchema.safeParse(req.body);
       if (!result.success) {
         return res.status(400).json({ error: "Invalid deposit data", details: result.error.issues });
       }
 
+      const userId = (req as any).user?.uid || (req as any).user?.id;
       const { amount, source, countryCode, email } = result.data;
       const currencyInfo = getCurrencyForCountry(countryCode);
+      
+      let wallet = await storage.getWalletByUserId(userId, currencyInfo.currency);
       
       const paymentResult = await paymentService.createPaymentIntent(
         amount,
         currencyInfo.currency,
         countryCode,
-        { email, type: 'wallet_deposit', source }
+        { email, type: 'wallet_deposit', source, userId, walletId: wallet?.id }
       );
       
       res.json({
@@ -2659,6 +2735,110 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to initiate deposit" });
+    }
+  });
+
+  const processedDepositReferences = new Set<string>();
+  
+  app.post("/api/wallet/deposit/confirm", requireAuth, async (req, res) => {
+    try {
+      const { paymentIntentId, sessionId, provider, reference: paystackRef } = req.body;
+      const userId = (req as any).user?.uid || (req as any).user?.id;
+      
+      if (!paymentIntentId && !sessionId && !paystackRef) {
+        return res.status(400).json({ error: "Payment reference required (paymentIntentId, sessionId, or reference)" });
+      }
+
+      const idempotencyKey = paymentIntentId || sessionId || paystackRef;
+      if (processedDepositReferences.has(idempotencyKey)) {
+        return res.json({ success: true, message: "Deposit already processed", duplicate: true });
+      }
+
+      const existingDepositTx = await storage.getTransactionByReference(`DEP-${idempotencyKey}`);
+      if (existingDepositTx) {
+        processedDepositReferences.add(idempotencyKey);
+        return res.json({ success: true, message: "Deposit already processed", duplicate: true });
+      }
+      
+      let amount = 0;
+      let depositCurrency = 'USD';
+
+      if (sessionId) {
+        const { getUncachableStripeClient } = await import('./stripeClient');
+        const stripe = await getUncachableStripeClient();
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        
+        if (session.payment_status !== 'paid') {
+          return res.status(400).json({ error: "Payment not completed" });
+        }
+        const sessionUserId = (session.metadata as any)?.userId;
+        if (sessionUserId && sessionUserId !== userId) {
+          return res.status(403).json({ error: "Session does not belong to this user" });
+        }
+        amount = (session.amount_total || 0) / 100;
+        depositCurrency = session.currency?.toUpperCase() || 'USD';
+      } else if (paymentIntentId) {
+        const { getUncachableStripeClient } = await import('./stripeClient');
+        const stripe = await getUncachableStripeClient();
+        const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+        
+        if (pi.status !== 'succeeded') {
+          return res.status(400).json({ error: "Payment not completed" });
+        }
+        const piUserId = (pi.metadata as any)?.userId;
+        if (piUserId && piUserId !== userId) {
+          return res.status(403).json({ error: "Payment does not belong to this user" });
+        }
+        amount = pi.amount / 100;
+        depositCurrency = pi.currency?.toUpperCase() || 'USD';
+      } else if (paystackRef) {
+        const paystackResult = await paymentService.verifyPayment(paystackRef, 'paystack');
+        if (!paystackResult || paystackResult.status !== 'success') {
+          return res.status(400).json({ error: "Payment verification failed" });
+        }
+        amount = paystackResult.amount / 100;
+        depositCurrency = paystackResult.currency?.toUpperCase() || 'NGN';
+      }
+
+      if (amount <= 0) {
+        return res.status(400).json({ error: "Invalid payment amount" });
+      }
+
+      processedDepositReferences.add(idempotencyKey);
+
+      let wallet = await storage.getWalletByUserId(userId, depositCurrency);
+      
+      if (wallet) {
+        await storage.creditWallet(
+          wallet.id,
+          amount,
+          'deposit',
+          `Wallet deposit confirmed - ${idempotencyKey}`,
+          `DEP-${idempotencyKey}`,
+          { provider: provider || 'stripe', currency: depositCurrency }
+        );
+      } else {
+        wallet = await storage.createWallet({
+          userId,
+          currency: depositCurrency,
+          balance: String(amount),
+          status: 'active',
+        });
+      }
+
+      await storage.createTransaction({
+        type: 'Funding',
+        amount: String(amount),
+        fee: "0",
+        status: 'Completed',
+        date: new Date().toISOString().split('T')[0],
+        description: `Wallet deposit confirmed - DEP-${idempotencyKey}`,
+        currency: depositCurrency,
+      });
+
+      res.json({ success: true, amount, currency: depositCurrency, message: `${depositCurrency} ${amount} deposited successfully` });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to confirm deposit" });
     }
   });
 

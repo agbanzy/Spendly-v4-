@@ -41,6 +41,7 @@ export interface IStorage {
   
   getTransactions(): Promise<Transaction[]>;
   getTransaction(id: string): Promise<Transaction | undefined>;
+  getTransactionByReference(reference: string): Promise<Transaction | undefined>;
   createTransaction(transaction: Omit<Transaction, 'id'>): Promise<Transaction>;
   updateTransaction(id: string, transaction: Partial<Omit<Transaction, 'id'>>): Promise<Transaction | undefined>;
   deleteTransaction(id: string): Promise<boolean>;
@@ -319,6 +320,13 @@ export class DatabaseStorage implements IStorage {
 
   async getTransaction(id: string): Promise<Transaction | undefined> {
     const result = await db.select().from(transactions).where(eq(transactions.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getTransactionByReference(reference: string): Promise<Transaction | undefined> {
+    const result = await db.select().from(transactions).where(
+      sql`${transactions.description} LIKE ${'%' + reference + '%'}`
+    ).limit(1);
     return result[0];
   }
 
