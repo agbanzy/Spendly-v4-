@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getAuthHeaders } from "@/lib/queryClient";
 import { getCurrencySymbol, formatCurrencyAmount, isPaystackRegion, PAYMENT_LIMITS } from "@/lib/constants";
 import { PinVerificationDialog, usePinVerification } from "@/components/pin-verification-dialog";
 import {
@@ -162,7 +162,8 @@ export default function Transactions() {
   const { data: userProfile } = useQuery({
     queryKey: ["/api/user-profile", user?.id],
     queryFn: async () => {
-      const res = await fetch(`/api/user-profile/${user?.id}`);
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(`/api/user-profile/${user?.id}`, { headers: authHeaders, credentials: "include" });
       if (!res.ok) return null;
       return res.json();
     },
@@ -177,7 +178,9 @@ export default function Transactions() {
   const { data: banks } = useQuery<Bank[]>({
     queryKey: ["/api/payment/banks", countryCode],
     queryFn: async () => {
-      const res = await fetch(`/api/payment/banks/${countryCode}`);
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(`/api/payment/banks/${countryCode}`, { headers: authHeaders, credentials: "include" });
+      if (!res.ok) return [];
       return res.json();
     },
     enabled: isPaystack,

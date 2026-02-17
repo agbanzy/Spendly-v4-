@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, getAuthHeaders } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -188,7 +188,8 @@ export default function Onboarding() {
     queryFn: async () => {
       if (!user?.id) return null;
       try {
-        const res = await fetch(`/api/user-profile/${user.id}`);
+        const authHeaders = await getAuthHeaders();
+        const res = await fetch(`/api/user-profile/${user.id}`, { headers: authHeaders, credentials: "include" });
         if (res.status === 404) {
           const createRes = await apiRequest("POST", "/api/user-profile", {
             firebaseUid: user.id,
@@ -272,8 +273,10 @@ export default function Onboarding() {
       const formDataUpload = new FormData();
       formDataUpload.append("document", file);
       
+      const authHeaders = await getAuthHeaders();
       const res = await fetch("/api/kyc/upload", {
         method: "POST",
+        headers: authHeaders,
         body: formDataUpload,
       });
       
@@ -369,7 +372,8 @@ export default function Onboarding() {
     if (!stripeSessionId) return;
     
     try {
-      const res = await fetch(`/api/kyc/stripe/status/${stripeSessionId}`);
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(`/api/kyc/stripe/status/${stripeSessionId}`, { headers: authHeaders, credentials: "include" });
       const data = await res.json();
       
       setStripeVerificationStatus(data.status);

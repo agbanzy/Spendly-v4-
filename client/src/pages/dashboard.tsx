@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getAuthHeaders } from "@/lib/queryClient";
 import { getCurrencySymbol, formatCurrencyAmount, PAYMENT_LIMITS } from "@/lib/constants";
 import {
   Dialog,
@@ -149,10 +149,10 @@ export default function Dashboard() {
   const { data: virtualAccounts } = useQuery<VirtualAccount[]>({
     queryKey: ["/api/virtual-accounts", user?.id],
     queryFn: async () => {
-      const res = await fetch("/api/virtual-accounts");
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch("/api/virtual-accounts", { headers: authHeaders, credentials: "include" });
       if (!res.ok) return [];
       const accounts = await res.json();
-      // Filter to only show the current user's accounts
       return accounts.filter((a: VirtualAccount) => a.userId === user?.id);
     },
     enabled: !!user?.id,
@@ -172,7 +172,9 @@ export default function Dashboard() {
   const { data: banks } = useQuery<Bank[]>({
     queryKey: ["/api/payment/banks", countryCode],
     queryFn: async () => {
-      const res = await fetch(`/api/payment/banks/${countryCode}`);
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(`/api/payment/banks/${countryCode}`, { headers: authHeaders, credentials: "include" });
+      if (!res.ok) return [];
       return res.json();
     },
     enabled: isPaystack,
@@ -182,7 +184,8 @@ export default function Dashboard() {
     queryKey: ["/api/user-profile", user?.id],
     queryFn: async () => {
       if (!user?.id) return null;
-      const res = await fetch(`/api/user-profile/${user.id}`);
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(`/api/user-profile/${user.id}`, { headers: authHeaders, credentials: "include" });
       if (!res.ok) return null;
       return res.json();
     },
@@ -390,7 +393,7 @@ export default function Dashboard() {
 
   const handleGenerateVirtualAccount = () => {
     setIsGeneratingVirtualAccount(true);
-    generateVirtualAccountMutation.mutate();
+    generateVirtualAccountMutation.mutate(undefined);
   };
 
   const handleVaPhoneSubmit = async () => {

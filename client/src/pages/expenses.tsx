@@ -57,7 +57,7 @@ import {
 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, getAuthHeaders } from "@/lib/queryClient";
 import type { Expense, TeamMember, Vendor, CompanySettings } from "@shared/schema";
 import { motion } from "framer-motion";
 import {
@@ -267,8 +267,10 @@ export default function Expenses() {
     formData.append('receipt', file);
     
     try {
+      const authHeaders = await getAuthHeaders();
       const response = await fetch('/api/upload/receipt', {
         method: 'POST',
+        headers: authHeaders,
         body: formData,
       });
       const result = await response.json();

@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getAuthHeaders } from "@/lib/queryClient";
 import { PageWrapper, PageHeader, MetricCard, StatusBadge, AnimatedListItem, EmptyState, GlassCard, fadeUp, stagger } from "@/components/ui-extended";
 import { motion } from "framer-motion";
 import {
@@ -124,14 +124,15 @@ export default function ReportsPage() {
         description: `Preparing ${report.name}`
       });
       
-      const response = await fetch(`/api/reports/${report.id}/download`);
+      const authHeaders = await getAuthHeaders();
+      const response = await fetch(`/api/reports/${report.id}/download`, { headers: authHeaders, credentials: "include" });
       if (!response.ok) throw new Error('Download failed');
       
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${report.name.replace(/\s+/g, '_')}.json`;
+      a.download = `${report.name.replace(/\s+/g, '_')}.csv`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -283,28 +284,28 @@ export default function ReportsPage() {
             value={reports.length}
             icon={FileText}
             color="violet"
-            trend={`${reports.length} generated`}
+            subtitle={`${reports.length} generated`}
           />
           <MetricCard
             title="Completed"
             value={reports.filter(r => r.status === "completed").length}
             icon={CheckCircle2}
             color="emerald"
-            trend="Ready to download"
+            subtitle="Ready to download"
           />
           <MetricCard
             title="Processing"
             value={reports.filter(r => r.status === "processing").length}
             icon={Loader2}
             color="amber"
-            trend="In progress"
+            subtitle="In progress"
           />
           <MetricCard
             title="Scheduled"
             value={reports.filter(r => r.status === "scheduled").length}
             icon={Clock}
             color="cyan"
-            trend="Upcoming"
+            subtitle="Upcoming"
           />
         </motion.div>
 

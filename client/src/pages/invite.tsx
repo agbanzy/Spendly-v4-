@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, getAuthHeaders } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import { Loader2, CheckCircle, XCircle, Building2, Shield, Clock } from "lucide-react";
 
@@ -30,7 +30,8 @@ export default function InvitePage() {
   const { data: invitation, isLoading, error } = useQuery<InvitationInfo>({
     queryKey: ["/api/invitations", token],
     queryFn: async () => {
-      const res = await fetch(`/api/invitations/${token}`);
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(`/api/invitations/${token}`, { headers: authHeaders, credentials: "include" });
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || "Failed to load invitation");
