@@ -56,6 +56,7 @@ export default function PayrollScreen() {
 
   const createPayrollMutation = useMutation({
     mutationFn: (data: {
+      employeeId: string;
       employeeName: string;
       employeeEmail: string;
       salary: number;
@@ -149,6 +150,7 @@ export default function PayrollScreen() {
       return;
     }
     createPayrollMutation.mutate({
+      employeeId: employeeName.trim().toLowerCase().replace(/\s+/g, '-') + '-' + Date.now(),
       employeeName: employeeName.trim(),
       employeeEmail: employeeEmail.trim(),
       salary: parsedSalary,

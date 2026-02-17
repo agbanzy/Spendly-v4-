@@ -59,7 +59,7 @@ const emptyUtilityForm = {
   phoneNumber: '',
   meterNumber: '',
   smartCardNumber: '',
-  countryCode: 'NG',
+  countryCode: 'US',
 };
 
 // Provider options per utility type (African — most common usage)
@@ -80,6 +80,11 @@ export default function BillsScreen() {
   const { data: bills, isLoading, refetch } = useQuery({
     queryKey: ['bills'],
     queryFn: () => api.get<Bill[]>('/api/bills'),
+  });
+
+  const { data: settings } = useQuery({
+    queryKey: ['/api/settings'],
+    queryFn: () => api.get<{ countryCode?: string; currency?: string }>('/api/settings'),
   });
 
   const [refreshing, setRefreshing] = React.useState(false);
@@ -218,7 +223,7 @@ export default function BillsScreen() {
   // Open utility payment modal
   const openUtilityModal = (type: UtilityType) => {
     setUtilityType(type);
-    setUtilityForm({ ...emptyUtilityForm, provider: providerOptions[type][0] || '' });
+    setUtilityForm({ ...emptyUtilityForm, countryCode: settings?.countryCode || 'US', provider: providerOptions[type][0] || '' });
     setUtilityModalVisible(true);
   };
 
@@ -293,7 +298,7 @@ export default function BillsScreen() {
             billPayMutation.mutate({
               billId: bill.id,
               paymentMethod: 'wallet',
-              countryCode: 'NG',
+              countryCode: settings?.countryCode || 'US',
             });
           },
         },

@@ -32,6 +32,14 @@ interface VirtualCard {
   type: string;
 }
 
+interface SecureCardDetails {
+  number: string;
+  cvc: string;
+  expMonth: number;
+  expYear: number;
+  last4: string;
+}
+
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = width - 40;
 
@@ -50,6 +58,13 @@ export default function CardsScreen() {
   const [fundModalVisible, setFundModalVisible] = React.useState(false);
   const [detailsModalVisible, setDetailsModalVisible] = React.useState(false);
   const [selectedCard, setSelectedCard] = React.useState<VirtualCard | null>(null);
+  const [secureDetailsCardId, setSecureDetailsCardId] = React.useState<number | null>(null);
+
+  const { data: secureDetails, isLoading: secureDetailsLoading } = useQuery({
+    queryKey: ['cardDetails', secureDetailsCardId],
+    queryFn: () => api.get<SecureCardDetails>(`/api/cards/${secureDetailsCardId}/details`),
+    enabled: secureDetailsCardId !== null && detailsModalVisible,
+  });
   const [fundAmount, setFundAmount] = React.useState('');
   const [revealedCvv, setRevealedCvv] = React.useState<Record<number, boolean>>({});
   const [createModalVisible, setCreateModalVisible] = React.useState(false);
@@ -57,8 +72,8 @@ export default function CardsScreen() {
   const [newCardType, setNewCardType] = React.useState('virtual');
 
   const freezeMutation = useMutation({
-    mutationFn: ({ id, status }: { id: number; status: string }) =>
-      api.patch<VirtualCard>(`/api/cards/${id}`, { status }),
+    mutationFn: ({ id, action }: { id: number; action: 'freeze' | 'unfreeze' }) =>
+      api.post<VirtualCard>(`/api/cards/${id}/${action}`, {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cards'] });
     },
@@ -77,7 +92,7 @@ export default function CardsScreen() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: { cardholderName: string; type: string }) =>
+    mutationFn: (data: { name: string; type: string }) =>
       api.post<VirtualCard>('/api/cards', data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cards'] });
@@ -94,15 +109,19 @@ export default function CardsScreen() {
       Alert.alert('Validation', 'Please enter a cardholder name.');
       return;
     }
-    createMutation.mutate({ cardholderName: newCardName.trim(), type: newCardType });
+    createMutation.mutate({ name: newCardName.trim(), type: newCardType });
   };
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.delete(`/api/cards/${id}`),
+    mutationFn: async (id: number) => {
+      // First cancel in Stripe, then remove from DB
+      await api.post(`/api/cards/${id}/cancel`, {});
+      await api.delete(`/api/cards/${id}`);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cards'] });
       closeDetailsModal();
-      Alert.alert('Success', 'Card deleted.');
+      Alert.alert('Success', 'Card cancelled and deleted.');
     },
     onError: (error: Error) => Alert.alert('Error', error.message),
   });
@@ -125,8 +144,7 @@ export default function CardsScreen() {
   };
 
   const handleFreeze = (card: VirtualCard) => {
-    const newStatus = card.status === 'active' ? 'frozen' : 'active';
-    const action = card.status === 'active' ? 'freeze' : 'unfreeze';
+    const action: 'freeze' | 'unfreeze' = card.status === 'active' ? 'freeze' : 'unfreeze';
     Alert.alert(
       `${action.charAt(0).toUpperCase() + action.slice(1)} Card`,
       `Are you sure you want to ${action} this card?`,
@@ -134,7 +152,7 @@ export default function CardsScreen() {
         { text: 'Cancel', style: 'cancel' },
         {
           text: action.charAt(0).toUpperCase() + action.slice(1),
-          onPress: () => freezeMutation.mutate({ id: card.id, status: newStatus }),
+          onPress: () => freezeMutation.mutate({ id: card.id, action }),
         },
       ]
     );
@@ -164,12 +182,14 @@ export default function CardsScreen() {
 
   const openDetailsModal = (card: VirtualCard) => {
     setSelectedCard(card);
+    setSecureDetailsCardId(card.id);
     setDetailsModalVisible(true);
   };
 
   const closeDetailsModal = () => {
     setDetailsModalVisible(false);
     setSelectedCard(null);
+    setSecureDetailsCardId(null);
   };
 
   const toggleCvvReveal = (cardId: number) => {
@@ -411,9 +431,13 @@ export default function CardsScreen() {
                   <Ionicons name="card-outline" size={20} color={colors.textSecondary} />
                   <View style={styles.detailInfo}>
                     <Text style={styles.detailLabel}>Card Number</Text>
-                    <Text style={styles.detailValue}>
-                      {formatCardNumber(selectedCard.cardNumber)}
-                    </Text>
+                    {secureDetailsLoading ? (
+                      <ActivityIndicator size="small" color={colors.accent} style={{ alignSelf: 'flex-start', marginTop: 4 }} />
+                    ) : (
+                      <Text style={styles.detailValue}>
+                        {secureDetails ? formatCardNumber(secureDetails.number) : `**** **** **** ${selectedCard.cardNumber.slice(-4)}`}
+                      </Text>
+                    )}
                   </View>
                 </View>
 
@@ -421,7 +445,11 @@ export default function CardsScreen() {
                   <Ionicons name="calendar-outline" size={20} color={colors.textSecondary} />
                   <View style={styles.detailInfo}>
                     <Text style={styles.detailLabel}>Expiry Date</Text>
-                    <Text style={styles.detailValue}>{selectedCard.expiryDate}</Text>
+                    <Text style={styles.detailValue}>
+                      {secureDetails
+                        ? `${String(secureDetails.expMonth).padStart(2, '0')}/${secureDetails.expYear}`
+                        : selectedCard.expiryDate}
+                    </Text>
                   </View>
                 </View>
 
@@ -429,7 +457,13 @@ export default function CardsScreen() {
                   <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
                   <View style={styles.detailInfo}>
                     <Text style={styles.detailLabel}>CVV</Text>
-                    <Text style={styles.detailValue}>{selectedCard.cvv}</Text>
+                    {secureDetailsLoading ? (
+                      <ActivityIndicator size="small" color={colors.accent} style={{ alignSelf: 'flex-start', marginTop: 4 }} />
+                    ) : (
+                      <Text style={styles.detailValue}>
+                        {secureDetails ? secureDetails.cvc : '***'}
+                      </Text>
+                    )}
                   </View>
                 </View>
 

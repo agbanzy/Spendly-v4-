@@ -16,9 +16,16 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import * as WebBrowser from 'expo-web-browser';
 import { api } from '../lib/api';
 import { useTheme } from '../lib/theme-context';
+import { useAuth } from '../lib/auth-context';
 import { ColorTokens } from '../lib/colors';
+
+const AFRICAN_COUNTRIES = ['NG', 'GH', 'KE', 'ZA', 'EG', 'RW', 'CI'];
+function isPaystackRegion(countryCode: string): boolean {
+  return AFRICAN_COUNTRIES.includes(countryCode.toUpperCase());
+}
 
 interface Balance {
   id: string;
@@ -52,17 +59,25 @@ interface Transaction {
   currency: string;
 }
 
+interface CompanySettings {
+  countryCode?: string;
+  currency?: string;
+  companyName?: string;
+}
+
 export default function WalletScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const queryClient = useQueryClient();
   const navigation = useNavigation<any>();
+  const { user } = useAuth();
   const [fundModalVisible, setFundModalVisible] = useState(false);
   const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
   const [sendModalVisible, setSendModalVisible] = useState(false);
 
   // Fund state
   const [fundAmount, setFundAmount] = useState('');
+  const [fundingMethod, setFundingMethod] = useState<'card' | 'bank'>('card');
 
   // Withdraw state
   const [withdrawAmount, setWithdrawAmount] = useState('');
@@ -89,6 +104,15 @@ export default function WalletScreen() {
     queryKey: ['/api/transactions'],
     queryFn: () => api.get<Transaction[]>('/api/transactions'),
   });
+
+  const { data: settings } = useQuery({
+    queryKey: ['/api/settings'],
+    queryFn: () => api.get<CompanySettings>('/api/settings'),
+  });
+
+  const countryCode = settings?.countryCode || 'US';
+  const settingsCurrency = settings?.currency || 'USD';
+  const isPaystack = isPaystackRegion(countryCode);
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -137,20 +161,76 @@ export default function WalletScreen() {
     }
   };
 
-  // Fund wallet mutation
+  // Fund wallet mutation — uses real payment processing (Stripe or Paystack)
   const fundMutation = useMutation({
     mutationFn: async (amount: string) => {
-      return api.post('/api/balances/fund', { amount: parseFloat(amount) });
+      const numAmount = parseFloat(amount);
+
+      if (fundingMethod === 'card') {
+        if (isPaystack) {
+          // Paystack payment flow (African countries)
+          const result = await api.post<{
+            authorizationUrl?: string;
+            reference?: string;
+            accessCode?: string;
+          }>('/api/payment/create-intent', {
+            amount: numAmount,
+            currency: settingsCurrency,
+            countryCode,
+            email: user?.email || '',
+            metadata: { type: 'wallet_funding' },
+          });
+
+          if (result.authorizationUrl) {
+            await WebBrowser.openBrowserAsync(result.authorizationUrl);
+            return { paymentInitiated: true, provider: 'paystack' };
+          }
+          return result;
+        } else {
+          // Stripe Checkout flow (US, EU, UK, AU, etc.)
+          const callbackUrl = 'spendly://payment-callback';
+          const result = await api.post<{
+            url?: string;
+            sessionId?: string;
+          }>('/api/stripe/checkout-session', {
+            amount: numAmount,
+            currency: settingsCurrency,
+            countryCode,
+            successUrl: callbackUrl + '?payment=success',
+            cancelUrl: callbackUrl + '?payment=cancelled',
+            metadata: { type: 'wallet_funding' },
+          });
+
+          if (result.url) {
+            await WebBrowser.openBrowserAsync(result.url);
+            return { paymentInitiated: true, provider: 'stripe' };
+          }
+          return result;
+        }
+      } else {
+        // Bank transfer — show virtual account info (balance credited via webhook)
+        Alert.alert(
+          'Bank Transfer',
+          'Transfer funds to your virtual account to add money to your wallet. Your balance will be updated automatically once the transfer is confirmed.',
+          [{ text: 'OK' }],
+        );
+        return { paymentInitiated: false, method: 'bank_transfer' };
+      }
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['/api/balances'] });
       queryClient.invalidateQueries({ queryKey: ['/api/transactions'] });
-      Alert.alert('Success', `Wallet funded successfully`);
+      if (data?.paymentInitiated) {
+        Alert.alert(
+          'Payment Processing',
+          'Your payment is being processed. Your wallet balance will be updated once the payment is confirmed.',
+        );
+      }
       setFundModalVisible(false);
       setFundAmount('');
     },
     onError: (error: any) => {
-      Alert.alert('Funding Failed', error?.message || 'Failed to fund wallet', [
+      Alert.alert('Funding Failed', error?.message || 'Failed to initiate payment', [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Retry', onPress: () => fundMutation.mutate(fundAmount) },
       ]);
@@ -162,7 +242,7 @@ export default function WalletScreen() {
     mutationFn: async (data: { amount: string; accountNumber: string; bankName: string }) => {
       return api.post('/api/wallet/payout', {
         amount: parseFloat(data.amount),
-        countryCode: 'US',
+        countryCode,
         recipientDetails: {
           accountNumber: data.accountNumber,
           bankCode: '',
@@ -193,13 +273,13 @@ export default function WalletScreen() {
     mutationFn: async (data: { amount: string; accountNumber: string; bankName: string; note: string }) => {
       return api.post('/api/payment/transfer', {
         amount: parseFloat(data.amount),
-        countryCode: 'US',
+        countryCode,
         reason: data.note || 'Money transfer',
         recipientDetails: {
           accountNumber: data.accountNumber,
           bankCode: '',
           accountName: data.bankName,
-          currency: balance?.localCurrency || 'USD',
+          currency: settingsCurrency,
         },
       });
     },
@@ -222,6 +302,26 @@ export default function WalletScreen() {
   });
 
   const handleFund = () => {
+    if (fundingMethod === 'bank') {
+      // For bank transfer, show virtual account details
+      if (virtualAccounts && virtualAccounts.length > 0) {
+        const account = virtualAccounts[0];
+        Alert.alert(
+          'Transfer to Your Virtual Account',
+          `Bank: ${account.bankName}\nAccount: ${account.accountNumber}\nName: ${account.name}\n\nTransfer any amount to this account. Your wallet balance will be updated automatically.`,
+          [{ text: 'OK' }],
+        );
+      } else {
+        Alert.alert(
+          'No Virtual Account',
+          'You need a virtual account to receive bank transfers. Please generate one from the dashboard.',
+          [{ text: 'OK' }],
+        );
+      }
+      setFundModalVisible(false);
+      return;
+    }
+
     const parsed = parseFloat(fundAmount);
     if (!fundAmount || isNaN(parsed) || parsed <= 0) {
       Alert.alert('Error', 'Please enter a valid amount greater than zero');
@@ -417,65 +517,111 @@ export default function WalletScreen() {
       {/* Fund Wallet Modal */}
       <Modal visible={fundModalVisible} animationType="slide" transparent>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Fund Wallet</Text>
-              <TouchableOpacity onPress={() => setFundModalVisible(false)}>
-                <Ionicons name="close" size={24} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
+          <ScrollView contentContainerStyle={styles.modalScrollContent} keyboardShouldPersistTaps="handled">
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Fund Wallet</Text>
+                <TouchableOpacity onPress={() => setFundModalVisible(false)}>
+                  <Ionicons name="close" size={24} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
 
-            <View style={styles.modalBalanceCard}>
-              <Text style={styles.modalBalanceLabel}>Current Balance</Text>
-              <Text style={styles.modalBalanceAmount}>{formatCurrency(localBalance, localCurrency)}</Text>
-            </View>
+              <View style={styles.modalBalanceCard}>
+                <Text style={styles.modalBalanceLabel}>Current Balance</Text>
+                <Text style={styles.modalBalanceAmount}>{formatCurrency(localBalance, localCurrency)}</Text>
+              </View>
 
-            <Text style={styles.modalInputLabel}>Amount to Add</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="0.00"
-              placeholderTextColor={colors.placeholderText}
-              keyboardType="numeric"
-              value={fundAmount}
-              onChangeText={setFundAmount}
-            />
-
-            <View style={styles.presetRow}>
-              {AMOUNT_PRESETS.map((amount) => (
+              {/* Payment Method Selection */}
+              <Text style={styles.modalInputLabel}>Payment Method</Text>
+              <View style={styles.fundingMethodRow}>
                 <TouchableOpacity
-                  key={amount}
-                  style={[styles.presetButton, fundAmount === String(amount) && styles.presetButtonActive]}
-                  onPress={() => setFundAmount(String(amount))}
+                  style={[styles.fundingMethodButton, fundingMethod === 'card' && styles.fundingMethodActive]}
+                  onPress={() => setFundingMethod('card')}
                 >
-                  <Text style={[styles.presetText, fundAmount === String(amount) && styles.presetTextActive]}>
-                    {amount.toLocaleString()}
+                  <Ionicons
+                    name="card"
+                    size={20}
+                    color={fundingMethod === 'card' ? colors.primaryForeground : colors.textSecondary}
+                  />
+                  <Text style={[styles.fundingMethodText, fundingMethod === 'card' && styles.fundingMethodTextActive]}>
+                    {isPaystack ? 'Card / Bank' : 'Card'}
                   </Text>
                 </TouchableOpacity>
-              ))}
-            </View>
+                <TouchableOpacity
+                  style={[styles.fundingMethodButton, fundingMethod === 'bank' && styles.fundingMethodActive]}
+                  onPress={() => setFundingMethod('bank')}
+                >
+                  <Ionicons
+                    name="business"
+                    size={20}
+                    color={fundingMethod === 'bank' ? colors.primaryForeground : colors.textSecondary}
+                  />
+                  <Text style={[styles.fundingMethodText, fundingMethod === 'bank' && styles.fundingMethodTextActive]}>
+                    Bank Transfer
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
-            <View style={styles.infoRow}>
-              <Ionicons name="checkmark-circle" size={16} color={colors.colorGreen} />
-              <Text style={styles.infoText}>Instant funding with zero fees.</Text>
-            </View>
+              <Text style={styles.modalInputLabel}>Amount to Add</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="0.00"
+                placeholderTextColor={colors.placeholderText}
+                keyboardType="numeric"
+                value={fundAmount}
+                onChangeText={setFundAmount}
+              />
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalCancelButton} onPress={() => setFundModalVisible(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalSubmitButton, fundMutation.isPending && styles.buttonDisabled]}
-                onPress={handleFund}
-                disabled={fundMutation.isPending}
-              >
-                {fundMutation.isPending ? (
-                  <ActivityIndicator color={colors.primaryForeground} size="small" />
-                ) : (
-                  <Text style={styles.modalSubmitText}>Fund Wallet</Text>
-                )}
-              </TouchableOpacity>
+              <View style={styles.presetRow}>
+                {AMOUNT_PRESETS.map((amount) => (
+                  <TouchableOpacity
+                    key={amount}
+                    style={[styles.presetButton, fundAmount === String(amount) && styles.presetButtonActive]}
+                    onPress={() => setFundAmount(String(amount))}
+                  >
+                    <Text style={[styles.presetText, fundAmount === String(amount) && styles.presetTextActive]}>
+                      {amount.toLocaleString()}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {fundingMethod === 'card' ? (
+                <View style={styles.infoRow}>
+                  <Ionicons name="shield-checkmark" size={16} color={colors.colorGreen} />
+                  <Text style={styles.infoText}>
+                    Secure payment via {isPaystack ? 'Paystack' : 'Stripe'}. You will be redirected to complete payment.
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.infoRow}>
+                  <Ionicons name="information-circle" size={16} color={colors.accent} />
+                  <Text style={styles.infoText}>
+                    Transfer to your virtual account. Balance updates automatically when the transfer is confirmed.
+                  </Text>
+                </View>
+              )}
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalCancelButton} onPress={() => setFundModalVisible(false)}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalSubmitButton, fundMutation.isPending && styles.buttonDisabled]}
+                  onPress={handleFund}
+                  disabled={fundMutation.isPending}
+                >
+                  {fundMutation.isPending ? (
+                    <ActivityIndicator color={colors.primaryForeground} size="small" />
+                  ) : (
+                    <Text style={styles.modalSubmitText}>
+                      {fundingMethod === 'card' ? 'Pay Now' : 'View Account Details'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
 
@@ -999,15 +1145,47 @@ function createStyles(colors: ColorTokens) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-      backgroundColor: colors.successSubtle,
+      backgroundColor: colors.surface,
       borderRadius: 10,
       padding: 12,
       marginTop: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
     },
     infoText: {
       fontSize: 13,
-      color: colors.colorGreen,
+      color: colors.textSecondary,
       flex: 1,
+    },
+    fundingMethodRow: {
+      flexDirection: 'row',
+      gap: 10,
+      marginBottom: 16,
+    },
+    fundingMethodButton: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+    },
+    fundingMethodActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primary,
+    },
+    fundingMethodText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+    fundingMethodTextActive: {
+      color: colors.primaryForeground,
     },
     warningRow: {
       flexDirection: 'row',

@@ -109,17 +109,27 @@ export default function TeamScreen() {
   const inviteMutation = useMutation({
     mutationFn: (data: { name: string; email: string; role: string; department: string }) => {
       if (companyId) {
-        return api.post(`/api/companies/${companyId}/invitations`, data);
+        return api.post<{ inviteEmailSent?: boolean }>(
+          `/api/companies/${companyId}/invitations`,
+          data,
+        );
       }
-      return api.post('/api/team', data);
+      return api.post<{ inviteEmailSent?: boolean }>('/api/team', data);
     },
-    onSuccess: () => {
+    onSuccess: (response) => {
       queryClient.invalidateQueries({ queryKey: ['team'] });
       queryClient.invalidateQueries({ queryKey: ['company-members'] });
       queryClient.invalidateQueries({ queryKey: ['company-invitations'] });
       setInviteModalVisible(false);
       resetInviteForm();
-      Alert.alert('Success', 'Team invitation sent successfully.');
+      if (response?.inviteEmailSent === false) {
+        Alert.alert(
+          'Member Added',
+          'Team member was added but the invitation email could not be sent. Please share the invite link manually.',
+        );
+      } else {
+        Alert.alert('Success', 'Team invitation sent successfully.');
+      }
     },
     onError: (err: Error) => {
       Alert.alert('Error', err.message || 'Failed to invite team member. Please try again.');

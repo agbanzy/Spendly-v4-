@@ -1033,7 +1033,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/budgets/:id", async (req, res) => {
+  app.patch("/api/budgets/:id", requireAuth, async (req, res) => {
     try {
       const result = budgetUpdateSchema.safeParse(req.body);
       if (!result.success) {
@@ -1049,7 +1049,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/budgets/:id", async (req, res) => {
+  app.delete("/api/budgets/:id", requireAuth, async (req, res) => {
     try {
       const deleted = await storage.deleteBudget(req.params.id);
       if (!deleted) {
@@ -2338,7 +2338,7 @@ export async function registerRoutes(
   });
 
   // ==================== REPORTS ====================
-  app.get("/api/reports", async (req, res) => {
+  app.get("/api/reports", requireAuth, async (req, res) => {
     try {
       const reports = await storage.getReports();
       res.json(reports);
@@ -2465,7 +2465,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/reports/:id", async (req, res) => {
+  app.delete("/api/reports/:id", requireAuth, async (req, res) => {
     try {
       await storage.deleteReport(req.params.id);
       res.json({ success: true });

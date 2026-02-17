@@ -10,13 +10,59 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '../lib/api';
 import { useTheme } from '../lib/theme-context';
+import { useCompany } from '../lib/company-context';
 import { ColorTokens } from '../lib/colors';
+
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://spendlymanager.com';
+const ACTIVE_COMPANY_KEY = 'spendly_active_company_id';
+
+async function uploadReceipt(uri: string): Promise<string> {
+  const [token, activeCompanyId] = await Promise.all([
+    AsyncStorage.getItem('authToken'),
+    AsyncStorage.getItem(ACTIVE_COMPANY_KEY),
+  ]);
+
+  const formData = new FormData();
+  const filename = uri.split('/').pop() || 'receipt.jpg';
+  const match = /\.(\w+)$/.exec(filename);
+  const type = match ? `image/${match[1]}` : 'image/jpeg';
+
+  formData.append('receipt', {
+    uri: Platform.OS === 'ios' ? uri.replace('file://', '') : uri,
+    name: filename,
+    type,
+  } as any);
+
+  const headers: HeadersInit = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  if (activeCompanyId) {
+    headers['X-Company-Id'] = activeCompanyId;
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/upload/receipt`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Upload failed' }));
+    throw new Error(error.message || 'Failed to upload receipt');
+  }
+
+  const result = await response.json();
+  return result.url;
+}
 
 interface Expense {
   id: number;
@@ -27,6 +73,7 @@ interface Expense {
   date: string;
   merchant?: string;
   currency?: string;
+  receiptUrl?: string;
 }
 
 const categories = ['Software', 'Travel', 'Office', 'Marketing', 'Food', 'Equipment', 'Utilities', 'Legal', 'Other'];
@@ -36,6 +83,7 @@ export default function ExpensesScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const queryClient = useQueryClient();
+  const { isAdmin, isManager } = useCompany();
   const [modalVisible, setModalVisible] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [description, setDescription] = useState('');
@@ -45,6 +93,7 @@ export default function ExpensesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [receiptUri, setReceiptUri] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   const { data: expenses, isLoading, refetch } = useQuery({
     queryKey: ['expenses'],
@@ -52,8 +101,8 @@ export default function ExpensesScreen() {
   });
 
   const createExpense = useMutation({
-    mutationFn: (data: { description: string; amount: number; category: string; merchant?: string }) =>
-      api.post('/api/expenses', { description: data.description, amount: data.amount, category: data.category, merchant: data.merchant || undefined }),
+    mutationFn: (data: { description: string; amount: number; category: string; merchant?: string; receiptUrl?: string }) =>
+      api.post('/api/expenses', { merchant: data.merchant || data.description, amount: data.amount, category: data.category, note: data.description, receiptUrl: data.receiptUrl || undefined }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       closeModal();
@@ -65,8 +114,8 @@ export default function ExpensesScreen() {
   });
 
   const updateExpense = useMutation({
-    mutationFn: (data: { id: number; description: string; amount: number; category: string; merchant?: string }) =>
-      api.patch(`/api/expenses/${data.id}`, { description: data.description, amount: data.amount, category: data.category, merchant: data.merchant || undefined }),
+    mutationFn: (data: { id: number; description: string; amount: number; category: string; merchant?: string; receiptUrl?: string }) =>
+      api.patch(`/api/expenses/${data.id}`, { merchant: data.merchant || data.description, amount: data.amount, category: data.category, note: data.description, receiptUrl: data.receiptUrl || undefined }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       closeModal();
@@ -87,6 +136,64 @@ export default function ExpensesScreen() {
       Alert.alert('Error', error.message || 'Failed to delete expense');
     },
   });
+
+  const approveExpense = useMutation({
+    mutationFn: (id: number) => api.patch(`/api/expenses/${id}`, { status: 'Approved' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      Alert.alert('Success', 'Expense approved');
+    },
+    onError: (error: any) => {
+      Alert.alert('Error', error.message || 'Failed to approve expense');
+    },
+  });
+
+  const rejectExpense = useMutation({
+    mutationFn: (data: { id: number; reason: string }) =>
+      api.post(`/api/expenses/${data.id}/reject`, { reason: data.reason }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      Alert.alert('Success', 'Expense rejected');
+    },
+    onError: (error: any) => {
+      Alert.alert('Error', error.message || 'Failed to reject expense');
+    },
+  });
+
+  const handleApprove = (expense: Expense) => {
+    Alert.alert(
+      'Approve Expense',
+      `Approve "${expense.description}" for ${formatCurrency(expense.amount, expense.currency)}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Approve', onPress: () => approveExpense.mutate(expense.id) },
+      ]
+    );
+  };
+
+  const handleReject = (expense: Expense) => {
+    Alert.prompt(
+      'Reject Expense',
+      `Provide a reason for rejecting "${expense.description}":`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reject',
+          style: 'destructive',
+          onPress: (reason?: string) => {
+            if (!reason?.trim()) {
+              Alert.alert('Error', 'A rejection reason is required');
+              return;
+            }
+            rejectExpense.mutate({ id: expense.id, reason: reason.trim() });
+          },
+        },
+      ],
+      'plain-text',
+      '',
+      'default'
+    );
+  };
 
   const resetForm = () => {
     setDescription('');
@@ -158,7 +265,7 @@ export default function ExpensesScreen() {
     );
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!description.trim() || !amount.trim()) {
       Alert.alert('Error', 'Please fill in all required fields');
       return;
@@ -169,6 +276,22 @@ export default function ExpensesScreen() {
       return;
     }
 
+    let receiptUrl: string | undefined;
+
+    // Upload receipt if one was selected
+    if (receiptUri) {
+      try {
+        setIsUploading(true);
+        receiptUrl = await uploadReceipt(receiptUri);
+      } catch (error: any) {
+        Alert.alert('Upload Error', error.message || 'Failed to upload receipt');
+        setIsUploading(false);
+        return;
+      } finally {
+        setIsUploading(false);
+      }
+    }
+
     if (editingExpense) {
       updateExpense.mutate({
         id: editingExpense.id,
@@ -176,6 +299,7 @@ export default function ExpensesScreen() {
         amount: parseFloat(amount),
         category,
         merchant: merchant || undefined,
+        receiptUrl,
       });
     } else {
       createExpense.mutate({
@@ -183,6 +307,7 @@ export default function ExpensesScreen() {
         amount: parseFloat(amount),
         category,
         merchant: merchant || undefined,
+        receiptUrl,
       });
     }
   };
@@ -213,7 +338,11 @@ export default function ExpensesScreen() {
     return matchesSearch && matchesStatus;
   });
 
-  const isPending = createExpense.isPending || updateExpense.isPending;
+  const isPending = createExpense.isPending || updateExpense.isPending || isUploading;
+
+  const canApproveReject = isAdmin || isManager;
+  const isApproving = approveExpense.isPending;
+  const isRejecting = rejectExpense.isPending;
 
   const renderExpense = ({ item }: { item: Expense }) => (
     <TouchableOpacity style={styles.expenseCard} onPress={() => openEditModal(item)} onLongPress={() => handleDelete(item)}>
@@ -225,6 +354,38 @@ export default function ExpensesScreen() {
         <Text style={styles.expenseMeta}>
           {item.category}{item.merchant ? ` - ${item.merchant}` : ''}
         </Text>
+        {canApproveReject && item.status?.toLowerCase() === 'pending' && (
+          <View style={styles.approvalActions}>
+            <TouchableOpacity
+              style={styles.approveButton}
+              onPress={() => handleApprove(item)}
+              disabled={isApproving || isRejecting}
+            >
+              {isApproving ? (
+                <ActivityIndicator size="small" color={colors.success} />
+              ) : (
+                <>
+                  <Ionicons name="checkmark-circle-outline" size={16} color={colors.success} />
+                  <Text style={styles.approveButtonText}>Approve</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.rejectButton}
+              onPress={() => handleReject(item)}
+              disabled={isApproving || isRejecting}
+            >
+              {isRejecting ? (
+                <ActivityIndicator size="small" color={colors.danger} />
+              ) : (
+                <>
+                  <Ionicons name="close-circle-outline" size={16} color={colors.danger} />
+                  <Text style={styles.rejectButtonText}>Reject</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
       <View style={styles.expenseRight}>
         <Text style={styles.expenseAmount}>{formatCurrency(item.amount, item.currency)}</Text>
@@ -540,6 +701,43 @@ function createStyles(colors: ColorTokens) {
       flex: 1,
       color: colors.textSoft,
       fontSize: 14,
+    },
+    approvalActions: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 8,
+    },
+    approveButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: colors.surface,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderWidth: 1,
+      borderColor: colors.success,
+    },
+    approveButtonText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.success,
+    },
+    rejectButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: colors.surface,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderWidth: 1,
+      borderColor: colors.danger,
+    },
+    rejectButtonText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.danger,
     },
   });
 }
