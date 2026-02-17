@@ -52,6 +52,7 @@ import {
   PlayCircle,
   PauseCircle,
   Wifi,
+  AlertTriangle,
 } from "lucide-react";
 import type { VirtualCard, CompanySettings } from "@shared/schema";
 
@@ -75,6 +76,10 @@ export default function Cards() {
 
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
+  });
+
+  const { data: balances } = useQuery<{ local: number; usd: number; escrow: number }>({
+    queryKey: ["/api/balances"],
   });
 
   const currency = settings?.currency || "USD";
@@ -687,47 +692,71 @@ export default function Cards() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-5 py-4">
-            {fundingCard && (
-              <>
-                <div className="p-4 rounded-xl bg-muted/40 border border-border/50 backdrop-blur-sm">
-                  <div className="flex justify-between items-center mb-3">
-                    <span className="text-sm font-medium text-muted-foreground">
-                      Current Balance
-                    </span>
-                    <span className="font-semibold">
-                      {formatCurrency(
-                        fundingCard.balance,
-                        fundingCard.currency
-                      )}
-                    </span>
+            {fundingCard && (() => {
+              const cardCurrency = fundingCard.currency || currency;
+              const walletBalance = cardCurrency === currency ? (balances?.local || 0) :
+                cardCurrency === 'USD' ? (balances?.usd || 0) : (balances?.local || 0);
+              const fundNum = parseFloat(fundAmount) || 0;
+              const isInsufficient = fundNum > 0 && fundNum > walletBalance;
+              return (
+                <>
+                  <div className="p-4 rounded-xl bg-muted/40 border border-border/50 backdrop-blur-sm space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium text-muted-foreground">
+                        Card Balance
+                      </span>
+                      <span className="font-semibold">
+                        {formatCurrency(fundingCard.balance, fundingCard.currency)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center pt-3 border-t border-border/30">
+                      <span className="text-sm font-medium text-muted-foreground">
+                        Wallet Balance ({cardCurrency})
+                      </span>
+                      <span className={`font-semibold ${isInsufficient ? "text-red-500" : ""}`}>
+                        {formatCurrency(walletBalance, cardCurrency)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center pt-3 border-t border-border/30">
+                      <span className="text-sm font-medium text-muted-foreground">
+                        Card Currency
+                      </span>
+                      <span className="font-medium">{fundingCard.currency}</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between items-center pt-3 border-t border-border/30">
-                    <span className="text-sm font-medium text-muted-foreground">
-                      Card Currency
-                    </span>
-                    <span className="font-medium">{fundingCard.currency}</span>
+                  <div className="space-y-2">
+                    <Label htmlFor="fundAmount" className="text-sm font-medium">
+                      Amount to Add ({getCurrencySymbol(fundingCard.currency)})
+                    </Label>
+                    <Input
+                      id="fundAmount"
+                      type="number"
+                      value={fundAmount}
+                      onChange={(e) => setFundAmount(e.target.value)}
+                      placeholder="0.00"
+                      className="bg-muted/30 border-border/50 rounded-xl h-11 text-lg font-bold"
+                      data-testid="input-fund-amount"
+                    />
+                    <div className="grid grid-cols-4 gap-2">
+                      {[50, 100, 500, 1000].map((amt) => (
+                        <Button key={amt} variant="outline" size="sm" onClick={() => setFundAmount(String(amt))} className="text-xs font-bold" data-testid={`button-quick-fund-${amt}`}>
+                          {getCurrencySymbol(fundingCard.currency)}{amt.toLocaleString()}
+                        </Button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Funds will be deducted from your {cardCurrency} wallet.
+                    </p>
                   </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="fundAmount" className="text-sm font-medium">
-                    Amount to Add
-                  </Label>
-                  <Input
-                    id="fundAmount"
-                    type="number"
-                    value={fundAmount}
-                    onChange={(e) => setFundAmount(e.target.value)}
-                    placeholder="Enter amount"
-                    className="bg-muted/30 border-border/50 rounded-xl h-11"
-                    data-testid="input-fund-amount"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Funds will be deducted from your {fundingCard.currency}{" "}
-                    wallet.
-                  </p>
-                </div>
-              </>
-            )}
+                  {isInsufficient && (
+                    <div className="p-3 bg-red-50 dark:bg-red-950 rounded-xl text-red-700 dark:text-red-300 text-sm flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                      <span>Insufficient wallet balance. You need {formatCurrency(fundNum - walletBalance, cardCurrency)} more. Fund your wallet first.</span>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
           <DialogFooter className="flex gap-2">
             <Button
@@ -739,7 +768,13 @@ export default function Cards() {
             </Button>
             <Button
               onClick={handleFundCard}
-              disabled={fundCardMutation.isPending || !fundAmount}
+              disabled={fundCardMutation.isPending || !fundAmount || (() => {
+                const amt = parseFloat(fundAmount);
+                if (!fundingCard || isNaN(amt) || amt <= 0) return false;
+                const cc = fundingCard.currency || currency;
+                const wb = cc === currency ? (balances?.local || 0) : cc === 'USD' ? (balances?.usd || 0) : (balances?.local || 0);
+                return amt > wb;
+              })()}
               className="gap-2 rounded-xl"
               data-testid="button-confirm-fund"
             >

@@ -43,6 +43,7 @@ import AdminExchangeRates from "@/pages/admin-exchange-rates";
 import AdminDatabase from "@/pages/admin-database";
 import AdminLogin from "@/pages/admin-login";
 import InvitePage from "@/pages/invite";
+import VirtualAccounts from "@/pages/virtual-accounts";
 
 function AuthLoading() {
   return (
@@ -101,6 +102,7 @@ function AppRouter() {
       <Route path="/bills">{() => <ProtectedRoute component={Bills} />}</Route>
       <Route path="/budget">{() => <ProtectedRoute component={Budget} />}</Route>
       <Route path="/cards">{() => <ProtectedRoute component={Cards} />}</Route>
+      <Route path="/accounts">{() => <ProtectedRoute component={VirtualAccounts} />}</Route>
       <Route path="/team">{() => <ProtectedRoute component={Team} />}</Route>
       <Route path="/settings">{() => <ProtectedRoute component={Settings} />}</Route>
       <Route path="/analytics">{() => <ProtectedRoute component={Analytics} />}</Route>

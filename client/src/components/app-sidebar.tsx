@@ -70,6 +70,7 @@ const mainMenuItems = [
   { title: "Bills", url: "/bills", icon: FileText },
   { title: "Budget", url: "/budget", icon: PieChart },
   { title: "Cards", url: "/cards", icon: CreditCard },
+  { title: "Accounts", url: "/accounts", icon: Wallet },
 ];
 
 const financeItems = [
