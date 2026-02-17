@@ -320,10 +320,7 @@ const billUpdateSchema = billSchema.partial().extend({
 const budgetUpdateSchema = budgetSchema.partial().extend({
   spent: z.union([z.string(), z.number()]).optional().transform(val => String(val || '0')),
 });
-const cardUpdateSchema = cardSchema.partial().extend({
-  status: z.string().optional(),
-  balance: z.union([z.string(), z.number()]).optional().transform(val => String(val || '0')),
-});
+const cardUpdateSchema = cardSchema.partial();
 const teamMemberUpdateSchema = teamMemberSchema.partial().extend({
   status: z.string().optional(),
 });
@@ -1249,6 +1246,14 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid card data", details: result.error.issues });
       }
+      const existingCard = await storage.getCard(req.params.id);
+      if (!existingCard) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+      const company = await resolveUserCompany(req);
+      if (company && existingCard.companyId && existingCard.companyId !== company.companyId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
       const card = await storage.updateCard(req.params.id, result.data as any);
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
@@ -1261,6 +1266,14 @@ export async function registerRoutes(
 
   app.delete("/api/cards/:id", requireAuth, async (req, res) => {
     try {
+      const card = await storage.getCard(req.params.id);
+      if (!card) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+      const company = await resolveUserCompany(req);
+      if (company && card.companyId && card.companyId !== company.companyId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
       const deleted = await storage.deleteCard(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Card not found" });
@@ -1288,6 +1301,10 @@ export async function registerRoutes(
       const card = await storage.getCard(req.params.id);
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
+      }
+      const company = await resolveUserCompany(req);
+      if (company && card.companyId && card.companyId !== company.companyId) {
+        return res.status(403).json({ error: "Access denied" });
       }
 
       const cardCurrency = card.currency || 'USD';
@@ -1395,6 +1412,10 @@ export async function registerRoutes(
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
+      const company = await resolveUserCompany(req);
+      if (company && card.companyId && card.companyId !== company.companyId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
       
       if (card.status !== 'Active') {
         return res.status(400).json({ error: "Card is not active" });
@@ -1458,6 +1479,10 @@ export async function registerRoutes(
       const card = await storage.getCard(req.params.id);
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
+      }
+      const company = await resolveUserCompany(req);
+      if (company && card.companyId && card.companyId !== company.companyId) {
+        return res.status(403).json({ error: "Access denied" });
       }
       
       const transactions = await storage.getCardTransactions(req.params.id);
@@ -3377,6 +3402,10 @@ export async function registerRoutes(
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
+      const company = await resolveUserCompany(req);
+      if (company && card.companyId && card.companyId !== company.companyId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
 
       if (!card.stripeCardId) {
         return res.status(400).json({ error: "Card does not support freezing" });
@@ -3401,6 +3430,10 @@ export async function registerRoutes(
       const card = await storage.getCard(req.params.id);
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
+      }
+      const company = await resolveUserCompany(req);
+      if (company && card.companyId && card.companyId !== company.companyId) {
+        return res.status(403).json({ error: "Access denied" });
       }
 
       if (!card.stripeCardId) {
@@ -3427,6 +3460,10 @@ export async function registerRoutes(
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
+      const company = await resolveUserCompany(req);
+      if (company && card.companyId && card.companyId !== company.companyId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
 
       if (!card.stripeCardId) {
         return res.status(400).json({ error: "Card details not available" });
@@ -3451,6 +3488,10 @@ export async function registerRoutes(
       const card = await storage.getCard(req.params.id);
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
+      }
+      const company = await resolveUserCompany(req);
+      if (company && card.companyId && card.companyId !== company.companyId) {
+        return res.status(403).json({ error: "Access denied" });
       }
 
       if (!card.stripeCardId) {
@@ -3488,6 +3529,10 @@ export async function registerRoutes(
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
+      const company = await resolveUserCompany(req);
+      if (company && card.companyId && card.companyId !== company.companyId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
 
       if (!card.stripeCardId) {
         return res.status(400).json({ error: "Card does not support cancellation" });
@@ -3513,6 +3558,10 @@ export async function registerRoutes(
       const card = await storage.getCard(req.params.id);
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
+      }
+      const company = await resolveUserCompany(req);
+      if (company && card.companyId && card.companyId !== company.companyId) {
+        return res.status(403).json({ error: "Access denied" });
       }
 
       if (!card.stripeCardId) {

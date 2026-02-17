@@ -139,16 +139,29 @@ export default function Cards() {
     },
   });
 
-  const toggleStatusMutation = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      return apiRequest("PATCH", `/api/cards/${id}`, { status });
+  const freezeMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("POST", `/api/cards/${id}/freeze`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cards"] });
-      toast({ title: "Card status updated" });
+      toast({ title: "Card frozen successfully" });
     },
     onError: () => {
-      toast({ title: "Failed to update card status", variant: "destructive" });
+      toast({ title: "Failed to freeze card", variant: "destructive" });
+    },
+  });
+
+  const unfreezeMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("POST", `/api/cards/${id}/unfreeze`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/cards"] });
+      toast({ title: "Card activated successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to activate card", variant: "destructive" });
     },
   });
 
@@ -405,25 +418,24 @@ export default function Cards() {
                                   Edit
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
-                                  onClick={() =>
-                                    toggleStatusMutation.mutate({
-                                      id: card.id,
-                                      status:
-                                        card.status === "Active"
-                                          ? "Frozen"
-                                          : "Active",
-                                    })
-                                  }
+                                  onClick={() => {
+                                    if (card.status === "Active") {
+                                      freezeMutation.mutate(card.id);
+                                    } else {
+                                      unfreezeMutation.mutate(card.id);
+                                    }
+                                  }}
+                                  disabled={freezeMutation.isPending || unfreezeMutation.isPending}
                                 >
                                   {card.status === "Active" ? (
                                     <>
                                       <PauseCircle className="h-4 w-4 mr-2" />
-                                      Freeze Card
+                                      {freezeMutation.isPending ? "Freezing..." : "Freeze Card"}
                                     </>
                                   ) : (
                                     <>
                                       <PlayCircle className="h-4 w-4 mr-2" />
-                                      Activate Card
+                                      {unfreezeMutation.isPending ? "Activating..." : "Activate Card"}
                                     </>
                                   )}
                                 </DropdownMenuItem>
