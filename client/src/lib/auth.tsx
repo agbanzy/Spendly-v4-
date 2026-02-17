@@ -30,12 +30,12 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-function mapFirebaseUser(firebaseUser: FirebaseUser): User {
+function mapFirebaseUser(firebaseUser: FirebaseUser, serverRole?: string): User {
   return {
     id: firebaseUser.uid,
     name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
     email: firebaseUser.email || "",
-    role: "Admin",
+    role: serverRole || "",
     photoURL: firebaseUser.photoURL || undefined
   };
 }
@@ -57,46 +57,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  const ensureUserProfile = async (firebaseUser: FirebaseUser) => {
+  const ensureUserProfile = async (firebaseUser: FirebaseUser, extra?: { phoneNumber?: string; country?: string }): Promise<string | undefined> => {
     try {
-      await apiRequest("POST", "/api/user-profile", {
+      const res = await apiRequest("POST", "/api/user-profile", {
         firebaseUid: firebaseUser.uid,
         email: firebaseUser.email,
         displayName: firebaseUser.displayName || firebaseUser.email?.split("@")[0],
         photoUrl: firebaseUser.photoURL || null,
+        ...(extra?.phoneNumber ? { phoneNumber: extra.phoneNumber } : {}),
+        ...(extra?.country ? { country: extra.country } : {}),
       });
+      const serverProfile = await res.json();
+      return serverProfile?.role || undefined;
     } catch (error) {
       console.error("Failed to sync user profile:", error);
+      return undefined;
     }
   };
 
   const login = async (email: string, password: string) => {
     const userCredential = await signInWithEmail(email, password);
-    await ensureUserProfile(userCredential.user);
-    setUser(mapFirebaseUser(userCredential.user));
+    const serverRole = await ensureUserProfile(userCredential.user);
+    setUser(mapFirebaseUser(userCredential.user, serverRole));
   };
 
   const loginWithGoogle = async () => {
     const userCredential = await signInWithGoogle();
-    await ensureUserProfile(userCredential.user);
-    setUser(mapFirebaseUser(userCredential.user));
+    const serverRole = await ensureUserProfile(userCredential.user);
+    setUser(mapFirebaseUser(userCredential.user, serverRole));
   };
 
   const signup = async (name: string, email: string, password: string, extra?: { phoneNumber?: string; country?: string }) => {
     const userCredential = await signUpWithEmail(email, password, name);
-    try {
-      await apiRequest("POST", "/api/user-profile", {
-        firebaseUid: userCredential.user.uid,
-        email: userCredential.user.email,
-        displayName: userCredential.user.displayName || name,
-        photoUrl: userCredential.user.photoURL || null,
-        phoneNumber: extra?.phoneNumber || null,
-        country: extra?.country || null,
-      });
-    } catch (error) {
-      console.error("Failed to sync user profile:", error);
-    }
-    setUser(mapFirebaseUser(userCredential.user));
+    const serverRole = await ensureUserProfile(userCredential.user, extra);
+    setUser(mapFirebaseUser(userCredential.user, serverRole));
   };
 
   const logout = async () => {

@@ -164,13 +164,7 @@ export default function Team() {
   const { currentCompany } = useCompany();
 
   const { data: invitations, isLoading: invitationsLoading } = useQuery<any[]>({
-    queryKey: ["/api/companies/invitations", currentCompany?.id],
-    queryFn: async () => {
-      if (!currentCompany?.id) return [];
-      const res = await fetch(`/api/companies/${currentCompany.id}/invitations`);
-      if (!res.ok) throw new Error("Failed to fetch invitations");
-      return res.json();
-    },
+    queryKey: [`/api/companies/${currentCompany?.id}/invitations`],
     enabled: !!currentCompany?.id,
   });
 

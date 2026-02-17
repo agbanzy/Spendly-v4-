@@ -28,9 +28,7 @@ export default function AdminPayouts() {
 
   const processMutation = useMutation({
     mutationFn: async (payoutId: string) => {
-      return apiRequest(`/api/payouts/${payoutId}/process`, {
-        method: "POST",
-      });
+      return apiRequest("POST", `/api/payouts/${payoutId}/process`);
     },
     onSuccess: () => {
       toast({

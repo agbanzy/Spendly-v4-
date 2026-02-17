@@ -34,12 +34,9 @@ export default function AdminDatabase() {
 
   const purgeMutation = useMutation({
     mutationFn: async () => {
-      return apiRequest("/api/admin/purge-database", {
-        method: "POST",
-        body: JSON.stringify({
-          confirmPurge: "CONFIRM_PURGE",
-          tablesToPreserve: ["admin_settings", "organization_settings", "system_settings", "role_permissions"],
-        }),
+      return apiRequest("POST", "/api/admin/purge-database", {
+        confirmPurge: "CONFIRM_PURGE",
+        tablesToPreserve: ["admin_settings", "organization_settings", "system_settings", "role_permissions"],
       });
     },
     onSuccess: (data: any) => {

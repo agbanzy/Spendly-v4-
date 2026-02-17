@@ -143,15 +143,9 @@ export default function Settings() {
     queryKey: ["/api/payment/keys"],
   });
 
-  // Fetch user-specific settings
+  // Fetch user-specific settings (uses default queryFn with auth headers)
   const { data: userSettings } = useQuery<UserSettings>({
-    queryKey: ["/api/user-settings", user?.id],
-    queryFn: async () => {
-      if (!user?.id) return null;
-      const res = await fetch(`/api/user-settings/${user.id}`);
-      if (!res.ok) return null;
-      return res.json();
-    },
+    queryKey: [`/api/user-settings/${user?.id}`],
     enabled: !!user?.id,
   });
 

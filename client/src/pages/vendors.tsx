@@ -31,7 +31,7 @@ export default function VendorsPage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [isAdding, setIsAdding] = useState(false);
+  const [vendorForm, setVendorForm] = useState({ name: "", email: "", phone: "", address: "", category: "", paymentTerms: "net30" });
 
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
@@ -49,14 +49,12 @@ export default function VendorsPage() {
 
   const createVendorMutation = useMutation({
     mutationFn: async (vendorData: { name: string; email: string; phone: string; address: string; category: string }) => {
-      return apiRequest("/api/vendors", {
-        method: "POST",
-        body: JSON.stringify(vendorData)
-      });
+      return apiRequest("POST", "/api/vendors", vendorData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/vendors"] });
       setIsAddOpen(false);
+      setVendorForm({ name: "", email: "", phone: "", address: "", category: "", paymentTerms: "net30" });
       toast({
         title: "Vendor added",
         description: "The vendor has been added successfully."
@@ -73,25 +71,26 @@ export default function VendorsPage() {
 
   const totalVendors = vendors.length;
   const activeVendors = vendors.filter(v => v.status === "active").length;
-  const totalPending = vendors.reduce((sum, v) => sum + v.pendingPayments, 0);
-  const totalPaidThisMonth = vendors.reduce((sum, v) => sum + v.totalPaid, 0);
+  const totalPending = vendors.reduce((sum, v) => sum + parseFloat(String(v.pendingPayments) || "0"), 0);
+  const totalPaidThisMonth = vendors.reduce((sum, v) => sum + parseFloat(String(v.totalPaid) || "0"), 0);
 
   const filteredVendors = vendors.filter(vendor =>
     vendor.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     vendor.category.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleAddVendor = async () => {
-    setIsAdding(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    toast({
-      title: "Vendor added",
-      description: "New vendor has been added successfully."
+  const handleAddVendor = () => {
+    if (!vendorForm.name || !vendorForm.email) {
+      toast({ title: "Name and email are required", variant: "destructive" });
+      return;
+    }
+    createVendorMutation.mutate({
+      name: vendorForm.name,
+      email: vendorForm.email,
+      phone: vendorForm.phone,
+      address: vendorForm.address,
+      category: vendorForm.category || "Other",
     });
-    
-    setIsAdding(false);
-    setIsAddOpen(false);
   };
 
   const handlePayVendor = (vendor: Vendor) => {
@@ -153,25 +152,25 @@ export default function VendorsPage() {
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
                   <Label className="text-slate-700 dark:text-slate-300">Vendor Name</Label>
-                  <Input placeholder="e.g., Amazon Web Services" data-testid="input-vendor-name" className="border-slate-200 dark:border-slate-700" />
+                  <Input placeholder="e.g., Amazon Web Services" data-testid="input-vendor-name" className="border-slate-200 dark:border-slate-700" value={vendorForm.name} onChange={(e) => setVendorForm({ ...vendorForm, name: e.target.value })} />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label className="text-slate-700 dark:text-slate-300">Email</Label>
-                    <Input type="email" placeholder="billing@vendor.com" className="border-slate-200 dark:border-slate-700" />
+                    <Input type="email" placeholder="billing@vendor.com" className="border-slate-200 dark:border-slate-700" value={vendorForm.email} onChange={(e) => setVendorForm({ ...vendorForm, email: e.target.value })} />
                   </div>
                   <div className="space-y-2">
                     <Label className="text-slate-700 dark:text-slate-300">Phone</Label>
-                    <Input type="tel" placeholder="+1 (555) 123-4567" className="border-slate-200 dark:border-slate-700" />
+                    <Input type="tel" placeholder="+1 (555) 123-4567" className="border-slate-200 dark:border-slate-700" value={vendorForm.phone} onChange={(e) => setVendorForm({ ...vendorForm, phone: e.target.value })} />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label className="text-slate-700 dark:text-slate-300">Address</Label>
-                  <Input placeholder="City, State, Country" className="border-slate-200 dark:border-slate-700" />
+                  <Input placeholder="City, State, Country" className="border-slate-200 dark:border-slate-700" value={vendorForm.address} onChange={(e) => setVendorForm({ ...vendorForm, address: e.target.value })} />
                 </div>
                 <div className="space-y-2">
                   <Label className="text-slate-700 dark:text-slate-300">Category</Label>
-                  <Select>
+                  <Select value={vendorForm.category} onValueChange={(value) => setVendorForm({ ...vendorForm, category: value })}>
                     <SelectTrigger className="border-slate-200 dark:border-slate-700">
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
@@ -188,7 +187,7 @@ export default function VendorsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label className="text-slate-700 dark:text-slate-300">Payment Terms</Label>
-                  <Select defaultValue="net30">
+                  <Select value={vendorForm.paymentTerms} onValueChange={(value) => setVendorForm({ ...vendorForm, paymentTerms: value })}>
                     <SelectTrigger className="border-slate-200 dark:border-slate-700">
                       <SelectValue />
                     </SelectTrigger>
@@ -205,8 +204,8 @@ export default function VendorsPage() {
                 <Button variant="outline" onClick={() => setIsAddOpen(false)} className="border-slate-200 dark:border-slate-700">
                   Cancel
                 </Button>
-                <Button onClick={handleAddVendor} disabled={isAdding} data-testid="button-save-vendor" className="bg-violet-600 hover:bg-violet-700">
-                  {isAdding ? (
+                <Button onClick={handleAddVendor} disabled={createVendorMutation.isPending} data-testid="button-save-vendor" className="bg-violet-600 hover:bg-violet-700">
+                  {createVendorMutation.isPending ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Adding...
@@ -246,7 +245,7 @@ export default function VendorsPage() {
           />
           <MetricCard
             title="Total Paid"
-            value={`${currencySymbol}${(totalPaidThisMonth / 1000).toFixed(1)}K`}
+            value={formatCurrency(totalPaidThisMonth)}
             icon={TrendingUp}
             color="cyan"
           />
@@ -417,7 +416,7 @@ function VendorCard({
                 </p>
               </div>
             </div>
-            <StatusBadge variant={getStatusVariant(vendor.status)} className="ml-2 flex-shrink-0">
+            <StatusBadge status={vendor.status} variant={getStatusVariant(vendor.status)} className="ml-2 flex-shrink-0">
               {vendor.status === "active"
                 ? "Active"
                 : vendor.status === "pending"
@@ -452,7 +451,7 @@ function VendorCard({
               </p>
               <p
                 className={`font-semibold text-sm mt-1 ${
-                  vendor.pendingPayments > 0
+                  parseFloat(String(vendor.pendingPayments)) > 0
                     ? "text-amber-600 dark:text-amber-400"
                     : "text-slate-900 dark:text-slate-100"
                 }`}
@@ -462,7 +461,7 @@ function VendorCard({
             </div>
           </div>
 
-          {vendor.pendingPayments > 0 && !isInactive && (
+          {parseFloat(String(vendor.pendingPayments)) > 0 && !isInactive && (
             <Button
               className="w-full mt-4 bg-violet-600 hover:bg-violet-700 text-white"
               onClick={() => onPay(vendor)}
