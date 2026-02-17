@@ -3,8 +3,8 @@ import express from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { z } from "zod";
-import { paymentService, REGION_CONFIGS, getRegionConfig, getCurrencyForCountry } from "./paymentService";
-import { getStripePublishableKey } from "./stripeClient";
+import { paymentService, REGION_CONFIGS, getRegionConfig, getCurrencyForCountry, getPaymentProvider } from "./paymentService";
+import { getStripeClient, getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
 import { getPaystackPublicKey, paystackClient } from "./paystackClient";
 import { notificationService } from "./services/notification-service";
 import multer from "multer";
@@ -17,6 +17,8 @@ import {
   emailLimiter
 } from "./middleware/rateLimiter";
 import { requireAuth, requireAdmin } from "./middleware/auth";
+import { verifyPaystackSignature, PaystackWebhookHandler } from './paystackWebhook';
+import { mapPaymentError, Money, paymentLogger } from './utils/paymentUtils';
 
 const uploadDir = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -112,6 +114,70 @@ async function getAuditUserName(req: any): Promise<string> {
   }
 }
 
+// Enhanced audit logging helper for approval workflows
+async function logAudit(
+  entityType: string,
+  entityId: string,
+  action: string,
+  userId: string,
+  userName: string,
+  previousState?: any,
+  newState?: any,
+  metadata?: any,
+  ipAddress?: string
+) {
+  try {
+    await storage.createAuditLog({
+      entityType,
+      entityId,
+      action,
+      userId,
+      userName,
+      details: {
+        previousState,
+        newState,
+        metadata,
+        ipAddress,
+      },
+      ipAddress,
+      createdAt: new Date().toISOString(),
+    } as any);
+  } catch (err) {
+    console.error('[AUDIT] Failed to log:', err);
+  }
+}
+
+// Resolve the user's active company from their Firebase UID
+async function resolveUserCompany(req: any): Promise<{ companyId: string; role: string } | null> {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return null;
+
+    // Check X-Company-Id header for multi-company users
+    const headerCompanyId = req.headers['x-company-id'] as string;
+
+    const userCompanies = await storage.getUserCompanies(uid);
+    if (userCompanies.length === 0) return null;
+
+    // If header specifies company, validate user is a member
+    if (headerCompanyId) {
+      const match = userCompanies.find(c => c.companyId === headerCompanyId);
+      if (match) return { companyId: match.companyId, role: match.role };
+    }
+
+    // Default to first (or only) company
+    return { companyId: userCompanies[0].companyId, role: userCompanies[0].role };
+  } catch {
+    return null;
+  }
+}
+
+// Middleware to verify entity belongs to user's company
+async function verifyCompanyAccess(entityCompanyId: string | null | undefined, userCompanyId: string): Promise<boolean> {
+  if (!entityCompanyId) return true; // Legacy data without company assignment
+  return entityCompanyId === userCompanyId;
+}
+
 const expenseSchema = z.object({
   merchant: z.string().min(1),
   amount: z.union([z.string(), z.number()]).transform(val => String(val)),
@@ -161,8 +227,11 @@ const budgetSchema = z.object({
 });
 
 const cardSchema = z.object({
-  name: z.string().min(1),
-  limit: z.union([z.string(), z.number()]).transform(val => String(val)),
+  name: z.string().min(2, "Card name must be at least 2 characters").max(50),
+  limit: z.preprocess(
+    (val) => (typeof val === 'string' ? parseFloat(val) : val),
+    z.number().positive("Spending limit must be greater than 0").max(1000000, "Spending limit too high")
+  ).optional(),
   type: z.string().optional().default('Visa'),
   color: z.string().optional().default('indigo'),
   currency: z.string().optional().default('USD'),
@@ -203,18 +272,37 @@ const payrollSchema = z.object({
 
 const invoiceSchema = z.object({
   client: z.string().min(1),
-  clientEmail: z.string().optional().default(''),
+  clientEmail: z.string().email("Invalid email address").optional().or(z.literal('')),
   amount: z.union([z.string(), z.number()]).transform(val => String(val)),
   dueDate: z.string().optional(),
-  items: z.array(z.any()).optional().default([]),
+  items: z.array(z.object({
+    description: z.string().optional(),
+    quantity: z.union([z.string(), z.number()]).optional(),
+    price: z.union([z.string(), z.number()]).optional(),
+    amount: z.union([z.string(), z.number()]).optional(),
+  })).optional().default([]),
 });
 
 const vendorSchema = z.object({
-  name: z.string().min(1),
-  email: z.string().optional().default(''),
-  phone: z.string().optional().default(''),
+  name: z.string().min(2, "Vendor name must be at least 2 characters"),
+  email: z.string().email("Invalid email address").optional().or(z.literal('')),
+  phone: z.string().regex(/^[+]?[(]?[0-9]{1,4}[)]?[-\s.]?[(]?[0-9]{1,4}[)]?[-\s.]?[0-9]{1,9}$/, "Invalid phone number format").optional().or(z.literal('')),
   address: z.string().optional().default(''),
   category: z.string().optional().default('Other'),
+});
+
+const fundingSourceSchema = z.object({
+  type: z.enum(['bank_account', 'card', 'mobile_money']).default('bank_account'),
+  provider: z.string().min(1),
+  bankName: z.string().optional(),
+  accountNumber: z.string().optional(),
+  accountName: z.string().optional(),
+  routingNumber: z.string().optional(),
+  currency: z.string().length(3).default('USD'),
+  country: z.string().length(2).default('US'),
+  isDefault: z.boolean().optional().default(false),
+  last4: z.string().max(4).optional(),
+  expiryDate: z.string().optional(),
 });
 
 const expenseUpdateSchema = expenseSchema.partial().extend({
@@ -255,7 +343,38 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  
+
+  // ==================== PAYSTACK WEBHOOK ====================
+  app.post("/api/paystack/webhook", express.raw({ type: 'application/json' }), async (req, res) => {
+    try {
+      const signature = req.headers['x-paystack-signature'] as string;
+      if (!signature) {
+        return res.status(401).json({ error: 'Missing signature' });
+      }
+
+      const payload = typeof req.body === 'string' ? req.body : req.body.toString('utf8');
+
+      if (!verifyPaystackSignature(payload, signature)) {
+        console.error('[WEBHOOK] Invalid Paystack signature');
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
+
+      const event = JSON.parse(payload);
+      console.log(JSON.stringify({ level: 'info', event: 'paystack_webhook_received', type: event.event, reference: event.data?.reference, timestamp: new Date().toISOString() }));
+
+      // Acknowledge immediately, process async
+      res.status(200).json({ received: true });
+
+      // Process event asynchronously
+      PaystackWebhookHandler.processEvent(event).catch(err => {
+        console.error(JSON.stringify({ level: 'error', event: 'paystack_webhook_processing_failed', type: event.event, error: err.message, timestamp: new Date().toISOString() }));
+      });
+    } catch (error: any) {
+      console.error('[WEBHOOK] Paystack webhook error:', error.message);
+      res.status(400).json({ error: 'Webhook processing failed' });
+    }
+  });
+
   // ==================== BALANCES ====================
   app.get("/api/balances", async (req, res) => {
     try {
@@ -266,7 +385,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/balances", async (req, res) => {
+  app.patch("/api/balances", requireAuth, requireAdmin, async (req, res) => {
     try {
       const balances = await storage.updateBalances(req.body);
       res.json(balances);
@@ -275,7 +394,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/balances/fund", async (req, res) => {
+  app.post("/api/balances/fund", requireAuth, async (req, res) => {
     try {
       const { amount } = req.body;
       const parsedAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
@@ -321,7 +440,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/balances/withdraw", async (req, res) => {
+  app.post("/api/balances/withdraw", requireAuth, async (req, res) => {
     try {
       const { amount } = req.body;
       const parsedAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
@@ -412,20 +531,25 @@ export async function registerRoutes(
   });
 
   // ==================== EXPENSES ====================
-  app.get("/api/expenses", async (req, res) => {
+  app.get("/api/expenses", requireAuth, async (req, res) => {
     try {
-      const expenses = await storage.getExpenses();
+      const company = await resolveUserCompany(req);
+      const expenses = await storage.getExpenses(company?.companyId);
       res.json(expenses);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch expenses" });
     }
   });
 
-  app.get("/api/expenses/:id", async (req, res) => {
+  app.get("/api/expenses/:id", requireAuth, async (req, res) => {
     try {
+      const company = await resolveUserCompany(req);
       const expense = await storage.getExpense(req.params.id);
       if (!expense) {
         return res.status(404).json({ error: "Expense not found" });
+      }
+      if (company && !await verifyCompanyAccess(expense.companyId, company.companyId)) {
+        return res.status(403).json({ error: "Access denied" });
       }
       res.json(expense);
     } catch (error) {
@@ -435,7 +559,7 @@ export async function registerRoutes(
 
   app.use('/uploads', (await import('express')).default.static(uploadDir));
 
-  app.post("/api/upload/receipt", upload.single('receipt'), async (req, res) => {
+  app.post("/api/upload/receipt", requireAuth, upload.single('receipt'), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
@@ -447,8 +571,9 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/expenses", async (req, res) => {
+  app.post("/api/expenses", requireAuth, async (req, res) => {
     try {
+      const company = await resolveUserCompany(req);
       const result = expenseSchema.safeParse(req.body);
       if (!result.success) {
         return res.status(400).json({ error: "Invalid expense data", details: result.error.issues });
@@ -460,11 +585,11 @@ export async function registerRoutes(
       const currency = settings.currency || 'USD';
       const autoApproveThreshold = parseFloat(settings.autoApproveBelow?.toString() || '100');
       const expenseAmount = parseFloat(amount);
-      
+
       // Determine status based on expense type and auto-approval threshold
       let status = 'PENDING';
       let autoApproved = false;
-      
+
       if (expenseType === 'spent') {
         // Already spent - auto approve
         status = 'APPROVED';
@@ -490,6 +615,7 @@ export async function registerRoutes(
         expenseType: expenseType || 'request',
         attachments: attachments || [],
         taggedReviewers: taggedReviewers || [],
+        companyId: company?.companyId,
       });
 
       // Notify the submitter
@@ -548,7 +674,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/expenses/:id", async (req, res) => {
+  app.patch("/api/expenses/:id", requireAuth, async (req, res) => {
     try {
       const result = expenseUpdateSchema.safeParse(req.body);
       if (!result.success) {
@@ -587,7 +713,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/expenses/:id", async (req, res) => {
+  app.delete("/api/expenses/:id", requireAuth, async (req, res) => {
     try {
       const deleted = await storage.deleteExpense(req.params.id);
       if (!deleted) {
@@ -674,20 +800,25 @@ export async function registerRoutes(
   });
 
   // ==================== BILLS ====================
-  app.get("/api/bills", async (req, res) => {
+  app.get("/api/bills", requireAuth, async (req, res) => {
     try {
-      const bills = await storage.getBills();
+      const company = await resolveUserCompany(req);
+      const bills = await storage.getBills(company?.companyId);
       res.json(bills);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch bills" });
     }
   });
 
-  app.get("/api/bills/:id", async (req, res) => {
+  app.get("/api/bills/:id", requireAuth, async (req, res) => {
     try {
+      const company = await resolveUserCompany(req);
       const bill = await storage.getBill(req.params.id);
       if (!bill) {
         return res.status(404).json({ error: "Bill not found" });
+      }
+      if (company && !await verifyCompanyAccess(bill.companyId, company.companyId)) {
+        return res.status(403).json({ error: "Access denied" });
       }
       res.json(bill);
     } catch (error) {
@@ -695,8 +826,9 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/bills", async (req, res) => {
+  app.post("/api/bills", requireAuth, async (req, res) => {
     try {
+      const company = await resolveUserCompany(req);
       const result = billSchema.safeParse(req.body);
       if (!result.success) {
         return res.status(400).json({ error: "Invalid bill data", details: result.error.issues });
@@ -717,6 +849,7 @@ export async function registerRoutes(
         frequency: frequency || 'monthly',
         createdAt: new Date(),
         updatedAt: new Date(),
+        companyId: company?.companyId,
       });
       
       res.status(201).json(bill);
@@ -725,7 +858,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/bills/:id", async (req, res) => {
+  app.patch("/api/bills/:id", requireAuth, async (req, res) => {
     try {
       const result = billUpdateSchema.safeParse(req.body);
       if (!result.success) {
@@ -759,7 +892,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/bills/:id", async (req, res) => {
+  app.delete("/api/bills/:id", requireAuth, async (req, res) => {
     try {
       const deleted = await storage.deleteBill(req.params.id);
       if (!deleted) {
@@ -771,21 +904,103 @@ export async function registerRoutes(
     }
   });
 
-  // ==================== BUDGETS ====================
-  app.get("/api/budgets", async (req, res) => {
+  // ==================== BILL APPROVAL WORKFLOW ====================
+
+  const billApprovalSchema = z.object({
+    approvedBy: z.string().optional(),
+    reason: z.string().optional(),
+  });
+
+  app.post("/api/bills/:id/approve", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const budgets = await storage.getBudgets();
+      const company = await resolveUserCompany(req);
+      const bill = await storage.getBill(req.params.id);
+      if (!bill) {
+        return res.status(404).json({ error: "Bill not found" });
+      }
+      if (company && !await verifyCompanyAccess(bill.companyId, company.companyId)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      if (bill.status !== 'Pending' && bill.status !== 'Overdue') {
+        return res.status(400).json({ error: "Bill is not in a state that can be approved" });
+      }
+
+      const userId = (req as any).user?.uid || 'system';
+      const userName = await getAuditUserName(req);
+
+      const updatedBill = await storage.updateBill(bill.id, {
+        status: 'Approved',
+      });
+
+      await logAudit('bill', bill.id, 'approved', userId, userName,
+        { status: bill.status },
+        { status: 'Approved' },
+        { approvedBy: userId, billName: bill.name, amount: bill.amount }
+      );
+
+      res.json(updatedBill);
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to approve bill" });
+    }
+  });
+
+  app.post("/api/bills/:id/reject", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const company = await resolveUserCompany(req);
+      const { reason } = req.body;
+
+      const bill = await storage.getBill(req.params.id);
+      if (!bill) {
+        return res.status(404).json({ error: "Bill not found" });
+      }
+      if (company && !await verifyCompanyAccess(bill.companyId, company.companyId)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      if (bill.status !== 'Pending') {
+        return res.status(400).json({ error: "Only pending bills can be rejected" });
+      }
+
+      const userId = (req as any).user?.uid || 'system';
+      const userName = await getAuditUserName(req);
+
+      const updatedBill = await storage.updateBill(bill.id, {
+        status: 'Rejected',
+      });
+
+      await logAudit('bill', bill.id, 'rejected', userId, userName,
+        { status: bill.status },
+        { status: 'Rejected' },
+        { reason: reason || 'No reason', rejectedBy: userId }
+      );
+
+      res.json(updatedBill);
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to reject bill" });
+    }
+  });
+
+  // ==================== BUDGETS ====================
+  app.get("/api/budgets", requireAuth, async (req, res) => {
+    try {
+      const company = await resolveUserCompany(req);
+      const budgets = await storage.getBudgets(company?.companyId);
       res.json(budgets);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch budgets" });
     }
   });
 
-  app.get("/api/budgets/:id", async (req, res) => {
+  app.get("/api/budgets/:id", requireAuth, async (req, res) => {
     try {
+      const company = await resolveUserCompany(req);
       const budget = await storage.getBudget(req.params.id);
       if (!budget) {
         return res.status(404).json({ error: "Budget not found" });
+      }
+      if (company && !await verifyCompanyAccess(budget.companyId, company.companyId)) {
+        return res.status(403).json({ error: "Access denied" });
       }
       res.json(budget);
     } catch (error) {
@@ -793,8 +1008,9 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/budgets", async (req, res) => {
+  app.post("/api/budgets", requireAuth, async (req, res) => {
     try {
+      const company = await resolveUserCompany(req);
       const result = budgetSchema.safeParse(req.body);
       if (!result.success) {
         return res.status(400).json({ error: "Invalid budget data", details: result.error.issues });
@@ -808,6 +1024,7 @@ export async function registerRoutes(
         spent: '0',
         currency: 'USD',
         period: (period || 'monthly') as any,
+        companyId: company?.companyId,
       });
       
       res.status(201).json(budget);
@@ -845,20 +1062,25 @@ export async function registerRoutes(
   });
 
   // ==================== CARDS ====================
-  app.get("/api/cards", async (req, res) => {
+  app.get("/api/cards", requireAuth, async (req, res) => {
     try {
-      const cards = await storage.getCards();
+      const company = await resolveUserCompany(req);
+      const cards = await storage.getCards(company?.companyId);
       res.json(cards);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch cards" });
     }
   });
 
-  app.get("/api/cards/:id", async (req, res) => {
+  app.get("/api/cards/:id", requireAuth, async (req, res) => {
     try {
+      const company = await resolveUserCompany(req);
       const card = await storage.getCard(req.params.id);
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
+      }
+      if (company && !await verifyCompanyAccess(card.companyId, company.companyId)) {
+        return res.status(403).json({ error: "Access denied" });
       }
       res.json(card);
     } catch (error) {
@@ -868,33 +1090,98 @@ export async function registerRoutes(
 
   app.post("/api/cards", requireAuth, async (req, res) => {
     try {
+      const company = await resolveUserCompany(req);
       const result = cardSchema.safeParse(req.body);
       if (!result.success) {
         return res.status(400).json({ error: "Invalid card data", details: result.error.issues });
       }
       const { name, limit, type, color, currency: cardCurrency } = result.data;
 
-      const last4 = String(Math.floor(1000 + Math.random() * 9000));
       const selectedCurrency = cardCurrency || 'USD';
-      
+
       // Determine provider based on currency
       const isLocalCurrency = ['NGN', 'GHS', 'KES', 'ZAR', 'EGP', 'RWF', 'XOF'].includes(selectedCurrency);
       const provider = isLocalCurrency ? 'paystack' : 'stripe';
-      
+
       // For Stripe currencies, cards are Visa; for Paystack, use Mastercard
       const cardType = isLocalCurrency ? 'Mastercard' : (type || 'Visa');
-      
+
+      let last4 = String(Math.floor(1000 + Math.random() * 9000));
+      let stripeCardId: string | undefined;
+      let stripeCardholderId: string | undefined;
+
+      // For Stripe provider, create real Stripe Issuing card
+      if (provider === 'stripe') {
+        try {
+          const user = req.user as any;
+          const userId = user?.uid || user?.id;
+
+          // Get full user profile for billing address (Firebase token doesn't have address)
+          const userProfile = userId ? await storage.getUserProfile(userId) : null;
+          const kycData = userId ? await storage.getKycSubmission(userId) : null;
+
+          if (!userProfile?.email) {
+            return res.status(400).json({ error: "Complete your profile before creating a card" });
+          }
+
+          // Billing address from KYC or profile - NEVER use fake defaults
+          const billingAddress = {
+            line1: (kycData as any)?.address || (userProfile as any)?.address || '',
+            city: (kycData as any)?.city || (userProfile as any)?.city || '',
+            state: (kycData as any)?.state || (userProfile as any)?.state || '',
+            postalCode: (kycData as any)?.postalCode || (userProfile as any)?.postalCode || '',
+            country: (kycData as any)?.country || (userProfile as any)?.country || 'US',
+          };
+
+          if (!billingAddress.line1 || !billingAddress.city || !billingAddress.postalCode) {
+            return res.status(400).json({
+              error: "Billing address required for card issuance. Please complete your address in settings.",
+              requiredFields: ['address', 'city', 'state', 'postalCode', 'country']
+            });
+          }
+
+          // Create cardholder with real profile data
+          const cardholder = await paymentService.createCardholder({
+            name: userProfile.displayName || user.email || 'Cardholder',
+            email: userProfile.email || user.email,
+            phoneNumber: (userProfile as any)?.phoneNumber || user.phoneNumber,
+            billingAddress,
+            type: 'individual',
+          });
+          stripeCardholderId = cardholder.id;
+
+          // Issue virtual card
+          const stripeCard = await paymentService.issueVirtualCard({
+            cardholderId: cardholder.id,
+            currency: selectedCurrency,
+            spendingLimit: limit || undefined,
+            spendingLimitInterval: 'monthly',
+          });
+
+          stripeCardId = stripeCard.id;
+          last4 = stripeCard.last4 || last4;
+          paymentLogger.info('stripe_card_created', { cardId: stripeCardId, cardholderId: stripeCardholderId });
+        } catch (stripeError: any) {
+          const mapped = mapPaymentError(stripeError, 'stripe');
+          paymentLogger.error('stripe_card_creation_failed', { error: stripeError.message, userId: (req.user as any).id });
+          return res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
+        }
+      }
+
       const card = await storage.createCard({
         name,
         last4,
-        balance: 0, // Start with 0, needs to be funded from wallet
+        balance: 0,
         limit: limit || 0,
         type: cardType as any,
         color: color || 'indigo',
         currency: selectedCurrency,
         status: 'Active',
-      });
-      
+        stripeCardId,
+        stripeCardholderId,
+        companyId: company?.companyId,
+      } as any);
+
       res.status(201).json({
         ...card,
         provider,
@@ -905,7 +1192,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/cards/:id", async (req, res) => {
+  app.patch("/api/cards/:id", requireAuth, async (req, res) => {
     try {
       const result = cardUpdateSchema.safeParse(req.body);
       if (!result.success) {
@@ -921,7 +1208,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/cards/:id", async (req, res) => {
+  app.delete("/api/cards/:id", requireAuth, async (req, res) => {
     try {
       const deleted = await storage.deleteCard(req.params.id);
       if (!deleted) {
@@ -1021,12 +1308,14 @@ export async function registerRoutes(
       });
 
       const currencySymbols: Record<string, string> = {
-        USD: '$', EUR: '€', GBP: '£', NGN: '₦', GHS: 'GH₵', KES: 'KSh', ZAR: 'R'
+        USD: '$', EUR: '€', GBP: '£', AUD: 'A$', CAD: 'CA$',
+        NGN: '₦', GHS: 'GH₵', KES: 'KSh', ZAR: 'R', EGP: 'E£', RWF: 'RF', XOF: 'CFA',
+        CHF: 'CHF', SEK: 'kr', NOK: 'kr', DKK: 'kr',
       };
       const cardSymbol = currencySymbols[cardCurrency] || cardCurrency;
       
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         card: updated,
         amountCredited: amountToCredit,
         amountDebited: amountToDeduct,
@@ -1035,12 +1324,13 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error('Card funding error:', error);
-      res.status(500).json({ error: error.message || "Failed to fund card" });
+      const mapped = mapPaymentError(error, 'card');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
   // Make a payment with virtual card
-  app.post("/api/cards/:id/pay", async (req, res) => {
+  app.post("/api/cards/:id/pay", requireAuth, async (req, res) => {
     try {
       const { amount, merchant, category, description } = req.body;
       if (!amount || amount <= 0) {
@@ -1112,7 +1402,7 @@ export async function registerRoutes(
   });
 
   // Get card transactions
-  app.get("/api/cards/:id/transactions", async (req, res) => {
+  app.get("/api/cards/:id/transactions", requireAuth, async (req, res) => {
     try {
       const card = await storage.getCard(req.params.id);
       if (!card) {
@@ -1127,9 +1417,10 @@ export async function registerRoutes(
   });
 
   // ==================== VIRTUAL ACCOUNTS ====================
-  app.get("/api/virtual-accounts", async (req, res) => {
+  app.get("/api/virtual-accounts", requireAuth, async (req, res) => {
     try {
-      const accounts = await storage.getVirtualAccounts();
+      const companyContext = await resolveUserCompany(req);
+      const accounts = await storage.getVirtualAccounts(companyContext?.companyId);
       res.json(accounts);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch virtual accounts" });
@@ -1138,40 +1429,141 @@ export async function registerRoutes(
 
   app.post("/api/virtual-accounts", requireAuth, async (req, res) => {
     try {
-      const { name, currency, type } = req.body;
+      const { name, currency, type, countryCode, email, firstName, lastName, phone, bvn } = req.body;
       const userId = (req as any).user?.uid || (req as any).user?.id;
-      
+
       if (!name) {
         return res.status(400).json({ error: "Account name is required" });
       }
-      
-      const accountNumber = `VA${Date.now()}${Math.floor(Math.random() * 1000)}`;
-      const bankCode = currency === 'NGN' ? 'PAYSTACK' : 'STRIPE';
-      
+
+      const effectiveCurrency = currency || 'USD';
+      const effectiveCountry = countryCode || (effectiveCurrency === 'NGN' ? 'NG' : 'US');
+      const provider = paymentService.getProvider ? paymentService.getProvider(effectiveCountry) : (
+        ['NG', 'GH', 'ZA', 'KE', 'EG', 'RW', 'CI'].includes(effectiveCountry.toUpperCase()) ? 'paystack' : 'stripe'
+      );
+
+      // Resolve company context
+      const companyContext = await resolveUserCompany(req);
+
+      let accountNumber = '';
+      let bankName = '';
+      let bankCode = '';
+      let accountName = '';
+      let providerAccountId = '';
+      let providerCustomerCode = '';
+      let status = 'pending';
+
+      if (provider === 'paystack') {
+        // --- PAYSTACK DVA (Dedicated Virtual Account) ---
+        // Requires user identity for BVN-based account assignment
+        const userProfile = userId ? await storage.getUserProfile(userId) : null;
+        const userEmail = email || (userProfile as any)?.email;
+        const userFirstName = firstName || (userProfile as any)?.firstName || name;
+        const userLastName = lastName || (userProfile as any)?.lastName || 'User';
+        const userPhone = phone || (userProfile as any)?.phoneNumber || '';
+
+        if (!userEmail) {
+          return res.status(400).json({
+            error: "Email is required for Paystack virtual accounts",
+            requiredFields: ['email', 'firstName', 'lastName'],
+          });
+        }
+
+        try {
+          const dvaResult = await paymentService.createVirtualAccount(
+            userEmail, userFirstName, userLastName, effectiveCountry, userPhone, bvn
+          );
+
+          accountNumber = dvaResult.accountNumber || '';
+          bankName = dvaResult.bankName || 'Wema Bank';
+          bankCode = dvaResult.bankCode || 'wema-bank';
+          accountName = dvaResult.accountName || `${userFirstName} ${userLastName}`;
+          providerCustomerCode = dvaResult.customerCode || '';
+          status = dvaResult.status === 'active' || dvaResult.status === 'assigned' ? 'active' : 'pending';
+
+          // If DVA pending validation, inform frontend
+          if ((dvaResult as any).message) {
+            console.log('DVA creation note:', (dvaResult as any).message);
+          }
+        } catch (dvaErr: any) {
+          console.error('Paystack DVA creation failed:', dvaErr.message);
+          return res.status(502).json({
+            error: "Failed to create virtual account with payment provider",
+            detail: dvaErr.message,
+          });
+        }
+      } else {
+        // --- STRIPE TREASURY (Financial Account) ---
+        try {
+          const treasuryResult = await paymentService.createStripeFinancialAccount({
+            supportedCurrencies: [effectiveCurrency],
+          });
+
+          providerAccountId = treasuryResult.id;
+
+          // Extract real ABA routing/account from financial_addresses
+          const abaAddress = (treasuryResult.financialAddresses || []).find(
+            (addr: any) => addr.type === 'aba' && addr.aba
+          );
+          if (abaAddress?.aba) {
+            accountNumber = abaAddress.aba.account_number || '';
+            bankCode = abaAddress.aba.routing_number || '';
+            bankName = 'Stripe Treasury';
+            accountName = name;
+          } else {
+            // Financial account created but ABA not yet provisioned
+            accountNumber = `pending_${treasuryResult.id}`;
+            bankName = 'Stripe Treasury';
+            bankCode = '';
+            accountName = name;
+          }
+
+          status = treasuryResult.status === 'open' ? 'active' : 'pending';
+        } catch (treasuryErr: any) {
+          console.error('Stripe Treasury creation failed:', treasuryErr.message);
+          return res.status(502).json({
+            error: "Failed to create virtual account with payment provider",
+            detail: treasuryErr.message,
+          });
+        }
+      }
+
+      // Persist in DB with real provider details
       const account = await storage.createVirtualAccount({
         userId: userId || null,
+        companyId: companyContext?.companyId || null,
         name,
         accountNumber,
-        bankName: bankCode === 'PAYSTACK' ? 'Wema Bank' : 'Stripe Treasury',
+        accountName,
+        bankName,
         bankCode,
-        currency: currency || 'USD',
+        currency: effectiveCurrency,
         balance: '0',
         type: type || 'collection',
-        status: 'active',
+        status,
+        provider,
+        providerAccountId: providerAccountId || null,
+        providerCustomerCode: providerCustomerCode || null,
         createdAt: new Date().toISOString(),
       });
-      
+
       res.status(201).json(account);
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Virtual account creation error:', error);
       res.status(500).json({ error: "Failed to create virtual account" });
     }
   });
 
-  app.get("/api/virtual-accounts/:id", async (req, res) => {
+  app.get("/api/virtual-accounts/:id", requireAuth, async (req, res) => {
     try {
       const account = await storage.getVirtualAccount(req.params.id);
       if (!account) {
         return res.status(404).json({ error: "Virtual account not found" });
+      }
+      // Verify company access
+      const companyContext = await resolveUserCompany(req);
+      if (companyContext && (account as any).companyId && (account as any).companyId !== companyContext.companyId) {
+        return res.status(403).json({ error: "Access denied" });
       }
       res.json(account);
     } catch (error) {
@@ -1179,116 +1571,269 @@ export async function registerRoutes(
     }
   });
 
-  // Transfer to virtual account
-  app.post("/api/virtual-accounts/:id/deposit", async (req, res) => {
+  // Fund virtual account via real payment provider
+  // For Paystack DVAs: Returns bank transfer instructions (user sends money to DVA number externally)
+  // For Stripe Treasury: Initiates an inbound transfer from a linked payment method
+  app.post("/api/virtual-accounts/:id/deposit", requireAuth, async (req, res) => {
     try {
-      const { amount, reference, source } = req.body;
+      const { amount, originPaymentMethod } = req.body;
       if (!amount || amount <= 0) {
         return res.status(400).json({ error: "Valid amount is required" });
       }
-      
+
       const account = await storage.getVirtualAccount(req.params.id);
       if (!account) {
         return res.status(404).json({ error: "Virtual account not found" });
       }
-      
-      const currentBalance = parseFloat(String(account.balance || 0));
-      const newBalance = currentBalance + amount;
-      await storage.updateVirtualAccount(req.params.id, { balance: String(newBalance) });
-      
-      // Create transaction record
-      await storage.createTransaction({
-        description: `Deposit to ${account.name} (${account.accountNumber})`,
-        amount: String(amount),
-        fee: "0",
-        type: 'Deposit',
-        status: 'Completed',
-        date: new Date().toISOString().split('T')[0],
-        currency: 'USD',
-      });
-      
-      // Send transaction notification if user has phone
-      if (account.userId) {
-        const profile = await storage.getUserProfile(account.userId);
-        const settings = await storage.getNotificationSettings(account.userId);
-        if (profile?.phoneNumber && settings?.paymentNotifications) {
-          notificationService.sendTransactionAlertSms({
-            phone: profile.phoneNumber,
-            type: 'credit',
+
+      // Verify user owns this account
+      const userId = (req as any).user?.uid || (req as any).user?.id;
+      if (account.userId && account.userId !== userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const accountProvider = (account as any).provider ||
+        (['NGN', 'GHS', 'ZAR', 'KES', 'EGP', 'RWF', 'XOF'].includes(account.currency) ? 'paystack' : 'stripe');
+
+      if (accountProvider === 'paystack') {
+        // Paystack DVAs receive deposits automatically via bank transfer
+        // The charge.success webhook credits the wallet when funds arrive
+        // Return the bank details for the user to initiate a transfer
+        res.json({
+          success: true,
+          method: 'bank_transfer',
+          instructions: {
+            bankName: account.bankName,
+            accountNumber: account.accountNumber,
+            accountName: (account as any).accountName || account.name,
+            currency: account.currency,
+            message: `Transfer ${account.currency} ${amount.toLocaleString()} to the account above. Funds will be credited automatically when received.`,
+          },
+        });
+      } else {
+        // Stripe Treasury: Initiate inbound transfer from linked payment method
+        const providerAcctId = (account as any).providerAccountId;
+        if (!providerAcctId || providerAcctId.startsWith('pending_')) {
+          return res.status(400).json({
+            error: "Treasury account not yet fully provisioned. Please wait for account activation.",
+          });
+        }
+
+        if (!originPaymentMethod) {
+          return res.status(400).json({
+            error: "originPaymentMethod is required for Stripe Treasury deposits",
+            hint: "Link a bank account first via Stripe Financial Connections",
+          });
+        }
+
+        try {
+          const transfer = await paymentService.createInboundTransfer({
+            financialAccountId: providerAcctId,
             amount,
-            currency: 'USD',
+            currency: account.currency,
+            originPaymentMethod,
             description: `Deposit to ${account.name}`,
-            balance: newBalance,
-          }).catch(err => console.error('Transaction SMS failed:', err));
+          });
+
+          // Create pending transaction record (webhook will mark Completed)
+          await storage.createTransaction({
+            description: `Deposit to ${account.name} (${account.accountNumber})`,
+            amount: String(amount),
+            fee: "0",
+            type: 'Deposit',
+            status: 'Pending',
+            date: new Date().toISOString().split('T')[0],
+            currency: account.currency,
+            reference: transfer.id,
+          });
+
+          res.json({
+            success: true,
+            method: 'inbound_transfer',
+            transferId: transfer.id,
+            status: transfer.status,
+            message: `Inbound transfer of ${account.currency} ${amount.toLocaleString()} initiated. Funds typically arrive in 1-3 business days.`,
+          });
+        } catch (transferErr: any) {
+          console.error('Stripe inbound transfer failed:', transferErr.message);
+          res.status(502).json({ error: "Failed to initiate deposit", detail: transferErr.message });
         }
       }
-      
-      res.json({ 
-        success: true, 
-        newBalance,
-        message: `$${amount.toLocaleString()} deposited`
-      });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to deposit" });
+    } catch (error: any) {
+      console.error('Virtual account deposit error:', error);
+      res.status(500).json({ error: "Failed to process deposit" });
     }
   });
 
-  // Withdraw from virtual account
-  app.post("/api/virtual-accounts/:id/withdraw", async (req, res) => {
+  // Withdraw from virtual account — initiates real payout via provider
+  app.post("/api/virtual-accounts/:id/withdraw", requireAuth, async (req, res) => {
     try {
-      const { amount, destination, reference } = req.body;
+      const { amount, destination, reason } = req.body;
       if (!amount || amount <= 0) {
         return res.status(400).json({ error: "Valid amount is required" });
       }
-      
+
       const account = await storage.getVirtualAccount(req.params.id);
       if (!account) {
         return res.status(404).json({ error: "Virtual account not found" });
       }
-      
-      const accountBalance = parseFloat(account.balance);
+
+      // Verify user owns this account
+      const userId = (req as any).user?.uid || (req as any).user?.id;
+      if (account.userId && account.userId !== userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const accountBalance = parseFloat(String(account.balance || '0'));
       if (accountBalance < amount) {
         return res.status(400).json({ error: "Insufficient balance" });
       }
-      
-      // Update balance
-      const newBalance = accountBalance - amount;
-      await storage.updateVirtualAccount(req.params.id, { balance: String(newBalance) });
-      
-      // Create transaction record
-      await storage.createTransaction({
-        description: `Withdrawal from ${account.name} (${account.accountNumber})`,
-        amount: String(amount),
-        fee: "0",
-        type: 'Payout',
-        status: 'Completed',
-        date: new Date().toISOString().split('T')[0],
-        currency: 'USD',
-      });
-      
-      // Send transaction notification if user has phone
-      if (account.userId) {
-        const profile = await storage.getUserProfile(account.userId);
-        const settings = await storage.getNotificationSettings(account.userId);
-        if (profile?.phoneNumber && settings?.paymentNotifications) {
-          notificationService.sendTransactionAlertSms({
-            phone: profile.phoneNumber,
-            type: 'debit',
+
+      const accountProvider = (account as any).provider ||
+        (['NGN', 'GHS', 'ZAR', 'KES', 'EGP', 'RWF', 'XOF'].includes(account.currency) ? 'paystack' : 'stripe');
+
+      if (accountProvider === 'paystack') {
+        // Paystack: Initiate transfer to destination bank account
+        if (!destination?.accountNumber || !destination?.bankCode) {
+          return res.status(400).json({
+            error: "Destination bank details required",
+            requiredFields: ['destination.accountNumber', 'destination.bankCode', 'destination.accountName'],
+          });
+        }
+
+        try {
+          // Create transfer recipient
+          const recipient = await paystackClient.createTransferRecipient(
+            destination.accountName || account.name,
+            destination.accountNumber,
+            destination.bankCode,
+            account.currency
+          );
+
+          const recipientCode = recipient.data?.recipient_code;
+          if (!recipientCode) {
+            throw new Error('Failed to create transfer recipient');
+          }
+
+          // Initiate transfer
+          const transfer = await paystackClient.initiateTransfer(
             amount,
-            currency: 'USD',
+            recipientCode,
+            reason || `Withdrawal from ${account.name}`
+          );
+
+          // Debit the virtual account balance optimistically
+          const newBalance = accountBalance - amount;
+          await storage.updateVirtualAccount(req.params.id, { balance: String(newBalance) } as any);
+
+          // Create pending transaction (webhook will update to Completed/Failed)
+          await storage.createTransaction({
+            description: `Withdrawal from ${account.name} to ${destination.accountNumber}`,
+            amount: String(amount),
+            fee: "0",
+            type: 'Payout',
+            status: 'Pending',
+            date: new Date().toISOString().split('T')[0],
+            currency: account.currency,
+            reference: transfer.data?.transfer_code || transfer.data?.reference,
+          });
+
+          // Send SMS notification
+          if (account.userId) {
+            const profile = await storage.getUserProfile(account.userId);
+            const settings = await storage.getNotificationSettings(account.userId);
+            if (profile?.phoneNumber && settings?.paymentNotifications) {
+              notificationService.sendTransactionAlertSms({
+                phone: profile.phoneNumber,
+                type: 'debit',
+                amount,
+                currency: account.currency,
+                description: `Withdrawal from ${account.name}`,
+                balance: newBalance,
+              }).catch(err => console.error('Transaction SMS failed:', err));
+            }
+          }
+
+          res.json({
+            success: true,
+            transferCode: transfer.data?.transfer_code,
+            status: 'Pending',
+            newBalance,
+            message: `${account.currency} ${amount.toLocaleString()} withdrawal initiated. Transfer is being processed.`,
+          });
+        } catch (transferErr: any) {
+          console.error('Paystack withdrawal failed:', transferErr.message);
+          res.status(502).json({ error: "Failed to initiate withdrawal", detail: transferErr.message });
+        }
+      } else {
+        // Stripe Treasury: Create outbound payment
+        const providerAcctId = (account as any).providerAccountId;
+        if (!providerAcctId || providerAcctId.startsWith('pending_')) {
+          return res.status(400).json({
+            error: "Treasury account not yet fully provisioned",
+          });
+        }
+
+        if (!destination?.accountNumber || !destination?.routingNumber) {
+          return res.status(400).json({
+            error: "Destination bank details required for withdrawal",
+            requiredFields: ['destination.accountNumber', 'destination.routingNumber', 'destination.accountName'],
+          });
+        }
+
+        try {
+          const stripe = await getUncachableStripeClient();
+
+          // Create outbound payment
+          const outboundPayment = await stripe.treasury.outboundPayments.create({
+            financial_account: providerAcctId,
+            amount: Math.round(amount * 100),
+            currency: account.currency.toLowerCase(),
+            destination_payment_method_data: {
+              type: 'us_bank_account',
+              us_bank_account: {
+                routing_number: destination.routingNumber,
+                account_number: destination.accountNumber,
+                account_holder_type: 'individual',
+              },
+              billing_details: {
+                name: destination.accountName || account.name,
+              },
+            },
+            description: reason || `Withdrawal from ${account.name}`,
+          });
+
+          // Debit balance optimistically (webhook confirms)
+          const newBalance = accountBalance - amount;
+          await storage.updateVirtualAccount(req.params.id, { balance: String(newBalance) } as any);
+
+          // Create pending transaction
+          await storage.createTransaction({
             description: `Withdrawal from ${account.name}`,
-            balance: newBalance,
-          }).catch(err => console.error('Transaction SMS failed:', err));
+            amount: String(amount),
+            fee: "0",
+            type: 'Payout',
+            status: 'Pending',
+            date: new Date().toISOString().split('T')[0],
+            currency: account.currency,
+            reference: outboundPayment.id,
+          });
+
+          res.json({
+            success: true,
+            paymentId: outboundPayment.id,
+            status: 'Pending',
+            newBalance,
+            message: `${account.currency} ${amount.toLocaleString()} withdrawal initiated via ACH. Typically arrives in 1-3 business days.`,
+          });
+        } catch (stripeErr: any) {
+          console.error('Stripe Treasury withdrawal failed:', stripeErr.message);
+          res.status(502).json({ error: "Failed to initiate withdrawal", detail: stripeErr.message });
         }
       }
-      
-      res.json({ 
-        success: true, 
-        newBalance,
-        message: `$${amount.toLocaleString()} withdrawn`
-      });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to withdraw" });
+    } catch (error: any) {
+      console.error('Virtual account withdrawal error:', error);
+      res.status(500).json({ error: "Failed to process withdrawal" });
     }
   });
 
@@ -1680,20 +2225,25 @@ export async function registerRoutes(
   });
 
   // ==================== TEAM ====================
-  app.get("/api/team", async (req, res) => {
+  app.get("/api/team", requireAuth, async (req, res) => {
     try {
-      const team = await storage.getTeam();
+      const company = await resolveUserCompany(req);
+      const team = await storage.getTeam(company?.companyId);
       res.json(team);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch team" });
     }
   });
 
-  app.get("/api/team/:id", async (req, res) => {
+  app.get("/api/team/:id", requireAuth, async (req, res) => {
     try {
+      const company = await resolveUserCompany(req);
       const member = await storage.getTeamMember(req.params.id);
       if (!member) {
         return res.status(404).json({ error: "Team member not found" });
+      }
+      if (company && !await verifyCompanyAccess(member.companyId, company.companyId)) {
+        return res.status(403).json({ error: "Access denied" });
       }
       res.json(member);
     } catch (error) {
@@ -1797,14 +2347,18 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/reports", async (req, res) => {
+  app.post("/api/reports", requireAuth, async (req, res) => {
     try {
       const { name, type, dateRange } = req.body;
       if (!name || !type || !dateRange) {
         return res.status(400).json({ error: "Name, type, and dateRange are required" });
       }
-      
+
+      const company = await resolveUserCompany(req);
+      const companyId = company?.companyId;
       const now = new Date();
+
+      // Create report entry in "processing" state
       const report = await storage.createReport({
         name,
         type,
@@ -1813,16 +2367,99 @@ export async function registerRoutes(
         status: "processing",
         fileSize: "--"
       });
-      
-      // Simulate report generation - mark as completed after short delay
-      setTimeout(async () => {
-        await storage.updateReportStatus(report.id, { 
-          status: "completed", 
-          fileSize: `${(Math.random() * 5 + 0.5).toFixed(1)} MB` 
+
+      // Actually generate the report data and calculate real file size
+      try {
+        const expenses = await storage.getExpenses(companyId);
+        const transactions = await storage.getTransactions();
+        const budgets = await storage.getBudgets(companyId);
+        const bills = await storage.getBills(companyId);
+        const payroll = await storage.getPayroll(companyId);
+
+        let reportData: any = { generatedAt: now.toISOString(), report: name, type, dateRange };
+        let recordCount = 0;
+
+        // Filter by date range
+        const [startDate, endDate] = dateRange.split(' - ').map((d: string) => d.trim());
+        const filterByDate = (items: any[], dateField: string = 'date') => {
+          if (!startDate || !endDate) return items;
+          return items.filter((item: any) => {
+            const itemDate = item[dateField] || item.createdAt || '';
+            return itemDate >= startDate && itemDate <= endDate;
+          });
+        };
+
+        if (type === "expense" || type === "Expense Summary") {
+          const filtered = filterByDate(expenses);
+          reportData.expenses = filtered;
+          reportData.totalAmount = filtered.reduce((sum: number, e: any) => sum + parseFloat(String(e.amount || 0)), 0);
+          reportData.count = filtered.length;
+          reportData.byCategory = filtered.reduce((acc: any, e: any) => {
+            const cat = e.category || 'Uncategorized';
+            acc[cat] = (acc[cat] || 0) + parseFloat(String(e.amount || 0));
+            return acc;
+          }, {});
+          reportData.byStatus = filtered.reduce((acc: any, e: any) => {
+            const status = e.status || 'Unknown';
+            acc[status] = (acc[status] || 0) + 1;
+            return acc;
+          }, {});
+          recordCount = filtered.length;
+        } else if (type === "budget" || type === "Budget Report") {
+          reportData.budgets = budgets;
+          reportData.totalBudget = budgets.reduce((sum: number, b: any) => sum + parseFloat(String(b.limit || 0)), 0);
+          reportData.totalSpent = budgets.reduce((sum: number, b: any) => sum + parseFloat(String(b.spent || 0)), 0);
+          reportData.utilization = reportData.totalBudget > 0 ?
+            Math.round((reportData.totalSpent / reportData.totalBudget) * 100) : 0;
+          recordCount = budgets.length;
+        } else if (type === "transaction" || type === "Transaction Report") {
+          const filtered = filterByDate(transactions);
+          reportData.transactions = filtered;
+          reportData.totalAmount = filtered.reduce((sum: number, t: any) => sum + parseFloat(String(t.amount || 0)), 0);
+          reportData.byType = filtered.reduce((acc: any, t: any) => {
+            const tp = t.type || 'Unknown';
+            acc[tp] = (acc[tp] || 0) + parseFloat(String(t.amount || 0));
+            return acc;
+          }, {});
+          recordCount = filtered.length;
+        } else if (type === "payroll" || type === "Payroll Report") {
+          const filtered = filterByDate(payroll, 'payDate');
+          reportData.payroll = filtered;
+          reportData.totalGross = filtered.reduce((sum: number, p: any) => sum + parseFloat(String(p.salary || p.grossSalary || 0)), 0);
+          reportData.totalDeductions = filtered.reduce((sum: number, p: any) => sum + parseFloat(String(p.deductions || 0)), 0);
+          reportData.totalNet = filtered.reduce((sum: number, p: any) => sum + parseFloat(String(p.netPay || 0)), 0);
+          reportData.employeeCount = filtered.length;
+          recordCount = filtered.length;
+        } else {
+          // Comprehensive report
+          reportData.expenses = filterByDate(expenses);
+          reportData.transactions = filterByDate(transactions);
+          reportData.budgets = budgets;
+          reportData.bills = filterByDate(bills, 'dueDate');
+          reportData.payroll = filterByDate(payroll, 'payDate');
+          recordCount = expenses.length + transactions.length + budgets.length;
+        }
+
+        // Calculate actual data size in bytes
+        const jsonStr = JSON.stringify(reportData);
+        const fileSizeBytes = Buffer.byteLength(jsonStr, 'utf8');
+        const fileSizeFormatted = fileSizeBytes > 1048576
+          ? `${(fileSizeBytes / 1048576).toFixed(1)} MB`
+          : `${(fileSizeBytes / 1024).toFixed(1)} KB`;
+
+        await storage.updateReportStatus(report.id, {
+          status: "completed",
+          fileSize: fileSizeFormatted,
         });
-      }, 3000);
-      
-      res.status(201).json(report);
+
+        // Return updated report
+        const updatedReport = { ...report, status: 'completed', fileSize: fileSizeFormatted, recordCount };
+        res.status(201).json(updatedReport);
+      } catch (genErr: any) {
+        console.error('Report generation error:', genErr);
+        await storage.updateReportStatus(report.id, { status: "failed", fileSize: "0" });
+        res.status(201).json({ ...report, status: 'failed' });
+      }
     } catch (error) {
       res.status(500).json({ error: "Failed to create report" });
     }
@@ -1883,20 +2520,25 @@ export async function registerRoutes(
   });
 
   // ==================== PAYROLL ====================
-  app.get("/api/payroll", async (req, res) => {
+  app.get("/api/payroll", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const payroll = await storage.getPayroll();
+      const company = await resolveUserCompany(req);
+      const payroll = await storage.getPayroll(company?.companyId);
       res.json(payroll);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch payroll" });
     }
   });
 
-  app.get("/api/payroll/:id", async (req, res) => {
+  app.get("/api/payroll/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
+      const company = await resolveUserCompany(req);
       const entry = await storage.getPayrollEntry(req.params.id);
       if (!entry) {
         return res.status(404).json({ error: "Payroll entry not found" });
+      }
+      if (company && !await verifyCompanyAccess(entry.companyId, company.companyId)) {
+        return res.status(403).json({ error: "Access denied" });
       }
       res.json(entry);
     } catch (error) {
@@ -1904,7 +2546,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/payroll", async (req, res) => {
+  app.post("/api/payroll", requireAuth, requireAdmin, async (req, res) => {
     try {
       const result = payrollSchema.safeParse(req.body);
       if (!result.success) {
@@ -1935,7 +2577,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/payroll/:id", async (req, res) => {
+  app.patch("/api/payroll/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
       const result = payrollUpdateSchema.safeParse(req.body);
       if (!result.success) {
@@ -1951,7 +2593,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/payroll/:id", async (req, res) => {
+  app.delete("/api/payroll/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
       const deleted = await storage.deletePayrollEntry(req.params.id);
       if (!deleted) {
@@ -1963,135 +2605,342 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/payroll/process", async (req, res) => {
+  app.post("/api/payroll/process", requireAuth, requireAdmin, async (req, res) => {
     try {
       const entries = await storage.getPayroll();
       const pendingEntries = entries.filter((e: any) => e.status === "pending");
-      
+
       if (pendingEntries.length === 0) {
         return res.status(400).json({ error: "No pending payroll entries to process" });
       }
 
-      const processedEntries = [];
-      for (const entry of pendingEntries) {
-        const updated = await storage.updatePayrollEntry(entry.id, { status: "paid" });
-        if (updated) {
-          processedEntries.push(updated);
-        }
-      }
-
-      const totalPaid = processedEntries.reduce((sum, e) => sum + parseFloat(String(e.netPay)), 0);
-      
-      await storage.createTransaction({
-        type: "Payout",
-        amount: String(totalPaid),
-        fee: "0",
-        status: 'Completed',
-        date: new Date().toISOString().split('T')[0],
-        description: `Payroll - ${processedEntries.length} employees`,
-        currency: 'USD',
-      });
-
-      // Send payslip emails to each employee
       const settings = await storage.getOrganizationSettings();
       const companyName = settings?.companyName || 'Spendly';
       const currency = settings?.currency || 'USD';
       const payPeriod = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      
-      for (const entry of processedEntries) {
-        if (entry.email) {
-          notificationService.sendPayslipEmail({
-            email: entry.email,
-            employeeName: entry.employeeName,
-            payPeriod,
-            grossSalary: parseFloat(String(entry.salary || entry.grossSalary || 0)),
-            deductions: parseFloat(String(entry.deductions || 0)),
-            netPay: parseFloat(String(entry.netPay)),
+
+      const results: Array<{ id: any; name: string; status: string; error?: string; reference?: string }> = [];
+      let totalInitiated = 0;
+      let totalFailed = 0;
+      let totalNoBanking = 0;
+
+      for (const entry of pendingEntries) {
+        const netPayAmount = parseFloat(String(entry.netPay || 0));
+        if (netPayAmount <= 0) {
+          results.push({ id: entry.id, name: entry.employeeName, status: 'skipped', error: 'Invalid net pay' });
+          continue;
+        }
+
+        // Get employee's payout destination
+        const destinations = await storage.getPayoutDestinations(entry.employeeId);
+        const defaultDest = destinations?.find((d: any) => d.isDefault) || destinations?.[0];
+
+        if (!defaultDest) {
+          // No banking details — skip but don't mark as paid
+          await storage.updatePayrollEntry(entry.id, { status: 'pending' } as any);
+          results.push({ id: entry.id, name: entry.employeeName, status: 'needs_banking_details' });
+          totalNoBanking++;
+          continue;
+        }
+
+        // Initiate real transfer
+        const countryCode = (defaultDest as any).countryCode || 'US';
+        const provider = getPaymentProvider(countryCode);
+        let reference = '';
+
+        try {
+          if (provider === 'paystack') {
+            const recipientResponse = await paystackClient.createTransferRecipient(
+              entry.employeeName,
+              (defaultDest as any).accountNumber,
+              (defaultDest as any).bankCode,
+              currency
+            );
+            const recipientCode = recipientResponse.data?.recipient_code;
+            if (!recipientCode) throw new Error('Failed to create transfer recipient');
+
+            const transferResponse = await paystackClient.initiateTransfer(
+              netPayAmount,
+              recipientCode,
+              `Salary - ${entry.employeeName} - ${payPeriod}`
+            );
+            reference = transferResponse.data?.transfer_code || transferResponse.data?.reference || '';
+          } else {
+            const stripe = getStripeClient();
+            const bankToken = await stripe.tokens.create({
+              bank_account: {
+                country: countryCode,
+                currency: currency.toLowerCase(),
+                account_holder_name: entry.employeeName,
+                account_holder_type: 'individual',
+                routing_number: (defaultDest as any).routingNumber || (defaultDest as any).sortCode || '',
+                account_number: (defaultDest as any).accountNumber,
+              } as any,
+            });
+
+            const payout = await stripe.payouts.create({
+              amount: Math.round(netPayAmount * 100),
+              currency: currency.toLowerCase(),
+              method: 'standard',
+              description: `Salary - ${entry.employeeName}`,
+              destination: bankToken.id,
+              metadata: { payrollId: String(entry.id), type: 'payroll' },
+            });
+            reference = payout.id;
+          }
+
+          // Mark as processing (webhook will confirm completion)
+          await storage.updatePayrollEntry(entry.id, { status: 'processing', payoutId: reference } as any);
+
+          // Create transaction
+          await storage.createTransaction({
+            type: "Payout",
+            amount: String(netPayAmount),
+            fee: "0",
+            status: 'Processing',
+            date: new Date().toISOString().split('T')[0],
+            description: `Salary payment - ${entry.employeeName}`,
             currency,
-            paymentDate: new Date().toLocaleDateString(),
-            companyName,
-          }).catch(err => console.error('Failed to send payslip:', err));
+            reference,
+          });
+
+          // Send payslip email
+          if (entry.email) {
+            notificationService.sendPayslipEmail({
+              email: entry.email,
+              employeeName: entry.employeeName,
+              payPeriod,
+              grossSalary: parseFloat(String(entry.salary || entry.grossSalary || 0)),
+              deductions: parseFloat(String(entry.deductions || 0)),
+              netPay: netPayAmount,
+              currency,
+              paymentDate: new Date().toLocaleDateString(),
+              companyName,
+            }).catch(err => console.error('Failed to send payslip:', err));
+          }
+
+          results.push({ id: entry.id, name: entry.employeeName, status: 'processing', reference });
+          totalInitiated++;
+        } catch (payErr: any) {
+          console.error(`Payroll payout failed for ${entry.employeeName}:`, payErr.message);
+          await storage.updatePayrollEntry(entry.id, { status: 'failed' } as any);
+          results.push({ id: entry.id, name: entry.employeeName, status: 'failed', error: payErr.message });
+          totalFailed++;
         }
       }
 
-      res.json({ 
-        message: "Payroll processed successfully",
-        processed: processedEntries.length,
-        totalPaid,
+      const totalPaid = results
+        .filter(r => r.status === 'processing')
+        .reduce((sum, r) => {
+          const entry = pendingEntries.find(e => e.id === r.id);
+          return sum + parseFloat(String(entry?.netPay || 0));
+        }, 0);
+
+      res.json({
+        message: `Payroll processing complete: ${totalInitiated} initiated, ${totalFailed} failed, ${totalNoBanking} need banking details`,
+        results,
+        summary: {
+          total: pendingEntries.length,
+          initiated: totalInitiated,
+          failed: totalFailed,
+          needsBankingDetails: totalNoBanking,
+          totalAmount: totalPaid,
+        },
       });
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Payroll process error:', error);
       res.status(500).json({ error: "Failed to process payroll" });
     }
   });
 
-  // Pay individual employee
-  app.post("/api/payroll/:id/pay", async (req, res) => {
+  // Pay individual employee — initiates REAL bank transfer via Stripe/Paystack
+  app.post("/api/payroll/:id/pay", requireAuth, requireAdmin, async (req, res) => {
     try {
       const entry = await storage.getPayrollEntry(req.params.id);
       if (!entry) {
         return res.status(404).json({ error: "Payroll entry not found" });
       }
-      
+
       if (entry.status !== "pending") {
         return res.status(400).json({ error: "Payroll entry is not pending" });
       }
 
-      const updated = await storage.updatePayrollEntry(req.params.id, { status: "paid" });
-      
+      const netPayAmount = parseFloat(String(entry.netPay || 0));
+      if (netPayAmount <= 0) {
+        return res.status(400).json({ error: "Invalid net pay amount" });
+      }
+
+      const settings = await storage.getOrganizationSettings();
+      const currency = settings?.currency || 'USD';
+      const companyName = settings?.companyName || 'Spendly';
+
+      // --- DETERMINE PAYOUT DESTINATION ---
+      // Check if employee has payout destinations configured
+      const destinations = await storage.getPayoutDestinations(entry.employeeId);
+      const defaultDest = destinations?.find((d: any) => d.isDefault) || destinations?.[0];
+
+      let providerResult: any = null;
+      let payoutStatus = 'processing';
+
+      if (defaultDest) {
+        // Employee has banking details — initiate real transfer
+        const countryCode = (defaultDest as any).countryCode || 'US';
+        const provider = getPaymentProvider(countryCode);
+
+        try {
+          if (provider === 'paystack') {
+            // Paystack transfer
+            const recipientResponse = await paystackClient.createTransferRecipient(
+              entry.employeeName,
+              (defaultDest as any).accountNumber,
+              (defaultDest as any).bankCode,
+              currency
+            );
+            const recipientCode = recipientResponse.data?.recipient_code;
+            if (!recipientCode) throw new Error('Failed to create transfer recipient');
+
+            const transferResponse = await paystackClient.initiateTransfer(
+              netPayAmount,
+              recipientCode,
+              `Salary payment - ${entry.employeeName} - ${new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`
+            );
+
+            providerResult = {
+              provider: 'paystack',
+              transferCode: transferResponse.data?.transfer_code,
+              reference: transferResponse.data?.reference,
+              status: transferResponse.data?.status || 'pending',
+            };
+          } else {
+            // Stripe payout
+            const stripe = getStripeClient();
+            const bankToken = await stripe.tokens.create({
+              bank_account: {
+                country: countryCode,
+                currency: currency.toLowerCase(),
+                account_holder_name: entry.employeeName,
+                account_holder_type: 'individual',
+                routing_number: (defaultDest as any).routingNumber || (defaultDest as any).sortCode || '',
+                account_number: (defaultDest as any).accountNumber,
+              } as any,
+            });
+
+            const payout = await stripe.payouts.create({
+              amount: Math.round(netPayAmount * 100),
+              currency: currency.toLowerCase(),
+              method: 'standard',
+              description: `Salary - ${entry.employeeName}`,
+              destination: bankToken.id,
+              metadata: {
+                payrollId: String(entry.id),
+                employeeName: entry.employeeName,
+                type: 'payroll',
+              },
+            });
+
+            providerResult = {
+              provider: 'stripe',
+              payoutId: payout.id,
+              status: payout.status,
+            };
+          }
+          payoutStatus = 'processing';
+        } catch (payErr: any) {
+          console.error(`Payroll payout failed for ${entry.employeeName}:`, payErr.message);
+          // Mark as failed but don't block the response
+          payoutStatus = 'failed';
+          providerResult = { error: payErr.message };
+        }
+      } else {
+        // No banking details — mark as needs_setup
+        payoutStatus = 'needs_banking_details';
+      }
+
+      // Update payroll entry status
+      const finalStatus = payoutStatus === 'failed' ? 'failed' :
+        payoutStatus === 'needs_banking_details' ? 'pending' : 'processing';
+      const updated = await storage.updatePayrollEntry(req.params.id, {
+        status: finalStatus,
+        ...(providerResult ? { payoutId: providerResult.transferCode || providerResult.payoutId } : {}),
+      } as any);
+
+      // Create transaction record with appropriate status
       await storage.createTransaction({
         type: "Payout",
-        amount: String(entry.netPay),
+        amount: String(netPayAmount),
         fee: "0",
-        status: 'Completed',
+        status: payoutStatus === 'processing' ? 'Processing' : (payoutStatus === 'failed' ? 'Failed' : 'Pending'),
         date: new Date().toISOString().split('T')[0],
         description: `Salary payment - ${entry.employeeName}`,
-        currency: 'USD',
+        currency,
+        reference: providerResult?.transferCode || providerResult?.payoutId || `PAY-${entry.id}-${Date.now()}`,
       });
 
-      // Send payslip email to employee
-      if (entry.email) {
-        const settings = await storage.getOrganizationSettings();
-        const companyName = settings?.companyName || 'Spendly';
-        const currency = settings?.currency || 'USD';
+      // Only send payslip email when payout was actually initiated
+      if (payoutStatus === 'processing' && entry.email) {
         const payPeriod = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-        
         notificationService.sendPayslipEmail({
           email: entry.email,
           employeeName: entry.employeeName,
           payPeriod,
           grossSalary: parseFloat(String(entry.salary || (entry as any).grossSalary || 0)),
           deductions: parseFloat(String(entry.deductions || 0)),
-          netPay: parseFloat(String(entry.netPay)),
+          netPay: netPayAmount,
           currency,
           paymentDate: new Date().toLocaleDateString(),
           companyName,
         }).catch(err => console.error('Failed to send payslip:', err));
       }
 
-      res.json({ 
-        message: "Payment processed successfully",
+      if (payoutStatus === 'needs_banking_details') {
+        return res.status(400).json({
+          error: "Employee has no banking details configured",
+          message: `Please add payout destination for ${entry.employeeName} before processing payment`,
+          entry: updated,
+        });
+      }
+
+      if (payoutStatus === 'failed') {
+        return res.status(502).json({
+          error: "Payment provider transfer failed",
+          detail: providerResult?.error,
+          entry: updated,
+        });
+      }
+
+      res.json({
+        message: "Payment initiated successfully",
+        status: 'processing',
+        provider: providerResult?.provider,
+        reference: providerResult?.transferCode || providerResult?.payoutId,
         entry: updated,
       });
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Payroll pay error:', error);
       res.status(500).json({ error: "Failed to process payment" });
     }
   });
 
   // ==================== INVOICES ====================
-  app.get("/api/invoices", async (req, res) => {
+  app.get("/api/invoices", requireAuth, async (req, res) => {
     try {
-      const invoices = await storage.getInvoices();
+      const company = await resolveUserCompany(req);
+      const invoices = await storage.getInvoices(company?.companyId);
       res.json(invoices);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch invoices" });
     }
   });
 
-  app.get("/api/invoices/:id", async (req, res) => {
+  app.get("/api/invoices/:id", requireAuth, async (req, res) => {
     try {
+      const company = await resolveUserCompany(req);
       const invoice = await storage.getInvoice(req.params.id);
       if (!invoice) {
         return res.status(404).json({ error: "Invoice not found" });
+      }
+      if (company && !await verifyCompanyAccess(invoice.companyId, company.companyId)) {
+        return res.status(403).json({ error: "Access denied" });
       }
       res.json(invoice);
     } catch (error) {
@@ -2099,7 +2948,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/invoices", async (req, res) => {
+  app.post("/api/invoices", requireAuth, async (req, res) => {
     try {
       const result = invoiceSchema.safeParse(req.body);
       if (!result.success) {
@@ -2151,7 +3000,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/invoices/:id", async (req, res) => {
+  app.patch("/api/invoices/:id", requireAuth, async (req, res) => {
     try {
       const result = invoiceUpdateSchema.safeParse(req.body);
       if (!result.success) {
@@ -2167,7 +3016,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/invoices/:id", async (req, res) => {
+  app.delete("/api/invoices/:id", requireAuth, async (req, res) => {
     try {
       const deleted = await storage.deleteInvoice(req.params.id);
       if (!deleted) {
@@ -2180,20 +3029,25 @@ export async function registerRoutes(
   });
 
   // ==================== VENDORS ====================
-  app.get("/api/vendors", async (req, res) => {
+  app.get("/api/vendors", requireAuth, async (req, res) => {
     try {
-      const vendors = await storage.getVendors();
+      const company = await resolveUserCompany(req);
+      const vendors = await storage.getVendors(company?.companyId);
       res.json(vendors);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch vendors" });
     }
   });
 
-  app.get("/api/vendors/:id", async (req, res) => {
+  app.get("/api/vendors/:id", requireAuth, async (req, res) => {
     try {
+      const company = await resolveUserCompany(req);
       const vendor = await storage.getVendor(req.params.id);
       if (!vendor) {
         return res.status(404).json({ error: "Vendor not found" });
+      }
+      if (company && !await verifyCompanyAccess(vendor.companyId, company.companyId)) {
+        return res.status(403).json({ error: "Access denied" });
       }
       res.json(vendor);
     } catch (error) {
@@ -2201,7 +3055,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/vendors", async (req, res) => {
+  app.post("/api/vendors", requireAuth, async (req, res) => {
     try {
       const result = vendorSchema.safeParse(req.body);
       if (!result.success) {
@@ -2227,7 +3081,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/vendors/:id", async (req, res) => {
+  app.patch("/api/vendors/:id", requireAuth, async (req, res) => {
     try {
       const result = vendorUpdateSchema.safeParse(req.body);
       if (!result.success) {
@@ -2243,7 +3097,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/vendors/:id", async (req, res) => {
+  app.delete("/api/vendors/:id", requireAuth, async (req, res) => {
     try {
       const deleted = await storage.deleteVendor(req.params.id);
       if (!deleted) {
@@ -2283,10 +3137,173 @@ export async function registerRoutes(
           createdAt: new Date().toISOString(),
         } as any);
       } catch (e) { /* audit log failure should not block operation */ }
-      
+
       res.json(settings);
     } catch (error) {
       res.status(500).json({ error: "Failed to update settings" });
+    }
+  });
+
+  // ==================== STRIPE CARD MANAGEMENT ====================
+
+  // Freeze card
+  app.post("/api/cards/:id/freeze", requireAuth, async (req, res) => {
+    try {
+      const card = await storage.getCard(req.params.id);
+      if (!card) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+
+      if (!card.stripeCardId) {
+        return res.status(400).json({ error: "Card does not support freezing" });
+      }
+
+      try {
+        await paymentService.updateCardStatus(card.stripeCardId, 'inactive');
+        const updatedCard = await storage.updateCard(req.params.id, { status: 'Frozen' });
+        res.json(updatedCard);
+      } catch (stripeError: any) {
+        const mapped = mapPaymentError(stripeError, 'stripe');
+        return res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
+      }
+    } catch (error) {
+      res.status(500).json({ error: "Failed to freeze card" });
+    }
+  });
+
+  // Unfreeze card
+  app.post("/api/cards/:id/unfreeze", requireAuth, async (req, res) => {
+    try {
+      const card = await storage.getCard(req.params.id);
+      if (!card) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+
+      if (!card.stripeCardId) {
+        return res.status(400).json({ error: "Card does not support unfreezing" });
+      }
+
+      try {
+        await paymentService.updateCardStatus(card.stripeCardId, 'active');
+        const updatedCard = await storage.updateCard(req.params.id, { status: 'Active' });
+        res.json(updatedCard);
+      } catch (stripeError: any) {
+        const mapped = mapPaymentError(stripeError, 'stripe');
+        return res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
+      }
+    } catch (error) {
+      res.status(500).json({ error: "Failed to unfreeze card" });
+    }
+  });
+
+  // Get sensitive card details (card number, CVV) - Rate limited
+  app.get("/api/cards/:id/details", sensitiveLimiter, requireAuth, async (req, res) => {
+    try {
+      const card = await storage.getCard(req.params.id);
+      if (!card) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+
+      if (!card.stripeCardId) {
+        return res.status(400).json({ error: "Card details not available" });
+      }
+
+      try {
+        const details = await paymentService.getCardDetails(card.stripeCardId);
+        res.json(details);
+      } catch (stripeError: any) {
+        const mapped = mapPaymentError(stripeError, 'stripe');
+        return res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
+      }
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch card details" });
+    }
+  });
+
+  // Update spending controls
+  app.patch("/api/cards/:id/controls", requireAuth, async (req, res) => {
+    try {
+      const { spendingLimit, spendingLimitInterval, allowedCategories, blockedCategories } = req.body;
+      const card = await storage.getCard(req.params.id);
+      if (!card) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+
+      if (!card.stripeCardId) {
+        return res.status(400).json({ error: "Card does not support spending controls" });
+      }
+
+      try {
+        await paymentService.updateCardSpendingControls(card.stripeCardId, {
+          spendingLimit,
+          spendingLimitInterval,
+          allowedCategories,
+          blockedCategories,
+        });
+
+        // Update local card limit if specified
+        if (spendingLimit !== undefined) {
+          await storage.updateCard(req.params.id, { limit: spendingLimit });
+        }
+
+        const updatedCard = await storage.getCard(req.params.id);
+        res.json(updatedCard);
+      } catch (stripeError: any) {
+        const mapped = mapPaymentError(stripeError, 'stripe');
+        return res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
+      }
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update spending controls" });
+    }
+  });
+
+  // Cancel card permanently
+  app.post("/api/cards/:id/cancel", requireAuth, async (req, res) => {
+    try {
+      const card = await storage.getCard(req.params.id);
+      if (!card) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+
+      if (!card.stripeCardId) {
+        return res.status(400).json({ error: "Card does not support cancellation" });
+      }
+
+      try {
+        await paymentService.updateCardStatus(card.stripeCardId, 'canceled');
+        const updatedCard = await storage.updateCard(req.params.id, { status: 'Cancelled' });
+        res.json(updatedCard);
+      } catch (stripeError: any) {
+        const mapped = mapPaymentError(stripeError, 'stripe');
+        return res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
+      }
+    } catch (error) {
+      res.status(500).json({ error: "Failed to cancel card" });
+    }
+  });
+
+  // Get card transactions from Stripe
+  app.get("/api/cards/:id/transactions", requireAuth, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 25;
+      const card = await storage.getCard(req.params.id);
+      if (!card) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+
+      if (!card.stripeCardId) {
+        return res.json([]);
+      }
+
+      try {
+        const transactions = await paymentService.listCardTransactions(card.stripeCardId, limit);
+        res.json(transactions);
+      } catch (stripeError: any) {
+        const mapped = mapPaymentError(stripeError, 'stripe');
+        return res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
+      }
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch card transactions" });
     }
   });
 
@@ -2392,7 +3409,8 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error('Stripe checkout error:', error);
-      res.status(500).json({ error: error.message || "Failed to create checkout session" });
+      const mapped = mapPaymentError(error, 'payment');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -2474,7 +3492,8 @@ export async function registerRoutes(
         });
       }
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to confirm payment" });
+      const mapped = mapPaymentError(error, 'payment');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -2486,7 +3505,7 @@ export async function registerRoutes(
     metadata: z.record(z.any()).optional(),
   });
 
-  app.post("/api/payment/create-intent", async (req, res) => {
+  app.post("/api/payment/create-intent", requireAuth, async (req, res) => {
     try {
       const result = paymentIntentSchema.safeParse(req.body);
       if (!result.success) {
@@ -2503,7 +3522,8 @@ export async function registerRoutes(
       
       res.json(paymentResult);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to create payment intent" });
+      const mapped = mapPaymentError(error, 'stripe/paystack');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -2512,12 +3532,37 @@ export async function registerRoutes(
     countryCode: z.string().min(2).max(2),
     reason: z.string().min(1),
     recipientDetails: z.object({
+      // Common fields
       accountNumber: z.string().optional(),
-      bankCode: z.string().optional(),
       accountName: z.string().optional(),
-      stripeAccountId: z.string().optional(),
       currency: z.string().optional(),
+      country: z.string().optional(),
+      accountType: z.enum(['individual', 'company']).optional().default('individual'),
+      // Paystack fields (Africa)
+      bankCode: z.string().optional(),
+      // Stripe Connect
+      stripeAccountId: z.string().optional(),
+      // Stripe bank transfer fields (non-African countries)
+      routingNumber: z.string().optional(),  // US ACH routing number
+      sortCode: z.string().optional(),        // UK BACS sort code
+      bsbNumber: z.string().optional(),       // AU BECS BSB number
+      iban: z.string().optional(),            // EU SEPA IBAN
+      swiftCode: z.string().optional(),       // International SWIFT/BIC
     }),
+  });
+
+  // ==================== BANK DETAIL VALIDATION ====================
+  app.post("/api/validate/bank-details", requireAuth, async (req, res) => {
+    try {
+      const { validateBankDetails, getRequiredBankFields } = await import('./utils/bankValidation');
+      const result = validateBankDetails(req.body);
+      res.json({
+        ...result,
+        requiredFields: getRequiredBankFields(req.body.countryCode || ''),
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: "Validation failed" });
+    }
   });
 
   app.post("/api/payment/transfer", requireAuth, financialLimiter, async (req, res) => {
@@ -2643,7 +3688,8 @@ export async function registerRoutes(
 
       res.json({ ...transferResult, reference: providerRef });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to initiate transfer" });
+      const mapped = mapPaymentError(error, 'transfer');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -2673,11 +3719,12 @@ export async function registerRoutes(
       
       res.json(accountResult);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to create virtual account" });
+      const mapped = mapPaymentError(error, 'virtual_account');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
-  app.post("/api/payment/verify", async (req, res) => {
+  app.post("/api/payment/verify", requireAuth, async (req, res) => {
     try {
       const { reference, provider } = req.body;
       if (!reference || !provider) {
@@ -2687,25 +3734,28 @@ export async function registerRoutes(
       const verifyResult = await paymentService.verifyPayment(reference, provider);
       res.json(verifyResult);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to verify payment" });
+      const mapped = mapPaymentError(error, 'verify');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
-  app.get("/api/payment/banks/:countryCode", async (req, res) => {
+  app.get("/api/payment/banks/:countryCode", requireAuth, async (req, res) => {
     try {
       const banks = await paymentService.getBanks(req.params.countryCode);
       res.json(banks);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch banks" });
+      const mapped = mapPaymentError(error, 'banks');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
-  app.get("/api/payment/provider-balance/:countryCode", async (req, res) => {
+  app.get("/api/payment/provider-balance/:countryCode", requireAuth, requireAdmin, async (req, res) => {
     try {
       const balances = await paymentService.getBalance(req.params.countryCode);
       res.json(balances);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch balance" });
+      const mapped = mapPaymentError(error, 'balance');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -2716,7 +3766,7 @@ export async function registerRoutes(
     countryCode: z.string().min(2).max(2).default('US'),
   });
 
-  app.post("/api/bills/pay", async (req, res) => {
+  app.post("/api/bills/pay", requireAuth, async (req, res) => {
     try {
       const result = billPaymentSchema.safeParse(req.body);
       if (!result.success) {
@@ -2816,7 +3866,8 @@ export async function registerRoutes(
         });
       }
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to pay bill" });
+      const mapped = mapPaymentError(error, 'bill_payment');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -2854,7 +3905,8 @@ export async function registerRoutes(
         currency: currencyInfo,
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to initiate deposit" });
+      const mapped = mapPaymentError(error, 'deposit');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -2966,7 +4018,8 @@ export async function registerRoutes(
 
       res.json({ success: true, amount, currency: depositCurrency, message: `${depositCurrency} ${amount} deposited successfully` });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to confirm deposit" });
+      const mapped = mapPaymentError(error, 'deposit_confirm');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -3063,11 +4116,30 @@ export async function registerRoutes(
         }
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to process payout" });
+      const mapped = mapPaymentError(error, 'payout');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
   // ==================== UTILITY PAYMENTS ====================
+
+  // List available providers for a utility type
+  app.get("/api/payments/utility/providers", requireAuth, async (req, res) => {
+    try {
+      const { type, countryCode } = req.query;
+      if (!type) {
+        return res.status(400).json({ error: "type query parameter is required (airtime, data, electricity, cable, internet)" });
+      }
+      const result = await paymentService.listUtilityProviders(
+        type as string,
+        (countryCode as string) || 'NG'
+      );
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to fetch utility providers", detail: error.message });
+    }
+  });
+
   const utilityPaymentSchema = z.object({
     type: z.enum(['airtime', 'data', 'electricity', 'cable', 'internet']),
     provider: z.string().min(1),
@@ -3094,13 +4166,9 @@ export async function registerRoutes(
     FR: { phone: /^\+?33[0-9]{9}$/, meter: /^[0-9]{14}$/, smartcard: /^\d{10}$/ },
   };
 
-  // Determine payment provider based on country
-  const getPaymentProvider = (countryCode: string): 'stripe' | 'paystack' => {
-    const africanCountries = ['NG', 'KE', 'GH', 'ZA', 'EG', 'TZ', 'UG', 'RW'];
-    return africanCountries.includes(countryCode.toUpperCase()) ? 'paystack' : 'stripe';
-  };
+  // Use getPaymentProvider from paymentService (imported at top) instead of local duplicate
 
-  app.post("/api/payments/utility", async (req, res) => {
+  app.post("/api/payments/utility", requireAuth, async (req, res) => {
     try {
       const result = utilityPaymentSchema.safeParse(req.body);
       if (!result.success) {
@@ -3158,8 +4226,8 @@ export async function registerRoutes(
           internet: ['xfinity', 'spectrum', 'att-fiber', 'virgin', 'bt'],
         },
       };
-      
-      const africanCountries = ['NG', 'KE', 'GH', 'ZA', 'EG', 'TZ', 'UG', 'RW'];
+
+      const africanCountries = ['NG', 'KE', 'GH', 'ZA', 'EG', 'RW', 'CI'];
       const region = africanCountries.includes(countryCode?.toUpperCase() || 'US') ? 'Africa' : 'US/Europe';
       const validProvidersForType = validProviders[region][type] || [];
       
@@ -3179,10 +4247,7 @@ export async function registerRoutes(
         wallet = await storage.getWallet(walletId);
       } else if (effectiveUserId) {
         // Try to get user's wallet in the appropriate currency
-        const africanCountries = ['NG', 'KE', 'GH', 'ZA', 'EG', 'TZ', 'UG', 'RW'];
-        const walletCurrency = africanCountries.includes(countryCode?.toUpperCase() || 'US') 
-          ? (countryCode === 'NG' ? 'NGN' : countryCode === 'KE' ? 'KES' : countryCode === 'GH' ? 'GHS' : countryCode === 'ZA' ? 'ZAR' : 'USD')
-          : 'USD';
+        const { currency: walletCurrency } = getCurrencyForCountry(countryCode || 'US');
         wallet = await storage.getWalletByUserId(effectiveUserId, walletCurrency);
       }
 
@@ -3223,19 +4288,66 @@ export async function registerRoutes(
       
       // Determine payment provider
       const paymentProvider = getPaymentProvider(countryCode || 'US');
-      
-      // Create transaction record
+      const utilityRef = `UTL-${Date.now()}`;
+
+      // --- CALL REAL PAYMENT PROVIDER ---
+      let providerResult: any;
+      try {
+        providerResult = await paymentService.processUtilityPayment({
+          type: type as any,
+          provider,
+          amount,
+          customer: phoneNumber || meterNumber || smartCardNumber || reference,
+          countryCode: countryCode || 'US',
+          email: (req as any).user?.email,
+          metadata: { reference, userId: effectiveUserId, utilityRef },
+        });
+      } catch (providerErr: any) {
+        // Provider call failed — reverse the wallet debit
+        if (wallet) {
+          try {
+            await storage.creditWallet(
+              wallet.id, amount, 'utility_reversal',
+              `Reversal: ${type} - ${provider} failed`,
+              `REV-${utilityRef}`,
+              { reason: providerErr.message }
+            );
+          } catch (reversalErr) {
+            console.error('CRITICAL: Utility reversal failed after provider error:', reversalErr);
+          }
+        } else {
+          // Reverse company balance debit
+          try {
+            const balances = await storage.getBalances();
+            const currentLocal = parseFloat(String(balances.local || 0));
+            await storage.updateBalances({ local: String(currentLocal + amount) });
+          } catch (reversalErr) {
+            console.error('CRITICAL: Company balance reversal failed:', reversalErr);
+          }
+        }
+
+        return res.status(502).json({
+          error: `${type} payment failed with provider`,
+          detail: providerErr.message,
+          reversed: true,
+        });
+      }
+
+      // Determine final status based on provider response
+      const finalStatus = providerResult.status === 'requires_payment_method' ? 'Pending' :
+        (providerResult.status === 'pending' ? 'Processing' : 'Completed');
+
+      // Create transaction record with real provider reference
       await storage.createTransaction({
         type: 'Bill',
         amount: String(amount),
         fee: "0",
-        status: 'Completed',
+        status: finalStatus,
         date: new Date().toISOString().split('T')[0],
-        description: `${type.charAt(0).toUpperCase() + type.slice(1)} - ${provider} (${reference})`,
+        description: `${type.charAt(0).toUpperCase() + type.slice(1)} - ${provider} (${phoneNumber || meterNumber || smartCardNumber || reference})`,
         currency: wallet?.currency || 'USD',
+        reference: providerResult.reference || providerResult.orderId || utilityRef,
       });
-      
-      const utilityRef = `UTL-${Date.now()}`;
 
       try {
         const auditName = await getAuditUserName(req);
@@ -3245,7 +4357,13 @@ export async function registerRoutes(
           userName: auditName,
           entityType: 'utility',
           entityId: utilityRef,
-          details: { type, provider, amount, reference, countryCode, paymentProvider },
+          details: {
+            type, provider, amount, reference,
+            countryCode, paymentProvider,
+            providerOrderId: providerResult.orderId,
+            providerReference: providerResult.reference,
+            providerStatus: providerResult.status,
+          },
           ipAddress: req.ip || '',
           userAgent: req.headers['user-agent'] || '',
           createdAt: new Date().toISOString(),
@@ -3253,16 +4371,21 @@ export async function registerRoutes(
       } catch (e) { /* audit log failure should not block operation */ }
 
       res.json({
-        success: true,
-        message: `${type.charAt(0).toUpperCase() + type.slice(1)} payment successful`,
-        reference: utilityRef,
+        success: providerResult.success,
+        message: providerResult.message || `${type.charAt(0).toUpperCase() + type.slice(1)} payment ${finalStatus.toLowerCase()}`,
+        reference: providerResult.reference || utilityRef,
+        orderId: providerResult.orderId,
+        status: finalStatus,
         paymentProvider,
         amount,
         type,
         provider,
+        // For Stripe non-African payments, client needs this to complete
+        ...(providerResult.clientSecret ? { clientSecret: providerResult.clientSecret } : {}),
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to process utility payment" });
+      const mapped = mapPaymentError(error, 'payment');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -3280,7 +4403,7 @@ export async function registerRoutes(
     pin: z.string().length(4),
   });
 
-  app.post("/api/user/set-pin", async (req, res) => {
+  app.post("/api/user/set-pin", requireAuth, async (req, res) => {
     try {
       const result = setPinSchema.safeParse(req.body);
       if (!result.success) {
@@ -3302,7 +4425,8 @@ export async function registerRoutes(
       
       res.json({ success: true, message: "Transaction PIN set successfully" });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to set PIN" });
+      const mapped = mapPaymentError(error, 'pin');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -3312,23 +4436,24 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid PIN format" });
       }
-      
+
       const { firebaseUid, pin } = result.data;
       const profile = await storage.getUserProfile(firebaseUid);
-      
+
       if (!profile) {
         return res.status(404).json({ error: "User profile not found" });
       }
-      
+
       if (!profile.transactionPinEnabled || !profile.transactionPinHash) {
         return res.status(400).json({ error: "Transaction PIN not set" });
       }
-      
+
       const valid = await bcrypt.compare(pin, profile.transactionPinHash);
-      
+
       res.json({ valid });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to verify PIN" });
+      const mapped = mapPaymentError(error, 'pin');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -3338,14 +4463,15 @@ export async function registerRoutes(
       if (!firebaseUid) {
         return res.status(400).json({ error: "Firebase UID required" });
       }
-      
+
       await storage.updateUserProfile(firebaseUid, {
         transactionPinEnabled: false,
       });
-      
+
       res.json({ success: true, message: "Transaction PIN disabled" });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to disable PIN" });
+      const mapped = mapPaymentError(error, 'pin');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -3390,14 +4516,21 @@ export async function registerRoutes(
         });
       }
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to validate account" });
+      const mapped = mapPaymentError(error, 'payment');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
   // ==================== PAYSTACK WEBHOOK ====================
   const processedPaystackReferences = new Set<string>();
-  
-  app.post("/api/paystack/webhook", async (req, res) => {
+
+  // NOTE: Primary Paystack webhook is registered at top of registerRoutes() using
+  // PaystackWebhookHandler with HMAC signature verification. This legacy handler is
+  // kept as dead code reference and will be removed in next cleanup.
+  // @deprecated — Use /api/paystack/webhook (registered above) instead.
+  const _legacyPaystackWebhook = false;
+  if (_legacyPaystackWebhook) { // @ts-ignore — Dead code block
+  app.post("/api/paystack/webhook-legacy", async (req, res) => {
     try {
       const crypto = await import('crypto');
       const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
@@ -3719,6 +4852,7 @@ export async function registerRoutes(
       res.status(500).json({ error: "Webhook processing failed" });
     }
   });
+  } // end legacy webhook dead code block
 
   // ==================== PAYSTACK CALLBACK ====================
   app.get("/api/paystack/callback", async (req, res) => {
@@ -3765,7 +4899,7 @@ export async function registerRoutes(
   // ==================== STRIPE WEBHOOK ====================
   const processedStripeEvents = new Set<string>();
   
-  app.post("/api/stripe/webhook", async (req, res) => {
+  app.post("/api/stripe/webhook", express.raw({ type: 'application/json' }), async (req, res) => {
     try {
       const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
       const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -3776,24 +4910,25 @@ export async function registerRoutes(
         return res.status(500).json({ error: "Webhook configuration error" });
       }
 
-      let event = req.body;
-      
       // If webhook secret is configured, verify signature
+      let event: any = req.body;
       if (stripeWebhookSecret) {
-        const Stripe = await import('stripe');
-        const stripe = new Stripe.default(stripeSecretKey);
+        const stripe = getStripeClient();
         const sig = req.headers['stripe-signature'];
-        
+
         if (sig) {
           try {
-            // Note: For raw body parsing, Express needs express.raw() for this route
-            const payload = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+            // Use raw body for signature verification (express.raw middleware already applied)
+            const payload = req.body;
             event = stripe.webhooks.constructEvent(payload, sig, stripeWebhookSecret);
           } catch (err: any) {
             console.error('Stripe webhook signature verification failed:', err.message);
             return res.status(401).json({ error: "Invalid signature" });
           }
         }
+      } else {
+        // If no webhook secret, parse the raw body to JSON
+        event = typeof req.body === 'string' ? JSON.parse(req.body) : (Buffer.isBuffer(req.body) ? JSON.parse(req.body.toString()) : req.body);
       }
 
       const eventId = event.id;
@@ -3932,6 +5067,149 @@ export async function registerRoutes(
         }
       }
 
+      // ==================== STRIPE ISSUING EVENTS ====================
+
+      // Real-time card authorization decision
+      if (eventType === 'issuing_authorization.request') {
+        processedStripeEvents.add(eventId);
+        const authorization = event.data.object;
+        const cardId = authorization.card?.id;
+        const requestedAmount = authorization.pending_request?.amount || 0;
+        const currency = authorization.pending_request?.currency || 'usd';
+        const merchantName = authorization.merchant_data?.name || 'Unknown';
+
+        paymentLogger.info('issuing_auth_request', { cardId, amount: requestedAmount / 100, merchantName });
+
+        // Find the card in our DB
+        const allCards = await storage.getCards();
+        const dbCard = allCards.find((c: any) => c.stripeCardId === cardId);
+
+        if (dbCard) {
+          // Check if card is active and within spending limits
+          const cardBalance = parseFloat(String(dbCard.balance || 0));
+          const cardLimit = parseFloat(String(dbCard.limit || 0));
+          const txAmount = requestedAmount / 100;
+
+          // Auto-approve if within limit (Stripe handles the actual approval via issuing settings)
+          paymentLogger.info('issuing_auth_check', {
+            cardId, txAmount, cardBalance, cardLimit,
+            approved: cardLimit === 0 || txAmount <= cardLimit
+          });
+        }
+      }
+
+      // Card transaction completed (purchase settled)
+      if (eventType === 'issuing_transaction.created') {
+        processedStripeEvents.add(eventId);
+        const transaction = event.data.object;
+        const cardId = transaction.card;
+        const amount = Math.abs(transaction.amount) / 100;
+        const currency = transaction.currency?.toUpperCase() || 'USD';
+        const merchantName = transaction.merchant_data?.name || 'Unknown';
+        const merchantCategory = transaction.merchant_data?.category || '';
+
+        paymentLogger.info('issuing_transaction_created', { cardId, amount, merchantName });
+
+        // Find card in DB and update balance
+        const allCards = await storage.getCards();
+        const dbCard = allCards.find((c: any) => c.stripeCardId === cardId);
+
+        if (dbCard) {
+          const currentBalance = parseFloat(String(dbCard.balance || 0));
+          const newBalance = Math.max(0, currentBalance - amount);
+
+          await storage.updateCard(dbCard.id, {
+            balance: newBalance,
+          } as any);
+
+          // Create card transaction record
+          await storage.createCardTransaction({
+            cardId: dbCard.id,
+            amount: String(amount),
+            merchant: merchantName,
+            category: merchantCategory,
+            status: 'Completed',
+            date: new Date().toISOString(),
+            currency,
+            type: 'purchase',
+          } as any);
+
+          paymentLogger.info('card_balance_updated', { cardId: dbCard.id, oldBalance: currentBalance, newBalance, merchant: merchantName });
+        }
+      }
+
+      // ==================== STRIPE TREASURY EVENTS ====================
+
+      // Incoming money received in Treasury financial account
+      if (eventType === 'treasury.received_credit.created') {
+        processedStripeEvents.add(eventId);
+        const credit = event.data.object;
+        const financialAccountId = credit.financial_account;
+        const amount = (credit.amount || 0) / 100;
+        const currency = credit.currency?.toUpperCase() || 'USD';
+        const description = credit.description || 'Incoming transfer';
+
+        paymentLogger.info('treasury_received_credit', { financialAccountId, amount, currency });
+
+        // Find the virtual account linked to this financial account
+        const allAccounts = await storage.getVirtualAccounts();
+        const virtualAccount = allAccounts.find((a: any) =>
+          a.accountNumber === financialAccountId || a.bankCode === financialAccountId
+        );
+
+        if (virtualAccount) {
+          // Update virtual account balance
+          const currentBalance = parseFloat(String(virtualAccount.balance || 0));
+          const newBalance = currentBalance + amount;
+          await storage.updateVirtualAccount(virtualAccount.id, { balance: String(newBalance) } as any);
+
+          // Credit the user's wallet if linked
+          if (virtualAccount.userId) {
+            const userWallet = await storage.getWalletByUserId(virtualAccount.userId, currency);
+            if (userWallet) {
+              await storage.creditWallet(
+                userWallet.id,
+                amount,
+                'virtual_account_funding',
+                `Treasury deposit: ${description}`,
+                `treasury-${credit.id}`,
+                { financialAccountId, treasuryCreditId: credit.id }
+              );
+            }
+          }
+
+          // Create transaction record
+          await storage.createTransaction({
+            type: 'Funding',
+            amount: String(amount),
+            fee: '0',
+            status: 'Completed',
+            description: `Virtual account deposit: ${description}`,
+            currency,
+            date: new Date().toISOString(),
+          });
+        }
+      }
+
+      // Outbound payment from Treasury completed
+      if (eventType === 'treasury.outbound_payment.posted') {
+        processedStripeEvents.add(eventId);
+        const payment = event.data.object;
+        const financialAccountId = payment.financial_account;
+        const amount = (payment.amount || 0) / 100;
+
+        paymentLogger.info('treasury_outbound_posted', { financialAccountId, amount });
+
+        // Update payout status if exists
+        const payouts = await storage.getPayouts({ providerReference: payment.id });
+        if (payouts.length > 0) {
+          await storage.updatePayout(payouts[0].id, {
+            status: 'completed',
+            processedAt: new Date().toISOString(),
+          });
+        }
+      }
+
       res.status(200).json({ received: true });
     } catch (error: any) {
       console.error('Stripe webhook error:', error);
@@ -3949,7 +5227,8 @@ export async function registerRoutes(
       const result = await paystackClient.createSubscriptionPlan(name, amount, interval, description);
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to create plan" });
+      const mapped = mapPaymentError(error, 'subscription');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -3958,7 +5237,8 @@ export async function registerRoutes(
       const result = await paystackClient.listPlans();
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to list plans" });
+      const mapped = mapPaymentError(error, 'subscription');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -3971,7 +5251,8 @@ export async function registerRoutes(
       const result = await paystackClient.createSubscription(customerEmail, planCode, authorizationCode);
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to create subscription" });
+      const mapped = mapPaymentError(error, 'subscription');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -3980,7 +5261,8 @@ export async function registerRoutes(
       const result = await paystackClient.listSubscriptions();
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to list subscriptions" });
+      const mapped = mapPaymentError(error, 'subscription');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -3993,7 +5275,8 @@ export async function registerRoutes(
       const result = await paystackClient.enableSubscription(subscriptionCode, emailToken);
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to enable subscription" });
+      const mapped = mapPaymentError(error, 'subscription');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -4006,7 +5289,8 @@ export async function registerRoutes(
       const result = await paystackClient.disableSubscription(subscriptionCode, emailToken);
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to disable subscription" });
+      const mapped = mapPaymentError(error, 'subscription');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -4033,7 +5317,8 @@ export async function registerRoutes(
       
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to charge authorization" });
+      const mapped = mapPaymentError(error, 'subscription');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -4042,7 +5327,8 @@ export async function registerRoutes(
       const result = await paystackClient.listAuthorizations(req.params.email);
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to list authorizations" });
+      const mapped = mapPaymentError(error, 'subscription');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -4055,7 +5341,142 @@ export async function registerRoutes(
       const result = await paystackClient.deactivateAuthorization(authorizationCode);
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to deactivate authorization" });
+      const mapped = mapPaymentError(error, 'subscription');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
+    }
+  });
+
+  // ==================== PAYSTACK VIRTUAL CARD & TRANSFER METHODS ====================
+
+  app.get("/api/paystack/balance", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const balance = await paystackClient.fetchBalance();
+      res.json(balance.data);
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'balance_check');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage });
+    }
+  });
+
+  app.post("/api/paystack/resolve-account", requireAuth, async (req, res) => {
+    try {
+      const { accountNumber, bankCode } = req.body;
+      if (!accountNumber || !bankCode) {
+        return res.status(400).json({ error: "Account number and bank code required" });
+      }
+      const result = await paystackClient.resolveAccountNumber(accountNumber, bankCode);
+      res.json(result.data);
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'account_resolution');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage });
+    }
+  });
+
+  app.get("/api/paystack/banks", requireAuth, async (req, res) => {
+    try {
+      const country = req.query.country as string || 'nigeria';
+      const result = await paystackClient.listBanks(country);
+      res.json(result.data);
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to fetch banks" });
+    }
+  });
+
+  app.get("/api/paystack/transfer-recipients", requireAuth, async (req, res) => {
+    try {
+      const perPage = Math.min(Number(req.query.perPage) || 50, 100);
+      const page = Number(req.query.page) || 1;
+      const result = await paystackClient.listTransferRecipients({ perPage, page });
+      res.json(result.data);
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'transfer_list');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage });
+    }
+  });
+
+  app.get("/api/paystack/transfers/:transferCode", requireAuth, async (req, res) => {
+    try {
+      const { transferCode } = req.params;
+      const result = await paystackClient.fetchTransfer(transferCode);
+      res.json(result.data);
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'transfer_fetch');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage });
+    }
+  });
+
+  app.post("/api/paystack/transfers/verify", requireAuth, async (req, res) => {
+    try {
+      const { reference } = req.body;
+      if (!reference) {
+        return res.status(400).json({ error: "Transfer reference required" });
+      }
+      const result = await paystackClient.verifyTransfer(reference);
+      res.json(result.data);
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'transfer_verify');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage });
+    }
+  });
+
+  app.post("/api/paystack/transfers/finalize", requireAuth, async (req, res) => {
+    try {
+      const { transferCode, otp } = req.body;
+      if (!transferCode || !otp) {
+        return res.status(400).json({ error: "Transfer code and OTP required" });
+      }
+      const result = await paystackClient.finalizeTransfer(transferCode, otp);
+      res.json(result.data);
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'transfer_finalize');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage });
+    }
+  });
+
+  app.post("/api/paystack/transfers/bulk", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { transfers } = req.body;
+      if (!Array.isArray(transfers) || transfers.length === 0) {
+        return res.status(400).json({ error: "Valid transfers array required" });
+      }
+      const result = await paystackClient.bulkTransfer(transfers);
+      res.json(result.data);
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'bulk_transfer');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage });
+    }
+  });
+
+  app.get("/api/paystack/settlements", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const perPage = Math.min(Number(req.query.perPage) || 50, 100);
+      const page = Number(req.query.page) || 1;
+      const from = req.query.from as string;
+      const to = req.query.to as string;
+      const result = await paystackClient.fetchSettlements({ perPage, page, from, to });
+      res.json(result.data);
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'settlements');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage });
+    }
+  });
+
+  app.post("/api/paystack/managed-accounts", requireAuth, async (req, res) => {
+    try {
+      const { customerId, currency, name } = req.body;
+      if (!customerId || !currency || !name) {
+        return res.status(400).json({ error: "customerId, currency, and name are required" });
+      }
+      const result = await paystackClient.createManagedAccount({
+        customerId,
+        currency,
+        name,
+        type: 'virtual',
+      });
+      res.json(result.data);
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'managed_account_create');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage });
     }
   });
 
@@ -4814,7 +6235,7 @@ export async function registerRoutes(
   });
 
   // Get KYC submission
-  app.get("/api/kyc/:userProfileId", async (req, res) => {
+  app.get("/api/kyc/:userProfileId", requireAuth, async (req, res) => {
     try {
       const { userProfileId } = req.params;
       const submission = await storage.getKycSubmission(userProfileId);
@@ -4883,7 +6304,7 @@ export async function registerRoutes(
   });
 
   // Submit KYC
-  app.post("/api/kyc", sensitiveLimiter, async (req, res) => {
+  app.post("/api/kyc", sensitiveLimiter, requireAuth, async (req, res) => {
     try {
       const parseResult = kycSubmissionSchema.safeParse(req.body);
       if (!parseResult.success) {
@@ -5042,7 +6463,7 @@ export async function registerRoutes(
   });
 
   // Update KYC submission
-  app.patch("/api/kyc/:id", async (req, res) => {
+  app.patch("/api/kyc/:id", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
       const submission = await storage.updateKycSubmission(id, req.body);
@@ -5056,7 +6477,7 @@ export async function registerRoutes(
   });
 
   // Upload KYC document with multer error handling
-  app.post("/api/kyc/upload", (req, res) => {
+  app.post("/api/kyc/upload", requireAuth, (req, res) => {
     upload.single('document')(req, res, (err: any) => {
       if (err) {
         const message = err.message || "Failed to upload document";
@@ -5081,17 +6502,14 @@ export async function registerRoutes(
   // ==================== STRIPE IDENTITY KYC ====================
 
   // Create Stripe Identity verification session
-  app.post("/api/kyc/stripe/create-session", async (req, res) => {
+  app.post("/api/kyc/stripe/create-session", requireAuth, async (req, res) => {
     try {
       const { userId, email, returnUrl } = req.body;
       if (!userId || !email) {
         return res.status(400).json({ error: "userId and email are required" });
       }
 
-      const Stripe = await import('stripe');
-      const stripe = new Stripe.default(process.env.STRIPE_SECRET_KEY || '', {
-        apiVersion: '2024-12-18.acacia' as any,
-      });
+      const stripe = getStripeClient();
 
       // Create Identity verification session
       const verificationSession = await stripe.identity.verificationSessions.create({
@@ -5123,14 +6541,11 @@ export async function registerRoutes(
   });
 
   // Check Stripe Identity verification status
-  app.get("/api/kyc/stripe/status/:sessionId", async (req, res) => {
+  app.get("/api/kyc/stripe/status/:sessionId", requireAuth, async (req, res) => {
     try {
       const { sessionId } = req.params;
-      
-      const Stripe = await import('stripe');
-      const stripe = new Stripe.default(process.env.STRIPE_SECRET_KEY || '', {
-        apiVersion: '2024-12-18.acacia' as any,
-      });
+
+      const stripe = getStripeClient();
 
       const verificationSession = await stripe.identity.verificationSessions.retrieve(sessionId);
 
@@ -5149,10 +6564,7 @@ export async function registerRoutes(
   // Stripe Identity webhook handler
   app.post("/api/kyc/stripe/webhook", express.raw({ type: 'application/json' }), async (req, res) => {
     try {
-      const Stripe = await import('stripe');
-      const stripe = new Stripe.default(process.env.STRIPE_SECRET_KEY || '', {
-        apiVersion: '2024-12-18.acacia' as any,
-      });
+      const stripe = getStripeClient();
 
       const sig = req.headers['stripe-signature'] as string;
       const webhookSecret = process.env.STRIPE_IDENTITY_WEBHOOK_SECRET || '';
@@ -5197,7 +6609,7 @@ export async function registerRoutes(
   // ==================== PAYSTACK KYC (BVN VERIFICATION) ====================
 
   // Resolve BVN (Bank Verification Number) - Nigeria
-  app.post("/api/kyc/paystack/resolve-bvn", async (req, res) => {
+  app.post("/api/kyc/paystack/resolve-bvn", requireAuth, async (req, res) => {
     try {
       const { bvn, accountNumber, bankCode, firstName, lastName } = req.body;
       if (!bvn) {
@@ -5246,12 +6658,13 @@ export async function registerRoutes(
       }
     } catch (error: any) {
       console.error('Paystack BVN error:', error);
-      res.status(500).json({ error: error.message || "Failed to verify BVN" });
+      const mapped = mapPaymentError(error, 'payment');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
   // Validate account with Paystack
-  app.post("/api/kyc/paystack/validate-account", async (req, res) => {
+  app.post("/api/kyc/paystack/validate-account", requireAuth, async (req, res) => {
     try {
       const { accountNumber, bankCode } = req.body;
       if (!accountNumber || !bankCode) {
@@ -5289,7 +6702,8 @@ export async function registerRoutes(
       }
     } catch (error: any) {
       console.error('Paystack account validation error:', error);
-      res.status(500).json({ error: error.message || "Failed to validate account" });
+      const mapped = mapPaymentError(error, 'payment');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -5321,14 +6735,14 @@ export async function registerRoutes(
           })),
         });
       } else {
-        res.status(400).json({ 
-          success: false, 
-          error: data.message || "Failed to fetch banks" 
+        res.status(400).json({
+          success: false,
+          error: data.message || "Failed to fetch banks from provider"
         });
       }
     } catch (error: any) {
-      console.error('Paystack banks error:', error);
-      res.status(500).json({ error: error.message || "Failed to fetch banks" });
+      const mapped = mapPaymentError(error, 'paystack-banks');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -5406,7 +6820,7 @@ export async function registerRoutes(
   });
 
   // Test email delivery - sends a test email via AWS SES
-  app.post("/api/notifications/test-email", async (req, res) => {
+  app.post("/api/notifications/test-email", emailLimiter, async (req, res) => {
     try {
       const { email } = req.body;
       // Default to the verified SES sender email for self-test
@@ -5726,7 +7140,8 @@ export async function registerRoutes(
       const walletsList = await storage.getWallets(userId as string);
       res.json(walletsList);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch wallets" });
+      const mapped = mapPaymentError(error, 'wallet');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -5739,7 +7154,8 @@ export async function registerRoutes(
       }
       res.json(wallet);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch wallet" });
+      const mapped = mapPaymentError(error, 'wallet');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -5765,7 +7181,8 @@ export async function registerRoutes(
       });
       res.status(201).json(wallet);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to create wallet" });
+      const mapped = mapPaymentError(error, 'wallet');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -5775,7 +7192,8 @@ export async function registerRoutes(
       const transactions = await storage.getWalletTransactions(req.params.id);
       res.json(transactions);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch wallet transactions" });
+      const mapped = mapPaymentError(error, 'wallet');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -5793,7 +7211,8 @@ export async function registerRoutes(
       );
       res.json(transaction);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fund wallet" });
+      const mapped = mapPaymentError(error, 'wallet');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -5811,7 +7230,8 @@ export async function registerRoutes(
       );
       res.json(transaction);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to withdraw from wallet" });
+      const mapped = mapPaymentError(error, 'wallet');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -5822,7 +7242,8 @@ export async function registerRoutes(
       const rates = await storage.getExchangeRates();
       res.json(rates);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch exchange rates" });
+      const mapped = mapPaymentError(error, 'exchange');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -5838,7 +7259,8 @@ export async function registerRoutes(
       });
       res.status(201).json(exchangeRate);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to create exchange rate" });
+      const mapped = mapPaymentError(error, 'exchange');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -5851,7 +7273,8 @@ export async function registerRoutes(
       }
       res.json(rate);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch exchange rate" });
+      const mapped = mapPaymentError(error, 'exchange');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -5891,7 +7314,8 @@ export async function registerRoutes(
         rates: createdRates
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to seed exchange rates" });
+      const mapped = mapPaymentError(error, 'exchange');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -5905,7 +7329,8 @@ export async function registerRoutes(
       }
       res.json(settings);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch exchange rate settings" });
+      const mapped = mapPaymentError(error, 'exchange');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -5913,28 +7338,29 @@ export async function registerRoutes(
   app.put("/api/exchange-rates/settings", requireAdmin, async (req, res) => {
     try {
       const { buyMarkupPercent, sellMarkupPercent } = req.body;
-      
+
       if (buyMarkupPercent === undefined || sellMarkupPercent === undefined) {
         return res.status(400).json({ error: "buyMarkupPercent and sellMarkupPercent are required" });
       }
-      
+
       const buyMarkup = parseFloat(buyMarkupPercent);
       const sellMarkup = parseFloat(sellMarkupPercent);
-      
+
       if (isNaN(buyMarkup) || isNaN(sellMarkup) || buyMarkup < 0 || sellMarkup < 0 || buyMarkup > 50 || sellMarkup > 50) {
         return res.status(400).json({ error: "Markup percentages must be between 0 and 50" });
       }
-      
+
       const adminId = (req as any).adminId || 'admin';
       const settings = await storage.updateExchangeRateSettings(
         buyMarkup.toFixed(2),
         sellMarkup.toFixed(2),
         adminId
       );
-      
+
       res.json(settings);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to update exchange rate settings" });
+      const mapped = mapPaymentError(error, 'exchange');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -5989,7 +7415,8 @@ export async function registerRoutes(
         rates: fetchedRates
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch live exchange rates" });
+      const mapped = mapPaymentError(error, 'exchange');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -5998,23 +7425,23 @@ export async function registerRoutes(
     try {
       const { base, target } = req.params;
       const { type = 'buy' } = req.query; // 'buy' or 'sell'
-      
+
       const rate = await storage.getExchangeRate(base, target);
       if (!rate) {
         return res.status(404).json({ error: "Exchange rate not found" });
       }
-      
+
       // Get markup settings
       let settings = await storage.getExchangeRateSettings();
       if (!settings) {
         settings = await storage.updateExchangeRateSettings('10.00', '10.00');
       }
-      
+
       const baseRate = parseFloat(String(rate.rate));
-      const markupPercent = type === 'sell' 
+      const markupPercent = type === 'sell'
         ? parseFloat(String(settings.sellMarkupPercent))
         : parseFloat(String(settings.buyMarkupPercent));
-      
+
       // Apply markup: for buying foreign currency, increase rate; for selling, decrease rate
       // Customer buys foreign currency at higher rate (pays more)
       // Customer sells foreign currency at lower rate (receives less)
@@ -6026,7 +7453,7 @@ export async function registerRoutes(
         // Customer selling target currency - they receive less
         adjustedRate = baseRate * (1 - markupPercent / 100);
       }
-      
+
       res.json({
         baseCurrency: base,
         targetCurrency: target,
@@ -6038,13 +7465,14 @@ export async function registerRoutes(
         validFrom: rate.validFrom,
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch exchange rate with markup" });
+      const mapped = mapPaymentError(error, 'exchange');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
   // ==================== PAYOUT DESTINATIONS ROUTES ====================
-  
-  app.get("/api/payout-destinations", async (req, res) => {
+
+  app.get("/api/payout-destinations", requireAuth, async (req, res) => {
     try {
       const { userId, vendorId } = req.query;
       const destinations = await storage.getPayoutDestinations(
@@ -6053,20 +7481,45 @@ export async function registerRoutes(
       );
       res.json(destinations);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch payout destinations" });
+      const mapped = mapPaymentError(error, 'payout');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
-  app.post("/api/payout-destinations", async (req, res) => {
+  const payoutDestinationSchema = z.object({
+    userId: z.string().optional(),
+    vendorId: z.string().optional(),
+    type: z.enum(['bank_account', 'mobile_money', 'card']).default('bank_account'),
+    provider: z.string().min(1),
+    bankName: z.string().optional(),
+    bankCode: z.string().optional(),
+    accountNumber: z.string().optional(),
+    accountName: z.string().optional(),
+    routingNumber: z.string().optional(),
+    swiftCode: z.string().optional(),
+    currency: z.string().min(3).max(3).default('USD'),
+    country: z.string().min(2).max(2).default('US'),
+    isDefault: z.boolean().optional().default(false),
+    providerRecipientId: z.string().optional(),
+  }).refine(data => data.userId || data.vendorId, {
+    message: "Either userId or vendorId must be provided",
+  });
+
+  app.post("/api/payout-destinations", requireAuth, async (req, res) => {
     try {
-      const destination = await storage.createPayoutDestination(req.body);
+      const result = payoutDestinationSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid destination data", details: result.error.issues });
+      }
+      const destination = await storage.createPayoutDestination(result.data);
       res.status(201).json(destination);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to create payout destination" });
+      const mapped = mapPaymentError(error, 'payout');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
-  app.put("/api/payout-destinations/:id", async (req, res) => {
+  app.put("/api/payout-destinations/:id", requireAuth, async (req, res) => {
     try {
       const destination = await storage.updatePayoutDestination(req.params.id, req.body);
       if (!destination) {
@@ -6074,11 +7527,12 @@ export async function registerRoutes(
       }
       res.json(destination);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to update payout destination" });
+      const mapped = mapPaymentError(error, 'payout');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
-  app.delete("/api/payout-destinations/:id", async (req, res) => {
+  app.delete("/api/payout-destinations/:id", requireAuth, async (req, res) => {
     try {
       const deleted = await storage.deletePayoutDestination(req.params.id);
       if (!deleted) {
@@ -6086,12 +7540,13 @@ export async function registerRoutes(
       }
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to delete payout destination" });
+      const mapped = mapPaymentError(error, 'payout');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
   // ==================== PAYOUT ROUTES ====================
-  
+
   app.get("/api/payouts", async (req, res) => {
     try {
       const { recipientType, recipientId, status } = req.query;
@@ -6102,7 +7557,8 @@ export async function registerRoutes(
       });
       res.json(payoutsList);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch payouts" });
+      const mapped = mapPaymentError(error, 'payout');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -6114,14 +7570,15 @@ export async function registerRoutes(
       }
       res.json(payout);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch payout" });
+      const mapped = mapPaymentError(error, 'payout');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
   // Initiate payout (expense reimbursement, payroll, vendor payment)
-  app.post("/api/payouts", async (req, res) => {
+  app.post("/api/payouts", requireAuth, async (req, res) => {
     try {
-      const { 
+      const {
         type, amount, currency, recipientType, recipientId, recipientName,
         destinationId, relatedEntityType, relatedEntityId, initiatedBy
       } = req.body;
@@ -6129,7 +7586,7 @@ export async function registerRoutes(
       // Get payout destination
       let destination = null;
       let provider = 'stripe';
-      
+
       if (destinationId) {
         destination = await storage.getPayoutDestination(destinationId);
         if (destination) {
@@ -6155,12 +7612,131 @@ export async function registerRoutes(
 
       res.status(201).json(payout);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to create payout" });
+      const mapped = mapPaymentError(error, 'payout');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
+    }
+  });
+
+  // Payout approval (maker-checker for high-value)
+  app.post("/api/payouts/:id/approve", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const userId = (req as any).user?.uid;
+      const userName = await getAuditUserName(req);
+      const payout = await storage.getPayout(req.params.id);
+
+      if (!payout) {
+        return res.status(404).json({ error: "Payout not found" });
+      }
+
+      if (!['pending', 'pending_second_approval'].includes(payout.status)) {
+        return res.status(400).json({ error: "Payout is not in approvable status" });
+      }
+
+      const amount = parseFloat(payout.amount);
+      const settings = await storage.getSettings();
+      const dualApprovalThreshold = parseFloat(settings?.dualApprovalThreshold?.toString() || '5000');
+
+      // Check if dual approval is needed
+      if (amount >= dualApprovalThreshold) {
+        // Maker-checker: initiator cannot be the approver
+        if (payout.initiatedBy === userId) {
+          return res.status(403).json({
+            error: "High-value payouts require approval from a different admin (maker-checker policy)",
+            requiresDualApproval: true,
+            threshold: dualApprovalThreshold,
+          });
+        }
+
+        // Check if already has first approval
+        const metadata = payout.metadata ? JSON.parse(JSON.stringify(payout.metadata)) : {};
+        if (!metadata.firstApproval) {
+          // First approval - store it, keep as pending_second_approval
+          metadata.firstApproval = { by: userId, byName: userName, at: new Date().toISOString() };
+          const updatedPayout = await storage.updatePayout(payout.id, {
+            status: 'pending_second_approval',
+            metadata: metadata as any,
+          });
+
+          await logAudit(
+            'payout',
+            payout.id,
+            'first_approval',
+            userId,
+            userName,
+            { status: payout.status },
+            { status: 'pending_second_approval' },
+            { amount, threshold: dualApprovalThreshold, makerChecker: true }
+          );
+
+          return res.json({
+            status: 'pending_second_approval',
+            message: `Payout of ${payout.currency} ${amount} requires second approval (threshold: ${dualApprovalThreshold})`,
+            payout: updatedPayout,
+          });
+        }
+
+        // Second approval - different person check
+        if (metadata.firstApproval.by === userId) {
+          return res.status(403).json({
+            error: "Second approval must be from a different admin",
+          });
+        }
+
+        metadata.secondApproval = { by: userId, byName: userName, at: new Date().toISOString() };
+        const updatedPayout = await storage.updatePayout(payout.id, {
+          status: 'approved',
+          approvedBy: userId,
+          metadata: metadata as any,
+        });
+
+        await logAudit(
+          'payout',
+          payout.id,
+          'second_approval',
+          userId,
+          userName,
+          { status: 'pending_second_approval' },
+          { status: 'approved', approvedBy: userId },
+          { amount, makerChecker: true, firstApprover: metadata.firstApproval.by }
+        );
+
+        return res.json({
+          status: 'approved',
+          message: 'Payout approved with dual authorization. Ready for processing.',
+          payout: updatedPayout,
+        });
+      }
+
+      // Below threshold: single approval
+      const updatedPayout = await storage.updatePayout(payout.id, {
+        status: 'approved',
+        approvedBy: userId,
+      });
+
+      await logAudit(
+        'payout',
+        payout.id,
+        'approved',
+        userId,
+        userName,
+        { status: payout.status },
+        { status: 'approved', approvedBy: userId },
+        { amount, singleApproval: true }
+      );
+
+      res.json({
+        status: 'approved',
+        message: 'Payout approved. Ready for processing.',
+        payout: updatedPayout,
+      });
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'payout');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage });
     }
   });
 
   // Process payout (actually send money via Stripe/Paystack)
-  app.post("/api/payouts/:id/process", async (req, res) => {
+  app.post("/api/payouts/:id/process", requireAuth, requireAdmin, async (req, res) => {
     try {
       const payout = await storage.getPayout(req.params.id);
       if (!payout) {
@@ -6205,6 +7781,20 @@ export async function registerRoutes(
           providerReference: transferResult.reference,
           processedAt: new Date().toISOString(),
         });
+
+        // Log audit trail for payout processing
+        const userId = (req as any).user?.uid;
+        const userName = await getAuditUserName(req);
+        await logAudit(
+          'payout',
+          payout.id,
+          'processed',
+          userId,
+          userName,
+          { status: 'pending' },
+          { status: 'processing', providerTransferId: updatedPayout.providerTransferId },
+          { provider: destination.provider, amount: payout.amount, currency: payout.currency }
+        );
 
         // If related to an expense, update expense payout status
         if (payout.relatedEntityType === 'expense' && payout.relatedEntityId) {
@@ -6261,24 +7851,29 @@ export async function registerRoutes(
           status: 'failed',
           failureReason: transferError.message,
         });
-        res.status(500).json({ error: transferError.message || "Transfer failed" });
+        const mapped = mapPaymentError(transferError, 'payout');
+        res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
       }
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to process payout" });
+      const mapped = mapPaymentError(error, 'payout');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
   // ==================== BILL PAYMENT FROM WALLET ====================
-  
-  app.post("/api/bills/:id/pay", async (req, res) => {
+
+  app.post("/api/bills/:id/pay", requireAuth, async (req, res) => {
     try {
       const { walletId } = req.body;
-      
+      const company = await resolveUserCompany(req);
+
       const bill = await storage.getBill(req.params.id);
       if (!bill) {
         return res.status(404).json({ error: "Bill not found" });
       }
-
+      if (company && !await verifyCompanyAccess(bill.companyId, company.companyId)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
       if (bill.status === 'Paid') {
         return res.status(400).json({ error: "Bill already paid" });
       }
@@ -6289,23 +7884,18 @@ export async function registerRoutes(
       }
 
       const billAmount = parseFloat(bill.amount);
-      
-      // Debit wallet
-      const transaction = await storage.debitWallet(
-        walletId,
-        billAmount,
-        'bill_payment',
-        `Bill payment: ${bill.name}`,
-        `BILL-${bill.id}`,
-        { billId: bill.id }
-      );
+      const userId = (req as any).user?.uid || 'system';
 
-      // Update bill status
-      const updatedBill = await storage.updateBill(bill.id, {
-        status: 'Paid',
+      // Use atomic bill payment - debit + bill update in single transaction
+      const { walletTx, bill: updatedBill } = await storage.atomicBillPayment({
+        walletId,
+        billId: bill.id,
+        amount: billAmount,
+        reference: `BILL-${bill.id}`,
+        paidBy: userId,
       });
 
-      // Create a transaction record
+      // Create a transaction record (outside atomic - informational only)
       await storage.createTransaction({
         type: 'Bill',
         amount: bill.amount,
@@ -6318,8 +7908,7 @@ export async function registerRoutes(
 
       // Send bill payment confirmation email
       try {
-        const userId = (req as any).user?.uid;
-        if (userId) {
+        if (userId !== 'system') {
           const userSettings = await storage.getNotificationSettings(userId);
           const userProfile = await storage.getUser(userId);
           const userName = userProfile?.displayName || userProfile?.email?.split('@')[0] || 'User';
@@ -6340,16 +7929,63 @@ export async function registerRoutes(
         console.error('Failed to send bill payment email:', emailErr);
       }
 
-      res.json({ bill: updatedBill, walletTransaction: transaction });
+      res.json({ bill: updatedBill, walletTransaction: walletTx });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to pay bill" });
+      const mapped = mapPaymentError(error, 'bill_payment');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
   // ==================== EXPENSE APPROVAL & PAYOUT FLOW ====================
-  
+
+  // Reject expense with audit trail
+  app.post("/api/expenses/:id/reject", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { reason } = req.body;
+      const userId = (req as any).user?.uid;
+      const userName = await getAuditUserName(req);
+
+      const expense = await storage.getExpense(req.params.id);
+      if (!expense) {
+        return res.status(404).json({ error: "Expense not found" });
+      }
+
+      if (expense.status !== 'PENDING') {
+        return res.status(400).json({ error: "Only pending expenses can be rejected" });
+      }
+
+      const updatedExpense = await storage.updateExpense(expense.id, {
+        status: 'REJECTED',
+      });
+
+      // Log rejection to audit trail
+      await logAudit(
+        'expense',
+        expense.id,
+        'rejected',
+        userId,
+        userName,
+        { status: 'PENDING' },
+        { status: 'REJECTED' },
+        { reason: reason || 'No reason provided', rejectedBy: userId }
+      );
+
+      // Notify the submitter about rejection
+      await notificationService.notifyExpenseRejected(expense.userId, {
+        id: expense.id,
+        merchant: expense.merchant,
+        amount: parseFloat(expense.amount),
+      }).catch(err => console.error('Failed to notify rejection:', err));
+
+      res.json(updatedExpense);
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'payment');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage });
+    }
+  });
+
   // Approve expense and initiate payout
-  app.post("/api/expenses/:id/approve-and-pay", async (req, res) => {
+  app.post("/api/expenses/:id/approve-and-pay", requireAuth, requireAdmin, async (req, res) => {
     try {
       const { approvedBy, vendorId } = req.body;
       
@@ -6409,6 +8045,20 @@ export async function registerRoutes(
         payoutId: payout.id,
       });
 
+      // Log audit trail for expense approval
+      const userId = (req as any).user?.uid;
+      const userName = await getAuditUserName(req);
+      await logAudit(
+        'expense',
+        expense.id,
+        'approved',
+        userId,
+        userName,
+        { status: 'PENDING', payoutStatus: 'not_started' },
+        { status: 'APPROVED', payoutStatus: 'pending', payoutId: payout.id },
+        { approvedBy, vendorId, amount: expense.amount, currency: expense.currency }
+      );
+
       // Send notification
       await notificationService.notifyExpenseApproved(expense.userId, {
         id: expense.id,
@@ -6418,13 +8068,14 @@ export async function registerRoutes(
 
       res.json({ expense: updatedExpense, payout });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to approve expense" });
+      const mapped = mapPaymentError(error, 'payment');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
   // ==================== PAYROLL BATCH PAYOUT ====================
-  
-  app.post("/api/payroll/batch-payout", async (req, res) => {
+
+  app.post("/api/payroll/batch-payout", requireAuth, requireAdmin, async (req, res) => {
     try {
       const { payrollIds, initiatedBy } = req.body;
       
@@ -6469,13 +8120,14 @@ export async function registerRoutes(
 
       res.json({ results });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to create batch payouts" });
+      const mapped = mapPaymentError(error, 'payout');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
   // ==================== VENDOR PAYMENT ====================
-  
-  app.post("/api/vendors/:id/pay", async (req, res) => {
+
+  app.post("/api/vendors/:id/pay", requireAuth, async (req, res) => {
     try {
       const { amount, description, initiatedBy, invoiceId } = req.body;
       
@@ -6510,7 +8162,8 @@ export async function registerRoutes(
 
       res.status(201).json(payout);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to create vendor payment" });
+      const mapped = mapPaymentError(error, 'payment');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -6543,26 +8196,59 @@ export async function registerRoutes(
       let providerMessage = '';
 
       try {
-        const providerResult = await paymentService.createVirtualAccount(
-          safeEmail,
-          firstName || 'User',
-          lastName || safeName,
-          safeCountry,
-          phone,
-          bvn,
-          bankAccountNumber,
-          userBankCode
-        );
-        
-        if (providerResult.accountNumber) {
-          accountNumber = providerResult.accountNumber;
-          bankName = providerResult.bankName || bankName;
-          bankCode = providerResult.bankCode || bankCode;
-          accountName = providerResult.accountName || accountName;
-          accountStatus = 'active';
-        } else if (providerResult.status === 'pending_validation') {
-          accountStatus = 'pending';
-          providerMessage = providerResult.message || 'Account pending validation';
+        const provider = getPaymentProvider(safeCountry);
+
+        if (provider === 'stripe') {
+          // Use Stripe Treasury for non-African countries
+          try {
+            const financialAccount = await paymentService.createStripeFinancialAccount({
+              supportedCurrencies: [currency],
+            });
+
+            // Extract real bank account details from financial addresses
+            const abaAddress = financialAccount.financialAddresses?.find((a: any) => a.type === 'aba');
+            if (abaAddress?.aba) {
+              accountNumber = abaAddress.aba.account_number || financialAccount.id;
+              bankCode = abaAddress.aba.routing_number || 'STRIPE_TREASURY';
+              bankName = abaAddress.aba.bank_name || 'Stripe Treasury';
+            } else {
+              accountNumber = financialAccount.id;
+              bankCode = 'STRIPE_TREASURY';
+              bankName = 'Stripe Treasury';
+            }
+            accountStatus = financialAccount.status === 'open' ? 'active' : 'pending';
+            providerMessage = accountStatus === 'active'
+              ? 'Virtual account created with real bank details.'
+              : 'Virtual account created. Bank details will be available once account is activated.';
+            paymentLogger.info('stripe_treasury_account_created', { accountId: financialAccount.id, currency });
+          } catch (treasuryError: any) {
+            paymentLogger.error('stripe_treasury_creation_failed', { error: treasuryError.message, currency });
+            accountStatus = 'pending';
+            providerMessage = 'Stripe Treasury account pending activation. Your account will be activated shortly.';
+          }
+        } else {
+          // Use Paystack for African countries
+          const providerResult = await paymentService.createVirtualAccount(
+            safeEmail,
+            firstName || 'User',
+            lastName || safeName,
+            safeCountry,
+            phone,
+            bvn,
+            bankAccountNumber,
+            userBankCode
+          );
+
+          if (providerResult.accountNumber) {
+            accountNumber = providerResult.accountNumber;
+            bankName = providerResult.bankName || bankName;
+            bankCode = providerResult.bankCode || bankCode;
+            accountName = providerResult.accountName || accountName;
+            accountStatus = 'active';
+          } else if (providerResult.status === 'pending_validation') {
+            accountStatus = 'pending';
+            providerMessage = providerResult.message || 'Account pending validation';
+          }
         }
       } catch (providerError: any) {
         console.log('Payment provider virtual account creation failed:', providerError.message);
@@ -6608,7 +8294,8 @@ export async function registerRoutes(
       res.status(201).json(response);
     } catch (error: any) {
       console.error('Virtual account creation error:', error);
-      res.status(500).json({ error: error.message || "Failed to create virtual account" });
+      const mapped = mapPaymentError(error, 'virtual_account');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -6731,7 +8418,7 @@ export async function registerRoutes(
   // ==================== INVOICE WITH VIRTUAL ACCOUNT ====================
   
   // Get invoice with virtual account details
-  app.get("/api/invoices/:id/payment-details", async (req, res) => {
+  app.get("/api/invoices/:id/payment-details", requireAuth, async (req, res) => {
     try {
       const invoice = await storage.getInvoice(req.params.id);
       if (!invoice) {
@@ -6754,13 +8441,14 @@ export async function registerRoutes(
         } : null,
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch invoice payment details" });
+      const mapped = mapPaymentError(error, 'payment');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
   // ==================== FUNDING SOURCE ROUTES ====================
   
-  app.get("/api/funding-sources", async (req, res) => {
+  app.get("/api/funding-sources", requireAuth, async (req, res) => {
     try {
       const { userId } = req.query;
       if (!userId) {
@@ -6769,20 +8457,26 @@ export async function registerRoutes(
       const sources = await storage.getFundingSources(userId as string);
       res.json(sources);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch funding sources" });
+      const mapped = mapPaymentError(error, 'funding');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
-  app.post("/api/funding-sources", async (req, res) => {
+  app.post("/api/funding-sources", requireAuth, async (req, res) => {
     try {
-      const source = await storage.createFundingSource(req.body);
+      const result = fundingSourceSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid funding source data", details: result.error.issues });
+      }
+      const source = await storage.createFundingSource(result.data);
       res.status(201).json(source);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to create funding source" });
+      const mapped = mapPaymentError(error, 'funding');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
-  app.delete("/api/funding-sources/:id", async (req, res) => {
+  app.delete("/api/funding-sources/:id", requireAuth, async (req, res) => {
     try {
       const deleted = await storage.deleteFundingSource(req.params.id);
       if (!deleted) {
@@ -6790,7 +8484,8 @@ export async function registerRoutes(
       }
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to delete funding source" });
+      const mapped = mapPaymentError(error, 'funding');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
     }
   });
 
@@ -6974,7 +8669,7 @@ export async function registerRoutes(
   });
 
   // Send email verification
-  app.post("/api/auth/send-verification", async (req, res) => {
+  app.post("/api/auth/send-verification", emailLimiter, async (req, res) => {
     try {
       const { email, name, verificationLink } = req.body;
       
@@ -7019,7 +8714,7 @@ export async function registerRoutes(
   });
 
   // Resend invoice email
-  app.post("/api/invoices/:id/send", async (req, res) => {
+  app.post("/api/invoices/:id/send", emailLimiter, async (req, res) => {
     try {
       const invoice = await storage.getInvoice(req.params.id);
       if (!invoice) {
@@ -7057,6 +8752,202 @@ export async function registerRoutes(
       res.json({ success: result.success, message: result.success ? 'Invoice sent successfully' : result.error });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to send invoice" });
+    }
+  });
+
+  // ==================== AUDIT LOG ENDPOINTS ====================
+
+  // Get audit logs with optional filtering
+  app.get("/api/audit-logs", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { entityType, entityId, limit = 50 } = req.query;
+      const logs = await storage.getAuditLogs();
+
+      let filtered = logs;
+
+      // Filter by entity type if provided
+      if (entityType) {
+        filtered = filtered.filter(log => log.entityType === entityType);
+      }
+
+      // Filter by entity ID if provided
+      if (entityId) {
+        filtered = filtered.filter(log => log.entityId === entityId);
+      }
+
+      // Apply limit
+      const limitNum = Math.min(parseInt(limit as string) || 50, 1000);
+      filtered = filtered.slice(0, limitNum);
+
+      res.json(filtered);
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'audit');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage });
+    }
+  });
+
+  // Get audit trail for a specific entity
+  app.get("/api/audit-logs/:entityType/:entityId", requireAuth, async (req, res) => {
+    try {
+      const { entityType, entityId } = req.params;
+      const logs = await storage.getAuditLogs();
+
+      const filtered = logs.filter(
+        log => log.entityType === entityType && log.entityId === entityId
+      );
+
+      res.json(filtered);
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'audit');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage });
+    }
+  });
+
+  // ==================== BATCH DISBURSEMENT ====================
+
+  // Batch disbursement (process multiple approved payouts)
+  app.post("/api/payouts/batch-process", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const userId = (req as any).user?.uid;
+      const userName = await getAuditUserName(req);
+      const { payoutIds } = req.body;
+
+      if (!Array.isArray(payoutIds) || payoutIds.length === 0) {
+        return res.status(400).json({ error: "Payout IDs array required" });
+      }
+
+      if (payoutIds.length > 50) {
+        return res.status(400).json({ error: "Maximum 50 payouts per batch" });
+      }
+
+      const results: any[] = [];
+      const paystackBatch: any[] = [];
+
+      for (const payoutId of payoutIds) {
+        try {
+          const payout = await storage.getPayout(payoutId);
+          if (!payout || !['pending', 'approved'].includes(payout.status)) {
+            results.push({ payoutId, status: 'skipped', reason: 'Not pending/approved' });
+            continue;
+          }
+
+          const destination = payout.destinationId
+            ? await storage.getPayoutDestination(payout.destinationId)
+            : null;
+
+          if (!destination) {
+            results.push({ payoutId, status: 'failed', reason: 'No destination configured' });
+            continue;
+          }
+
+          // Group Paystack transfers for bulk
+          if (destination.provider === 'paystack') {
+            paystackBatch.push({ payout, destination });
+          } else {
+            // Process Stripe individually
+            try {
+              const transferResult = await paymentService.initiateTransfer(
+                parseFloat(payout.amount),
+                {
+                  accountNumber: destination.accountNumber,
+                  bankCode: destination.bankCode,
+                  accountName: destination.accountName,
+                  stripeAccountId: destination.providerRecipientId,
+                  currency: destination.currency,
+                },
+                destination.country || 'US',
+                `Batch payout: ${payout.type} - ${payout.id}`
+              );
+
+              await storage.updatePayout(payout.id, {
+                status: transferResult.status === 'completed' ? 'completed' : 'processing',
+                providerTransferId: transferResult.transferId || transferResult.reference,
+                processedAt: new Date().toISOString(),
+              });
+
+              await logAudit(
+                'payout',
+                payout.id,
+                'batch_processed',
+                userId,
+                userName,
+                { status: payout.status },
+                { status: 'processing', batch: true }
+              );
+
+              results.push({ payoutId, status: 'processing', transferId: transferResult.transferId });
+            } catch (err: any) {
+              await storage.updatePayout(payout.id, {
+                status: 'failed',
+                failureReason: err.message,
+              });
+              results.push({ payoutId, status: 'failed', error: err.message });
+            }
+          }
+        } catch (err: any) {
+          results.push({ payoutId, status: 'error', error: err.message });
+        }
+      }
+
+      // Process Paystack batch if any
+      if (paystackBatch.length > 0) {
+        try {
+          const bulkTransfers = [];
+          for (const { payout, destination } of paystackBatch) {
+            // Create recipient first
+            const recipientResult = await paystackClient.createTransferRecipient(
+              destination.accountName || 'Recipient',
+              destination.accountNumber,
+              destination.bankCode,
+              destination.currency || 'NGN'
+            );
+
+            bulkTransfers.push({
+              amount: parseFloat(payout.amount),
+              recipient: recipientResult.data.recipient_code,
+              reason: `${payout.type}: ${payout.id}`,
+              reference: `batch_${payout.id}_${Date.now()}`,
+            });
+          }
+
+          const bulkResult = await paystackClient.bulkTransfer(bulkTransfers);
+
+          for (let i = 0; i < paystackBatch.length; i++) {
+            const { payout } = paystackBatch[i];
+            await storage.updatePayout(payout.id, {
+              status: 'processing',
+              processedAt: new Date().toISOString(),
+            });
+
+            await logAudit(
+              'payout',
+              payout.id,
+              'batch_processed',
+              userId,
+              userName,
+              { status: payout.status },
+              { status: 'processing', batch: true, provider: 'paystack' }
+            );
+
+            results.push({ payoutId: payout.id, status: 'processing', provider: 'paystack' });
+          }
+        } catch (err: any) {
+          for (const { payout } of paystackBatch) {
+            results.push({ payoutId: payout.id, status: 'failed', error: err.message });
+          }
+        }
+      }
+
+      res.json({
+        total: payoutIds.length,
+        processed: results.filter(r => ['processing', 'completed'].includes(r.status)).length,
+        failed: results.filter(r => r.status === 'failed').length,
+        skipped: results.filter(r => r.status === 'skipped').length,
+        results,
+      });
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'payout');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage });
     }
   });
 

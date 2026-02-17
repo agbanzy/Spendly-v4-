@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { formatCurrencyAmount } from "@/lib/constants";
 import { PageWrapper, PageHeader, MetricCard, StatusBadge, EmptyState, GlassCard, fadeUp, stagger } from "@/components/ui-extended";
 import {
   Building2,
@@ -36,16 +37,10 @@ export default function VendorsPage() {
     queryKey: ["/api/settings"],
   });
 
-  // Currency formatting
-  const currencySymbols: Record<string, string> = {
-    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
-  };
   const currency = settings?.currency || "USD";
-  const currencySymbol = currencySymbols[currency] || "$";
-  
+
   const formatCurrency = (amount: number | string) => {
-    const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
-    return `${currencySymbol}${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return formatCurrencyAmount(amount, currency);
   };
 
   const { data: vendors = [], isLoading } = useQuery<Vendor[]>({

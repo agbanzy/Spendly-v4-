@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import * as ImagePicker from 'expo-image-picker';
 import { api } from '../lib/api';
+import { useTheme } from '../lib/theme-context';
+import { ColorTokens } from '../lib/colors';
 
 interface Expense {
   id: number;
@@ -30,6 +33,8 @@ const categories = ['Software', 'Travel', 'Office', 'Marketing', 'Food', 'Equipm
 const statusFilters = ['all', 'pending', 'approved', 'rejected'];
 
 export default function ExpensesScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const queryClient = useQueryClient();
   const [modalVisible, setModalVisible] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
@@ -39,6 +44,7 @@ export default function ExpensesScreen() {
   const [merchant, setMerchant] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [receiptUri, setReceiptUri] = useState<string | null>(null);
 
   const { data: expenses, isLoading, refetch } = useQuery({
     queryKey: ['expenses'],
@@ -47,7 +53,7 @@ export default function ExpensesScreen() {
 
   const createExpense = useMutation({
     mutationFn: (data: { description: string; amount: number; category: string; merchant?: string }) =>
-      api.post('/api/expenses', { merchant: data.description, amount: data.amount, category: data.category, note: data.merchant || undefined }),
+      api.post('/api/expenses', { description: data.description, amount: data.amount, category: data.category, merchant: data.merchant || undefined }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       closeModal();
@@ -60,7 +66,7 @@ export default function ExpensesScreen() {
 
   const updateExpense = useMutation({
     mutationFn: (data: { id: number; description: string; amount: number; category: string; merchant?: string }) =>
-      api.patch(`/api/expenses/${data.id}`, { merchant: data.description, amount: data.amount, category: data.category, note: data.merchant || undefined }),
+      api.patch(`/api/expenses/${data.id}`, { description: data.description, amount: data.amount, category: data.category, merchant: data.merchant || undefined }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       closeModal();
@@ -87,12 +93,44 @@ export default function ExpensesScreen() {
     setAmount('');
     setCategory('Other');
     setMerchant('');
+    setReceiptUri(null);
     setEditingExpense(null);
   };
 
   const closeModal = () => {
     setModalVisible(false);
     resetForm();
+  };
+
+  const pickReceipt = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission Required', 'Please allow access to your photo library.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      quality: 0.7,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setReceiptUri(result.assets[0].uri);
+    }
+  };
+
+  const takePhoto = async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission Required', 'Please allow camera access.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      quality: 0.7,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setReceiptUri(result.assets[0].uri);
+    }
   };
 
   const openCreateModal = () => {
@@ -159,10 +197,10 @@ export default function ExpensesScreen() {
 
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
-      case 'approved': return '#10B981';
-      case 'pending': return '#F59E0B';
-      case 'rejected': return '#EF4444';
-      default: return '#94A3B8';
+      case 'approved': return colors.success;
+      case 'pending': return colors.warning;
+      case 'rejected': return colors.danger;
+      default: return colors.textSecondary;
     }
   };
 
@@ -180,7 +218,7 @@ export default function ExpensesScreen() {
   const renderExpense = ({ item }: { item: Expense }) => (
     <TouchableOpacity style={styles.expenseCard} onPress={() => openEditModal(item)} onLongPress={() => handleDelete(item)}>
       <View style={styles.expenseIcon}>
-        <Ionicons name="receipt-outline" size={20} color="#818CF8" />
+        <Ionicons name="receipt-outline" size={20} color={colors.accent} />
       </View>
       <View style={styles.expenseContent}>
         <Text style={styles.expenseDescription}>{item.description}</Text>
@@ -204,23 +242,23 @@ export default function ExpensesScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Expenses</Text>
         <TouchableOpacity style={styles.addButton} onPress={openCreateModal}>
-          <Ionicons name="add" size={24} color="#FFFFFF" />
+          <Ionicons name="add" size={24} color={colors.primaryForeground} />
         </TouchableOpacity>
       </View>
 
       {/* Search Bar */}
       <View style={styles.searchContainer}>
-        <Ionicons name="search" size={18} color="#64748B" />
+        <Ionicons name="search" size={18} color={colors.textTertiary} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search expenses..."
-          placeholderTextColor="#64748B"
+          placeholderTextColor={colors.placeholderText}
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
         {searchQuery !== '' && (
           <TouchableOpacity onPress={() => setSearchQuery('')}>
-            <Ionicons name="close-circle" size={18} color="#64748B" />
+            <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
           </TouchableOpacity>
         )}
       </View>
@@ -246,11 +284,11 @@ export default function ExpensesScreen() {
         renderItem={renderExpense}
         contentContainerStyle={styles.listContent}
         refreshControl={
-          <RefreshControl refreshing={isLoading} onRefresh={refetch} tintColor="#818CF8" />
+          <RefreshControl refreshing={isLoading} onRefresh={refetch} tintColor={colors.accent} />
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Ionicons name="receipt-outline" size={48} color="#334155" />
+            <Ionicons name="receipt-outline" size={48} color={colors.border} />
             <Text style={styles.emptyText}>No expenses found</Text>
             <Text style={styles.emptySubtext}>
               {searchQuery || statusFilter !== 'all' ? 'Try different filters' : 'Tap + to add your first expense'}
@@ -269,7 +307,7 @@ export default function ExpensesScreen() {
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <TouchableOpacity onPress={closeModal}>
-              <Ionicons name="close" size={24} color="#FFFFFF" />
+              <Ionicons name="close" size={24} color={colors.textPrimary} />
             </TouchableOpacity>
             <Text style={styles.modalTitle}>{editingExpense ? 'Edit Expense' : 'New Expense'}</Text>
             <View style={{ width: 24 }} />
@@ -280,7 +318,7 @@ export default function ExpensesScreen() {
             <TextInput
               style={styles.input}
               placeholder="What did you spend on?"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={colors.placeholderText}
               value={description}
               onChangeText={setDescription}
             />
@@ -289,7 +327,7 @@ export default function ExpensesScreen() {
             <TextInput
               style={styles.input}
               placeholder="0.00"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={colors.placeholderText}
               value={amount}
               onChangeText={setAmount}
               keyboardType="decimal-pad"
@@ -314,10 +352,34 @@ export default function ExpensesScreen() {
             <TextInput
               style={styles.input}
               placeholder="Store or vendor name"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={colors.placeholderText}
               value={merchant}
               onChangeText={setMerchant}
             />
+
+            <Text style={styles.label}>Receipt (Optional)</Text>
+            <View style={styles.receiptSection}>
+              {receiptUri ? (
+                <View style={styles.receiptPreview}>
+                  <Ionicons name="document-attach" size={24} color={colors.accent} />
+                  <Text style={styles.receiptFileName} numberOfLines={1}>Receipt attached</Text>
+                  <TouchableOpacity onPress={() => setReceiptUri(null)}>
+                    <Ionicons name="close-circle" size={20} color={colors.dangerLight} />
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.receiptButtons}>
+                  <TouchableOpacity style={styles.receiptButton} onPress={takePhoto}>
+                    <Ionicons name="camera-outline" size={20} color={colors.accent} />
+                    <Text style={styles.receiptButtonText}>Camera</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.receiptButton} onPress={pickReceipt}>
+                    <Ionicons name="image-outline" size={20} color={colors.accent} />
+                    <Text style={styles.receiptButtonText}>Gallery</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
 
             <TouchableOpacity
               style={[styles.submitButton, isPending && styles.submitButtonDisabled]}
@@ -325,7 +387,7 @@ export default function ExpensesScreen() {
               disabled={isPending}
             >
               {isPending ? (
-                <ActivityIndicator color="#FFFFFF" />
+                <ActivityIndicator color={colors.primaryForeground} />
               ) : (
                 <Text style={styles.submitButtonText}>
                   {editingExpense ? 'Update Expense' : 'Create Expense'}
@@ -341,7 +403,7 @@ export default function ExpensesScreen() {
                   handleDelete(editingExpense);
                 }}
               >
-                <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                <Ionicons name="trash-outline" size={18} color={colors.danger} />
                 <Text style={styles.deleteButtonText}>Delete Expense</Text>
               </TouchableOpacity>
             )}
@@ -352,90 +414,132 @@ export default function ExpensesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F172A' },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 16,
-  },
-  title: { fontSize: 28, fontWeight: 'bold', color: '#FFFFFF' },
-  addButton: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: '#4F46E5', alignItems: 'center', justifyContent: 'center',
-  },
-  searchContainer: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#1E293B', borderRadius: 12,
-    marginHorizontal: 20, marginBottom: 12,
-    paddingHorizontal: 14, paddingVertical: 10,
-    borderWidth: 1, borderColor: '#334155',
-  },
-  searchInput: { flex: 1, marginLeft: 8, fontSize: 15, color: '#FFFFFF' },
-  filterRow: {
-    flexDirection: 'row', paddingHorizontal: 20, gap: 8, marginBottom: 12,
-  },
-  filterChip: {
-    paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16,
-    backgroundColor: '#1E293B', borderWidth: 1, borderColor: '#334155',
-  },
-  filterChipActive: { backgroundColor: '#4F46E5', borderColor: '#4F46E5' },
-  filterChipText: { fontSize: 13, color: '#94A3B8' },
-  filterChipTextActive: { color: '#FFFFFF', fontWeight: '600' },
-  listContent: { padding: 20, paddingTop: 0 },
-  expenseCard: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#1E293B', borderRadius: 12,
-    padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#334155',
-  },
-  expenseIcon: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#334155', alignItems: 'center', justifyContent: 'center',
-  },
-  expenseContent: { flex: 1, marginLeft: 12 },
-  expenseDescription: { fontSize: 14, color: '#FFFFFF', fontWeight: '500' },
-  expenseMeta: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
-  expenseRight: { alignItems: 'flex-end' },
-  expenseAmount: { fontSize: 14, color: '#F87171', fontWeight: '600' },
-  expenseStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
-  statusDot: { width: 6, height: 6, borderRadius: 3 },
-  expenseStatus: { fontSize: 11, fontWeight: '500', textTransform: 'capitalize' },
-  expenseDate: { fontSize: 11, color: '#64748B', marginTop: 2 },
-  empty: { alignItems: 'center', paddingTop: 60 },
-  emptyText: { fontSize: 16, color: '#94A3B8', marginTop: 16 },
-  emptySubtext: { fontSize: 14, color: '#64748B', marginTop: 4 },
-  modalContainer: { flex: 1, backgroundColor: '#0F172A' },
-  modalHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    padding: 20, borderBottomWidth: 1, borderBottomColor: '#334155',
-  },
-  modalTitle: { fontSize: 18, fontWeight: '600', color: '#FFFFFF' },
-  form: { padding: 20 },
-  label: { fontSize: 14, color: '#94A3B8', marginBottom: 8, marginTop: 16 },
-  input: {
-    backgroundColor: '#1E293B', borderRadius: 12, padding: 16,
-    fontSize: 16, color: '#FFFFFF', borderWidth: 1, borderColor: '#334155',
-  },
-  categoryContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  categoryChip: {
-    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20,
-    backgroundColor: '#1E293B', borderWidth: 1, borderColor: '#334155',
-  },
-  categoryChipSelected: { backgroundColor: '#4F46E5', borderColor: '#4F46E5' },
-  categoryText: { fontSize: 14, color: '#94A3B8' },
-  categoryTextSelected: { color: '#FFFFFF' },
-  submitButton: {
-    backgroundColor: '#4F46E5', borderRadius: 12, padding: 16,
-    alignItems: 'center', marginTop: 32,
-  },
-  submitButtonDisabled: { opacity: 0.7 },
-  submitButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  deleteButton: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, marginTop: 16, padding: 16,
-  },
-  deleteButtonText: { color: '#EF4444', fontSize: 14, fontWeight: '500' },
-});
+function createStyles(colors: ColorTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.background },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingTop: 60,
+      paddingBottom: 16,
+    },
+    title: { fontSize: 28, fontWeight: 'bold', color: colors.textPrimary },
+    addButton: {
+      width: 44, height: 44, borderRadius: 22,
+      backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
+    },
+    searchContainer: {
+      flexDirection: 'row', alignItems: 'center',
+      backgroundColor: colors.surface, borderRadius: 12,
+      marginHorizontal: 20, marginBottom: 12,
+      paddingHorizontal: 14, paddingVertical: 10,
+      borderWidth: 1, borderColor: colors.border,
+    },
+    searchInput: { flex: 1, marginLeft: 8, fontSize: 15, color: colors.inputText },
+    filterRow: {
+      flexDirection: 'row', paddingHorizontal: 20, gap: 8, marginBottom: 12,
+    },
+    filterChip: {
+      paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16,
+      backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    },
+    filterChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+    filterChipText: { fontSize: 13, color: colors.textSecondary },
+    filterChipTextActive: { color: colors.primaryForeground, fontWeight: '600' },
+    listContent: { padding: 20, paddingTop: 0 },
+    expenseCard: {
+      flexDirection: 'row', alignItems: 'center',
+      backgroundColor: colors.surface, borderRadius: 12,
+      padding: 16, marginBottom: 8, borderWidth: 1, borderColor: colors.border,
+    },
+    expenseIcon: {
+      width: 40, height: 40, borderRadius: 20,
+      backgroundColor: colors.border, alignItems: 'center', justifyContent: 'center',
+    },
+    expenseContent: { flex: 1, marginLeft: 12 },
+    expenseDescription: { fontSize: 14, color: colors.textPrimary, fontWeight: '500' },
+    expenseMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+    expenseRight: { alignItems: 'flex-end' },
+    expenseAmount: { fontSize: 14, color: colors.colorRed, fontWeight: '600' },
+    expenseStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+    statusDot: { width: 6, height: 6, borderRadius: 3 },
+    expenseStatus: { fontSize: 11, fontWeight: '500', textTransform: 'capitalize' },
+    expenseDate: { fontSize: 11, color: colors.textTertiary, marginTop: 2 },
+    empty: { alignItems: 'center', paddingTop: 60 },
+    emptyText: { fontSize: 16, color: colors.textSecondary, marginTop: 16 },
+    emptySubtext: { fontSize: 14, color: colors.textTertiary, marginTop: 4 },
+    modalContainer: { flex: 1, backgroundColor: colors.background },
+    modalHeader: {
+      flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+      padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border,
+    },
+    modalTitle: { fontSize: 18, fontWeight: '600', color: colors.textPrimary },
+    form: { padding: 20 },
+    label: { fontSize: 14, color: colors.textSecondary, marginBottom: 8, marginTop: 16 },
+    input: {
+      backgroundColor: colors.inputBackground, borderRadius: 12, padding: 16,
+      fontSize: 16, color: colors.inputText, borderWidth: 1, borderColor: colors.inputBorder,
+    },
+    categoryContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    categoryChip: {
+      paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20,
+      backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    },
+    categoryChipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+    categoryText: { fontSize: 14, color: colors.textSecondary },
+    categoryTextSelected: { color: colors.primaryForeground },
+    submitButton: {
+      backgroundColor: colors.primary, borderRadius: 12, padding: 16,
+      alignItems: 'center', marginTop: 32,
+    },
+    submitButtonDisabled: { opacity: 0.7 },
+    submitButtonText: { color: colors.primaryForeground, fontSize: 16, fontWeight: '600' },
+    deleteButton: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+      gap: 8, marginTop: 16, padding: 16,
+    },
+    deleteButtonText: { color: colors.danger, fontSize: 14, fontWeight: '500' },
+    receiptSection: {
+      marginTop: 4,
+    },
+    receiptButtons: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    receiptButton: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderStyle: 'dashed',
+    },
+    receiptButtonText: {
+      color: colors.accent,
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    receiptPreview: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 14,
+      gap: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    receiptFileName: {
+      flex: 1,
+      color: colors.textSoft,
+      fontSize: 14,
+    },
+  });
+}

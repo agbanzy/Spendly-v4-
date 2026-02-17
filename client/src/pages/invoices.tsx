@@ -10,6 +10,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { getCurrencySymbol, formatCurrencyAmount } from "@/lib/constants";
 import {
   PageWrapper,
   PageHeader,
@@ -79,16 +80,11 @@ export default function InvoicesPage() {
     queryKey: ["/api/settings"],
   });
 
-  // Currency formatting
-  const currencySymbols: Record<string, string> = {
-    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
-  };
   const currency = settings?.currency || "USD";
-  const currencySymbol = currencySymbols[currency] || "$";
-  
+  const currencySymbol = getCurrencySymbol(currency);
+
   const formatCurrency = (amount: number | string) => {
-    const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
-    return `${currencySymbol}${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return formatCurrencyAmount(amount, currency);
   };
   
   const [invoiceForm, setInvoiceForm] = useState({

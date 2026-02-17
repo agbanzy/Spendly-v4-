@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { getCurrencySymbol, formatCurrencyAmount } from "@/lib/constants";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import {
@@ -52,15 +53,7 @@ interface Settings {
   currency: string;
 }
 
-const currencySymbols: Record<string, string> = {
-  USD: "$",
-  EUR: "€",
-  GBP: "£",
-  NGN: "₦",
-  KES: "KSh",
-  GHS: "₵",
-  ZAR: "R",
-};
+// Currency symbols are now imported from constants
 
 const departmentColors: Record<string, { badge: string; text: string; bg: string }> = {
   Engineering: { badge: "bg-violet-100 text-violet-700 dark:bg-violet-900 dark:text-violet-300", text: "text-violet-600", bg: "bg-violet-50 dark:bg-violet-950/30" },
@@ -109,10 +102,10 @@ export default function PayrollPage() {
   });
 
   const currency = settings?.currency || "USD";
-  const currencySymbol = currencySymbols[currency] || currency;
+  const currencySymbol = getCurrencySymbol(currency);
 
   const formatCurrency = (amount: number) => {
-    return `${currencySymbol}${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return formatCurrencyAmount(amount, currency);
   };
 
   const { data: payrollEntries = [], isLoading } = useQuery<PayrollEntry[]>({

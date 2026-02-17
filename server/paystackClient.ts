@@ -246,4 +246,169 @@ export const paystackClient = {
       authorization_code: authorizationCode,
     });
   },
+
+  // ==================== VIRTUAL CARD & TRANSFER METHODS ====================
+
+  async createManagedAccount(params: {
+    customerId: string;
+    currency: string;
+    name: string;
+    type: 'virtual';
+  }) {
+    return paystackRequest('/subaccount', 'POST', {
+      business_name: params.name,
+      settlement_bank: 'wema-bank',
+      account_number: '',
+      percentage_charge: 0,
+      description: `Virtual card wallet - ${params.name}`,
+      metadata: {
+        type: 'virtual_card',
+        customerId: params.customerId,
+        currency: params.currency,
+      },
+    });
+  },
+
+  async listTransferRecipients(params?: { perPage?: number; page?: number }) {
+    const query = new URLSearchParams();
+    if (params?.perPage) query.append('perPage', String(params.perPage));
+    if (params?.page) query.append('page', String(params.page));
+    return paystackRequest(`/transferrecipient?${query.toString()}`, 'GET');
+  },
+
+  async fetchTransfer(transferCode: string) {
+    return paystackRequest(`/transfer/${transferCode}`, 'GET');
+  },
+
+  async verifyTransfer(reference: string) {
+    return paystackRequest(`/transfer/verify/${reference}`, 'GET');
+  },
+
+  async finalizeTransfer(transferCode: string, otp: string) {
+    return paystackRequest('/transfer/finalize_transfer', 'POST', {
+      transfer_code: transferCode,
+      otp,
+    });
+  },
+
+  async bulkTransfer(transfers: Array<{
+    amount: number;
+    recipient: string;
+    reason?: string;
+    reference?: string;
+  }>) {
+    return paystackRequest('/transfer/bulk', 'POST', {
+      source: 'balance',
+      transfers: transfers.map(t => ({
+        amount: Math.round(t.amount * 100),
+        recipient: t.recipient,
+        reason: t.reason || 'Payout',
+        reference: t.reference || `bulk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      })),
+    });
+  },
+
+  async fetchBalance() {
+    return paystackRequest('/balance', 'GET');
+  },
+
+  async fetchSettlements(params?: { perPage?: number; page?: number; from?: string; to?: string }) {
+    const query = new URLSearchParams();
+    if (params?.perPage) query.append('perPage', String(params.perPage));
+    if (params?.page) query.append('page', String(params.page));
+    if (params?.from) query.append('from', params.from);
+    if (params?.to) query.append('to', params.to);
+    return paystackRequest(`/settlement?${query.toString()}`, 'GET');
+  },
+
+  async listBanks(country?: string) {
+    const query = country ? `?country=${country}` : '';
+    return paystackRequest(`/bank${query}`, 'GET');
+  },
+
+  async resolveAccountNumber(accountNumber: string, bankCode: string) {
+    return paystackRequest(`/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`, 'GET');
+  },
+
+  // ==================== BILL PAYMENTS / UTILITIES ====================
+
+  /**
+   * List available bill payment providers (billers) for a category.
+   * Paystack charges API (formerly bills API) uses the /integration endpoint
+   * to fetch available billers for categories like airtime, data, power, tv, internet.
+   */
+  async listBillers(category?: string) {
+    const query = category ? `?category=${encodeURIComponent(category)}` : '';
+    return paystackRequest(`/integration/payment/biller${query}`, 'GET');
+  },
+
+  /**
+   * Validate a customer reference (phone number, meter number, smartcard number)
+   * before making a bill payment.
+   */
+  async validateBillCustomer(itemCode: string, code: string, customer: string) {
+    return paystackRequest('/integration/payment/validate-customer', 'POST', {
+      item_code: itemCode,
+      code,
+      customer,
+    });
+  },
+
+  /**
+   * Create a bill payment order (airtime, data, electricity, cable, internet).
+   * This is the core method for all utility payments through Paystack.
+   *
+   * @param amount Amount in major units (naira). Will be converted to kobo internally by Paystack for some billers.
+   * @param billerCode The biller's code from listBillers
+   * @param itemCode The specific item/plan code
+   * @param customer Customer reference (phone, meter, smartcard number)
+   * @param metadata Optional metadata
+   */
+  async createBillPayment(amount: number, billerCode: string, itemCode: string, customer: string, metadata?: any) {
+    return paystackRequest('/integration/payment/create-order', 'POST', {
+      amount,
+      biller_code: billerCode,
+      item_code: itemCode,
+      customer,
+      metadata,
+    });
+  },
+
+  /**
+   * Purchase airtime directly via Paystack.
+   * Simplified wrapper for common airtime purchases.
+   */
+  async purchaseAirtime(amount: number, phone: string, countryCode: string = 'NG') {
+    // Paystack's dedicated airtime endpoint
+    return paystackRequest('/charge', 'POST', {
+      amount: Math.round(amount * 100), // kobo
+      email: `airtime-${phone}@spendly.internal`, // Paystack requires email
+      metadata: {
+        custom_fields: [
+          { display_name: 'Phone Number', variable_name: 'phone', value: phone },
+          { display_name: 'Type', variable_name: 'type', value: 'airtime' },
+          { display_name: 'Country', variable_name: 'country', value: countryCode },
+        ],
+      },
+    });
+  },
+
+  /**
+   * Fetch the status of a bill payment order.
+   */
+  async getBillPaymentStatus(orderId: string) {
+    return paystackRequest(`/integration/payment/order/${orderId}`, 'GET');
+  },
+
+  /**
+   * List bill payment history.
+   */
+  async listBillPayments(params?: { perPage?: number; page?: number; from?: string; to?: string }) {
+    const query = new URLSearchParams();
+    if (params?.perPage) query.append('perPage', String(params.perPage));
+    if (params?.page) query.append('page', String(params.page));
+    if (params?.from) query.append('from', params.from);
+    if (params?.to) query.append('to', params.to);
+    return paystackRequest(`/integration/payment/orders?${query.toString()}`, 'GET');
+  },
 };

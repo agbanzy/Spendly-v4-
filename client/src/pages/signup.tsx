@@ -23,16 +23,34 @@ export default function SignupPage() {
   const inviteToken = searchParams.get("invite");
 
   const countries = [
+    // Stripe - North America
     { code: "US", name: "United States", dial: "+1" },
+    { code: "CA", name: "Canada", dial: "+1" },
+    // Stripe - Europe
     { code: "GB", name: "United Kingdom", dial: "+44" },
-    { code: "NG", name: "Nigeria", dial: "+234" },
-    { code: "GH", name: "Ghana", dial: "+233" },
-    { code: "KE", name: "Kenya", dial: "+254" },
-    { code: "ZA", name: "South Africa", dial: "+27" },
     { code: "DE", name: "Germany", dial: "+49" },
     { code: "FR", name: "France", dial: "+33" },
-    { code: "CA", name: "Canada", dial: "+1" },
+    { code: "ES", name: "Spain", dial: "+34" },
+    { code: "IT", name: "Italy", dial: "+39" },
+    { code: "NL", name: "Netherlands", dial: "+31" },
+    { code: "BE", name: "Belgium", dial: "+32" },
+    { code: "AT", name: "Austria", dial: "+43" },
+    { code: "CH", name: "Switzerland", dial: "+41" },
+    { code: "SE", name: "Sweden", dial: "+46" },
+    { code: "NO", name: "Norway", dial: "+47" },
+    { code: "DK", name: "Denmark", dial: "+45" },
+    { code: "FI", name: "Finland", dial: "+358" },
+    { code: "IE", name: "Ireland", dial: "+353" },
+    { code: "PT", name: "Portugal", dial: "+351" },
     { code: "AU", name: "Australia", dial: "+61" },
+    // Paystack - Africa
+    { code: "NG", name: "Nigeria", dial: "+234" },
+    { code: "GH", name: "Ghana", dial: "+233" },
+    { code: "ZA", name: "South Africa", dial: "+27" },
+    { code: "KE", name: "Kenya", dial: "+254" },
+    { code: "EG", name: "Egypt", dial: "+20" },
+    { code: "RW", name: "Rwanda", dial: "+250" },
+    { code: "CI", name: "Côte d'Ivoire", dial: "+225" },
   ];
 
   const [formData, setFormData] = useState({
@@ -212,10 +230,12 @@ export default function SignupPage() {
                       id="fullName" type="text" placeholder="John Doe"
                       value={formData.fullName}
                       onChange={(e) => handleInputChange("fullName", e.target.value)}
+                      onBlur={() => handleBlur("fullName")}
                       className="pl-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors"
                       data-testid="input-fullname"
                     />
                   </div>
+                  {touched.fullName && errors.fullName && <p className="text-xs text-destructive mt-1">{errors.fullName}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -226,10 +246,12 @@ export default function SignupPage() {
                       id="email" type="email" placeholder="you@company.com"
                       value={formData.email}
                       onChange={(e) => handleInputChange("email", e.target.value)}
+                      onBlur={() => handleBlur("email")}
                       className="pl-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors"
                       data-testid="input-email"
                     />
                   </div>
+                  {touched.email && errors.email && <p className="text-xs text-destructive mt-1">{errors.email}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -246,7 +268,7 @@ export default function SignupPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <Label htmlFor="phoneNumber" className="text-sm font-medium">Phone Number</Label>
                     <div className="relative">
@@ -276,7 +298,7 @@ export default function SignupPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <Label htmlFor="password" className="text-sm font-medium">Password</Label>
                     <div className="relative">
@@ -287,6 +309,7 @@ export default function SignupPage() {
                         placeholder="Min 6 chars"
                         value={formData.password}
                         onChange={(e) => handleInputChange("password", e.target.value)}
+                        onBlur={() => handleBlur("password")}
                         className="pl-10 pr-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors"
                         data-testid="input-password"
                       />
@@ -298,6 +321,7 @@ export default function SignupPage() {
                         {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
+                    {touched.password && errors.password && <p className="text-xs text-destructive mt-1">{errors.password}</p>}
                   </div>
 
                   <div className="space-y-2">
@@ -310,10 +334,12 @@ export default function SignupPage() {
                         placeholder="Repeat"
                         value={formData.confirmPassword}
                         onChange={(e) => handleInputChange("confirmPassword", e.target.value)}
+                        onBlur={() => handleBlur("confirmPassword")}
                         className="pl-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors"
                         data-testid="input-confirm-password"
                       />
                     </div>
+                    {touched.confirmPassword && errors.confirmPassword && <p className="text-xs text-destructive mt-1">{errors.confirmPassword}</p>}
                   </div>
                 </div>
 

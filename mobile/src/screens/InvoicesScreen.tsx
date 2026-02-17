@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { useTheme } from '../lib/theme-context';
+import { useCompany } from '../lib/company-context';
+import { ColorTokens } from '../lib/colors';
 
 interface InvoiceItem {
   description: string;
@@ -44,10 +47,15 @@ const emptyForm = {
 };
 
 export default function InvoicesScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { activeCompany } = useCompany();
+
   const queryClient = useQueryClient();
+  const companyId = activeCompany?.id;
 
   const { data: invoices, isLoading, refetch } = useQuery({
-    queryKey: ['invoices'],
+    queryKey: ['invoices', companyId],
     queryFn: () => api.get<Invoice[]>('/api/invoices'),
   });
 
@@ -230,7 +238,7 @@ export default function InvoicesScreen() {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer} testID="loading-invoices">
-        <ActivityIndicator size="large" color="#818CF8" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -240,13 +248,13 @@ export default function InvoicesScreen() {
       <ScrollView
         style={styles.container}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#818CF8" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
         }
         testID="invoices-screen"
       >
         <View style={styles.header}>
           <View>
-            <Text style={styles.subtitle}>Manage your</Text>
+            <Text style={styles.subtitle}>{activeCompany ? activeCompany.name : 'Manage your'}</Text>
             <Text style={styles.title}>Invoices</Text>
           </View>
           <TouchableOpacity
@@ -254,27 +262,27 @@ export default function InvoicesScreen() {
             onPress={openCreateModal}
             testID="button-create-invoice-header"
           >
-            <Ionicons name="add" size={24} color="#FFFFFF" />
+            <Ionicons name="add" size={24} color={colors.primaryForeground} />
           </TouchableOpacity>
         </View>
 
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
-            <Ionicons name="document-text" size={20} color="#818CF8" />
+            <Ionicons name="document-text" size={20} color={colors.accent} />
             <Text style={styles.statLabel}>Total Invoiced</Text>
             <Text style={styles.statValue} testID="text-total-invoiced">
               {formatCurrency(totalInvoiced)}
             </Text>
           </View>
           <View style={styles.statCard}>
-            <Ionicons name="checkmark-circle" size={20} color="#34D399" />
+            <Ionicons name="checkmark-circle" size={20} color={colors.colorGreen} />
             <Text style={styles.statLabel}>Paid</Text>
             <Text style={styles.statValue} testID="text-total-paid">
               {formatCurrency(totalPaid)}
             </Text>
           </View>
           <View style={styles.statCard}>
-            <Ionicons name="time" size={20} color="#FBBF24" />
+            <Ionicons name="time" size={20} color={colors.warningLight} />
             <Text style={styles.statLabel}>Outstanding</Text>
             <Text style={styles.statValue} testID="text-total-outstanding">
               {formatCurrency(totalOutstanding)}
@@ -287,7 +295,7 @@ export default function InvoicesScreen() {
             <Text style={styles.sectionTitle}>All Invoices</Text>
             <TouchableOpacity onPress={openCreateModal} testID="button-create-invoice">
               <View style={styles.addButton}>
-                <Ionicons name="add" size={18} color="#FFFFFF" />
+                <Ionicons name="add" size={18} color={colors.primaryForeground} />
                 <Text style={styles.addButtonText}>New</Text>
               </View>
             </TouchableOpacity>
@@ -302,7 +310,7 @@ export default function InvoicesScreen() {
               testID={`invoice-item-${invoice.id}`}
             >
               <View style={styles.invoiceIcon}>
-                <Ionicons name="receipt-outline" size={20} color="#94A3B8" />
+                <Ionicons name="receipt-outline" size={20} color={colors.textSecondary} />
               </View>
               <View style={styles.invoiceDetails}>
                 <Text style={styles.invoiceClient}>{invoice.clientName}</Text>
@@ -323,13 +331,13 @@ export default function InvoicesScreen() {
                     onPress={() => openEditModal(invoice)}
                     testID={`button-edit-invoice-${invoice.id}`}
                   >
-                    <Ionicons name="create-outline" size={18} color="#818CF8" />
+                    <Ionicons name="create-outline" size={18} color={colors.accent} />
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => handleDelete(invoice)}
                     testID={`button-delete-invoice-${invoice.id}`}
                   >
-                    <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                    <Ionicons name="trash-outline" size={18} color={colors.danger} />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -338,11 +346,11 @@ export default function InvoicesScreen() {
 
           {(!invoices || invoices.length === 0) && !isLoading && (
             <View style={styles.emptyContainer} testID="empty-invoices">
-              <Ionicons name="receipt-outline" size={48} color="#334155" />
+              <Ionicons name="receipt-outline" size={48} color={colors.border} />
               <Text style={styles.emptyText}>No invoices yet</Text>
               <Text style={styles.emptySubtext}>Create your first invoice</Text>
               <TouchableOpacity style={styles.emptyAddButton} onPress={openCreateModal}>
-                <Ionicons name="add" size={20} color="#FFFFFF" />
+                <Ionicons name="add" size={20} color={colors.primaryForeground} />
                 <Text style={styles.emptyAddButtonText}>Create Invoice</Text>
               </TouchableOpacity>
             </View>
@@ -362,7 +370,7 @@ export default function InvoicesScreen() {
                 {editingInvoice ? 'Edit Invoice' : 'New Invoice'}
               </Text>
               <TouchableOpacity onPress={closeModal} testID="button-close-modal">
-                <Ionicons name="close" size={24} color="#94A3B8" />
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -371,7 +379,7 @@ export default function InvoicesScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="e.g. Acme Corp"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholderText}
                 value={form.clientName}
                 onChangeText={(val) => setForm({ ...form, clientName: val })}
                 testID="input-client-name"
@@ -381,7 +389,7 @@ export default function InvoicesScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="client@example.com"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholderText}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 value={form.clientEmail}
@@ -393,7 +401,7 @@ export default function InvoicesScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="2026-03-01"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholderText}
                 value={form.dueDate}
                 onChangeText={(val) => setForm({ ...form, dueDate: val })}
                 testID="input-due-date"
@@ -403,7 +411,7 @@ export default function InvoicesScreen() {
                 <Text style={styles.itemsSectionTitle}>Line Items</Text>
                 <TouchableOpacity onPress={addItem} testID="button-add-item">
                   <View style={styles.addItemButton}>
-                    <Ionicons name="add" size={16} color="#FFFFFF" />
+                    <Ionicons name="add" size={16} color={colors.primaryForeground} />
                     <Text style={styles.addItemText}>Add</Text>
                   </View>
                 </TouchableOpacity>
@@ -415,7 +423,7 @@ export default function InvoicesScreen() {
                     <TextInput
                       style={[styles.input, styles.itemDescInput]}
                       placeholder="Description"
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={colors.placeholderText}
                       value={item.description}
                       onChangeText={(val) => updateItem(index, 'description', val)}
                       testID={`input-item-desc-${index}`}
@@ -423,7 +431,7 @@ export default function InvoicesScreen() {
                     <TextInput
                       style={[styles.input, styles.itemAmountInput]}
                       placeholder="0.00"
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={colors.placeholderText}
                       keyboardType="decimal-pad"
                       value={item.amount}
                       onChangeText={(val) => updateItem(index, 'amount', val)}
@@ -436,7 +444,7 @@ export default function InvoicesScreen() {
                       style={styles.removeItemButton}
                       testID={`button-remove-item-${index}`}
                     >
-                      <Ionicons name="close-circle" size={22} color="#EF4444" />
+                      <Ionicons name="close-circle" size={22} color={colors.danger} />
                     </TouchableOpacity>
                   )}
                 </View>
@@ -459,7 +467,7 @@ export default function InvoicesScreen() {
                 testID="button-save-invoice"
               >
                 {isSaving ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <ActivityIndicator size="small" color={colors.primaryForeground} />
                 ) : (
                   <Text style={styles.saveButtonText}>
                     {editingInvoice ? 'Update' : 'Create'}
@@ -474,340 +482,342 @@ export default function InvoicesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 20,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#94A3B8',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginTop: 4,
-  },
-  headerAddButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#4F46E5',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    gap: 10,
-    marginBottom: 24,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  statLabel: {
-    fontSize: 11,
-    color: '#94A3B8',
-  },
-  statValue: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  section: {
-    paddingHorizontal: 20,
-    marginBottom: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#4F46E5',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    gap: 4,
-  },
-  addButtonText: {
-    fontSize: 13,
-    color: '#FFFFFF',
-    fontWeight: '500',
-  },
-  invoiceItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  invoiceIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#334155',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  invoiceDetails: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  invoiceClient: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    fontWeight: '500',
-  },
-  invoiceNumber: {
-    fontSize: 12,
-    color: '#818CF8',
-    marginTop: 2,
-  },
-  invoiceDue: {
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  invoiceRight: {
-    alignItems: 'flex-end',
-  },
-  invoiceAmount: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    fontWeight: '600',
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginTop: 4,
-  },
-  statusPaid: {
-    backgroundColor: '#065F46',
-  },
-  statusSent: {
-    backgroundColor: '#1E40AF',
-  },
-  statusOverdue: {
-    backgroundColor: '#991B1B',
-  },
-  statusDraft: {
-    backgroundColor: '#334155',
-  },
-  statusText: {
-    fontSize: 10,
-    color: '#FFFFFF',
-    textTransform: 'capitalize',
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 8,
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  emptyText: {
-    color: '#94A3B8',
-    fontSize: 16,
-    marginTop: 12,
-  },
-  emptySubtext: {
-    color: '#64748B',
-    fontSize: 13,
-    marginTop: 4,
-  },
-  emptyAddButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#4F46E5',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 10,
-    marginTop: 20,
-    gap: 6,
-  },
-  emptyAddButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
+function createStyles(colors: ColorTokens) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    loadingContainer: {
+      flex: 1,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-end',
+      paddingHorizontal: 20,
+      paddingTop: 60,
+      paddingBottom: 20,
+    },
+    subtitle: {
+      fontSize: 14,
+      color: colors.textSecondary,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: 'bold',
+      color: colors.textPrimary,
+      marginTop: 4,
+    },
+    headerAddButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    statsRow: {
+      flexDirection: 'row',
+      paddingHorizontal: 20,
+      gap: 10,
+      marginBottom: 24,
+    },
+    statCard: {
+      flex: 1,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 14,
+      alignItems: 'center',
+      gap: 6,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    statLabel: {
+      fontSize: 11,
+      color: colors.textSecondary,
+    },
+    statValue: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.textPrimary,
+    },
+    section: {
+      paddingHorizontal: 20,
+      marginBottom: 24,
+    },
+    sectionHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    sectionTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    addButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.primary,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      gap: 4,
+    },
+    addButtonText: {
+      fontSize: 13,
+      color: colors.primaryForeground,
+      fontWeight: '500',
+    },
+    invoiceItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    invoiceIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    invoiceDetails: {
+      flex: 1,
+      marginLeft: 12,
+    },
+    invoiceClient: {
+      fontSize: 14,
+      color: colors.textPrimary,
+      fontWeight: '500',
+    },
+    invoiceNumber: {
+      fontSize: 12,
+      color: colors.accent,
+      marginTop: 2,
+    },
+    invoiceDue: {
+      fontSize: 11,
+      color: colors.textTertiary,
+      marginTop: 2,
+    },
+    invoiceRight: {
+      alignItems: 'flex-end',
+    },
+    invoiceAmount: {
+      fontSize: 14,
+      color: colors.textPrimary,
+      fontWeight: '600',
+    },
+    statusBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 4,
+      marginTop: 4,
+    },
+    statusPaid: {
+      backgroundColor: colors.successSubtle,
+    },
+    statusSent: {
+      backgroundColor: colors.infoSubtle,
+    },
+    statusOverdue: {
+      backgroundColor: colors.dangerSubtle,
+    },
+    statusDraft: {
+      backgroundColor: colors.border,
+    },
+    statusText: {
+      fontSize: 10,
+      color: '#FFFFFF',
+      textTransform: 'capitalize',
+    },
+    actionRow: {
+      flexDirection: 'row',
+      gap: 12,
+      marginTop: 8,
+    },
+    emptyContainer: {
+      alignItems: 'center',
+      paddingVertical: 40,
+    },
+    emptyText: {
+      color: colors.textSecondary,
+      fontSize: 16,
+      marginTop: 12,
+    },
+    emptySubtext: {
+      color: colors.textTertiary,
+      fontSize: 13,
+      marginTop: 4,
+    },
+    emptyAddButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.primary,
+      paddingHorizontal: 20,
+      paddingVertical: 10,
+      borderRadius: 10,
+      marginTop: 20,
+      gap: 6,
+    },
+    emptyAddButtonText: {
+      color: colors.primaryForeground,
+      fontSize: 14,
+      fontWeight: '600',
+    },
 
-  // Modal styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#1E293B',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '92%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  modalBody: {
-    padding: 20,
-  },
-  inputLabel: {
-    fontSize: 13,
-    color: '#94A3B8',
-    marginBottom: 6,
-    marginTop: 12,
-  },
-  input: {
-    backgroundColor: '#0F172A',
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 15,
-    color: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  itemsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 20,
-    marginBottom: 10,
-  },
-  itemsSectionTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  addItemButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#4F46E5',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    gap: 4,
-  },
-  addItemText: {
-    fontSize: 12,
-    color: '#FFFFFF',
-    fontWeight: '500',
-  },
-  itemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-    gap: 8,
-  },
-  itemInputs: {
-    flex: 1,
-    flexDirection: 'row',
-    gap: 8,
-  },
-  itemDescInput: {
-    flex: 2,
-  },
-  itemAmountInput: {
-    flex: 1,
-  },
-  removeItemButton: {
-    padding: 4,
-  },
-  totalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-  },
-  totalLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#94A3B8',
-  },
-  totalValue: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  modalFooter: {
-    flexDirection: 'row',
-    padding: 20,
-    gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-  },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: '#334155',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    color: '#94A3B8',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  saveButton: {
-    flex: 1,
-    backgroundColor: '#4F46E5',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  saveButtonDisabled: {
-    opacity: 0.6,
-  },
-  saveButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-});
+    // Modal styles
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: colors.modalOverlay,
+      justifyContent: 'flex-end',
+    },
+    modalContent: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      maxHeight: '92%',
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: 20,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    modalTitle: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.textPrimary,
+    },
+    modalBody: {
+      padding: 20,
+    },
+    inputLabel: {
+      fontSize: 13,
+      color: colors.textSecondary,
+      marginBottom: 6,
+      marginTop: 12,
+    },
+    input: {
+      backgroundColor: colors.background,
+      borderRadius: 10,
+      padding: 14,
+      fontSize: 15,
+      color: colors.inputText,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+    },
+    itemsHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginTop: 20,
+      marginBottom: 10,
+    },
+    itemsSectionTitle: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    addItemButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.primary,
+      borderRadius: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      gap: 4,
+    },
+    addItemText: {
+      fontSize: 12,
+      color: colors.primaryForeground,
+      fontWeight: '500',
+    },
+    itemRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 8,
+      gap: 8,
+    },
+    itemInputs: {
+      flex: 1,
+      flexDirection: 'row',
+      gap: 8,
+    },
+    itemDescInput: {
+      flex: 2,
+    },
+    itemAmountInput: {
+      flex: 1,
+    },
+    removeItemButton: {
+      padding: 4,
+    },
+    totalRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginTop: 16,
+      paddingTop: 16,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    totalLabel: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+    totalValue: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.textPrimary,
+    },
+    modalFooter: {
+      flexDirection: 'row',
+      padding: 20,
+      gap: 12,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    cancelButton: {
+      flex: 1,
+      backgroundColor: colors.border,
+      borderRadius: 12,
+      paddingVertical: 14,
+      alignItems: 'center',
+    },
+    cancelButtonText: {
+      color: colors.textSecondary,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    saveButton: {
+      flex: 1,
+      backgroundColor: colors.primary,
+      borderRadius: 12,
+      paddingVertical: 14,
+      alignItems: 'center',
+    },
+    saveButtonDisabled: {
+      opacity: 0.6,
+    },
+    saveButtonText: {
+      color: colors.primaryForeground,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+  });
+}

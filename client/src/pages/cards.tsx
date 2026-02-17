@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { getCurrencySymbol, formatCurrencyAmount } from "@/lib/constants";
 import {
   Dialog,
   DialogContent,
@@ -76,17 +77,11 @@ export default function Cards() {
     queryKey: ["/api/settings"],
   });
 
-  // Currency formatting
-  const currencySymbols: Record<string, string> = {
-    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
-  };
   const currency = settings?.currency || "USD";
-  const currencySymbol = currencySymbols[currency] || "$";
-  
+
   const formatCurrency = (amount: number | string, cardCurrency?: string) => {
-    const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
-    const symbol = cardCurrency ? (currencySymbols[cardCurrency] || '$') : currencySymbol;
-    return `${symbol}${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const targetCurrency = cardCurrency || currency;
+    return formatCurrencyAmount(amount, targetCurrency);
   };
   const [formData, setFormData] = useState({
     name: "",

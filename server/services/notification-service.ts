@@ -27,6 +27,29 @@ interface SmsConfig {
 type EmailProvider = 'aws' | 'sendgrid' | 'none';
 type SmsProvider = 'aws' | 'twilio' | 'none';
 
+// Security: URL validation to prevent XSS in actionUrl
+function sanitizeUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  // Only allow relative paths or https/http URLs
+  if (url.startsWith('/')) return url;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') return url;
+  } catch {}
+  return undefined;
+}
+
+// Security: Email validation
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+// Security: SMS text sanitization to remove control characters
+function sanitizeSmsText(text: string): string {
+  // Remove control characters and limit length
+  return text.replace(/[\x00-\x1F\x7F]/g, '').substring(0, 160);
+}
+
 class NotificationService {
   private twilioClient: any = null;
   private sendgridClient: any = null;
@@ -171,7 +194,7 @@ class NotificationService {
 
     const promises: Promise<void>[] = [];
 
-    if (enabledChannels.includes('email') && recipientEmail) {
+    if (enabledChannels.includes('email') && recipientEmail && isValidEmail(recipientEmail)) {
       promises.push(this.sendEmail({
         to: recipientEmail,
         subject: title,
@@ -492,8 +515,8 @@ class NotificationService {
       bodyHtml: `
         <h2 style="color: #1f2937; margin: 0 0 16px 0; font-size: 20px;">${this.escapeHtml(title)}</h2>
         <p style="color: #4b5563; line-height: 1.6; margin: 0 0 24px 0;">${this.escapeHtml(message)}</p>
-        ${data?.actionUrl ? `
-          <a href="${data.actionUrl}" style="display: inline-block; background-color: #4F46E5; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600;">View Details</a>
+        ${sanitizeUrl(data?.actionUrl) ? `
+          <a href="${sanitizeUrl(data?.actionUrl)}" style="display: inline-block; background-color: #4F46E5; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600;">View Details</a>
         ` : ''}
       `,
       plainText: message,
@@ -534,7 +557,7 @@ class NotificationService {
       userId,
       type: 'expense_rejected',
       title: 'Expense Rejected',
-      message: `Your expense of ${sym}${expense.amount.toLocaleString()} at ${expense.merchant} was rejected. ${expense.reason ? `Reason: ${expense.reason}` : ''}`,
+      message: `Your expense of ${sym}${expense.amount.toLocaleString()} at ${expense.merchant} was rejected. ${expense.reason ? `Reason: ${sanitizeSmsText(expense.reason)}` : ''}`,
       data: { expenseId: expense.id, actionUrl: '/expenses' },
       channels: ['in_app', 'email', 'push'],
     });

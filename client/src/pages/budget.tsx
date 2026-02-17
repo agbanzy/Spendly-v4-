@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { formatCurrencyAmount } from "@/lib/constants";
 import {
   Dialog,
   DialogContent,
@@ -66,16 +67,10 @@ export default function BudgetPage() {
     queryKey: ["/api/settings"],
   });
 
-  // Currency formatting
-  const currencySymbols: Record<string, string> = {
-    USD: "$", EUR: "€", GBP: "£", NGN: "₦", KES: "KSh", GHS: "₵", ZAR: "R"
-  };
   const currency = settings?.currency || "USD";
-  const currencySymbol = currencySymbols[currency] || "$";
-  
+
   const formatCurrency = (amount: number | string) => {
-    const num = typeof amount === 'string' ? parseFloat(amount) || 0 : amount;
-    return `${currencySymbol}${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return formatCurrencyAmount(amount, currency);
   };
 
   const { data: budgets, isLoading } = useQuery<Budget[]>({

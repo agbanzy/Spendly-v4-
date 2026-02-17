@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { useTheme } from '../lib/theme-context';
+import { ColorTokens } from '../lib/colors';
 
 interface Transaction {
   id: string;
@@ -28,6 +30,9 @@ interface Transaction {
 const statusFilters = ['all', 'completed', 'processing', 'pending', 'failed'];
 
 export default function TransactionsScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   const [filter, setFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
@@ -54,11 +59,11 @@ export default function TransactionsScreen() {
   };
 
   const getColor = (type: string, status: string) => {
-    if (status?.toLowerCase() === 'failed') return '#EF4444';
-    if (status?.toLowerCase() === 'pending' || status?.toLowerCase() === 'processing') return '#F59E0B';
+    if (status?.toLowerCase() === 'failed') return colors.danger;
+    if (status?.toLowerCase() === 'pending' || status?.toLowerCase() === 'processing') return colors.warning;
     const lower = type.toLowerCase();
-    if (lower.includes('funding') || lower.includes('deposit') || lower.includes('credit')) return '#10B981';
-    return '#EF4444';
+    if (lower.includes('funding') || lower.includes('deposit') || lower.includes('credit')) return colors.success;
+    return colors.danger;
   };
 
   const isCredit = (type: string) => {
@@ -86,10 +91,10 @@ export default function TransactionsScreen() {
 
   const getStatusStyle = (status: string) => {
     switch (status?.toLowerCase()) {
-      case 'completed': case 'success': return { bg: '#065F46', color: '#34D399' };
-      case 'pending': case 'processing': return { bg: '#78350F', color: '#FBBF24' };
-      case 'failed': return { bg: '#7F1D1D', color: '#F87171' };
-      default: return { bg: '#334155', color: '#94A3B8' };
+      case 'completed': case 'success': return { bg: colors.successSubtle, color: colors.colorGreen };
+      case 'pending': case 'processing': return { bg: colors.warningSubtle, color: colors.warningLight };
+      case 'failed': return { bg: colors.dangerSubtle, color: colors.dangerLight };
+      default: return { bg: colors.border, color: colors.textSecondary };
     }
   };
 
@@ -127,17 +132,17 @@ export default function TransactionsScreen() {
 
       {/* Search */}
       <View style={styles.searchContainer}>
-        <Ionicons name="search" size={18} color="#64748B" />
+        <Ionicons name="search" size={18} color={colors.textTertiary} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search transactions..."
-          placeholderTextColor="#64748B"
+          placeholderTextColor={colors.placeholderText}
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
         {searchQuery !== '' && (
           <TouchableOpacity onPress={() => setSearchQuery('')}>
-            <Ionicons name="close-circle" size={18} color="#64748B" />
+            <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
           </TouchableOpacity>
         )}
       </View>
@@ -159,7 +164,7 @@ export default function TransactionsScreen() {
 
       {isLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#818CF8" />
+          <ActivityIndicator size="large" color={colors.accent} />
         </View>
       ) : (
         <FlatList
@@ -168,11 +173,11 @@ export default function TransactionsScreen() {
           renderItem={renderTransaction}
           contentContainerStyle={styles.listContainer}
           refreshControl={
-            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor="#818CF8" />
+            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.accent} />
           }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Ionicons name="swap-horizontal-outline" size={48} color="#334155" />
+              <Ionicons name="swap-horizontal-outline" size={48} color={colors.border} />
               <Text style={styles.emptyText}>No transactions found</Text>
               <Text style={styles.emptySubtext}>
                 {searchQuery || filter !== 'all' ? 'Try different filters' : 'Transactions will appear here'}
@@ -189,7 +194,7 @@ export default function TransactionsScreen() {
             <View style={styles.detailHeader}>
               <Text style={styles.detailTitle}>Transaction Details</Text>
               <TouchableOpacity onPress={() => setSelectedTransaction(null)}>
-                <Ionicons name="close" size={24} color="#94A3B8" />
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -241,76 +246,78 @@ export default function TransactionsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F172A' },
-  header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 },
-  title: { fontSize: 24, fontWeight: 'bold', color: '#FFFFFF' },
-  searchContainer: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#1E293B', borderRadius: 12,
-    marginHorizontal: 20, marginBottom: 12,
-    paddingHorizontal: 14, paddingVertical: 10,
-    borderWidth: 1, borderColor: '#334155',
-  },
-  searchInput: { flex: 1, marginLeft: 8, fontSize: 15, color: '#FFFFFF' },
-  filterRow: {
-    flexDirection: 'row', paddingHorizontal: 20, gap: 8, marginBottom: 12,
-    flexWrap: 'wrap',
-  },
-  filterChip: {
-    paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16,
-    backgroundColor: '#1E293B', borderWidth: 1, borderColor: '#334155',
-  },
-  filterChipActive: { backgroundColor: '#4F46E5', borderColor: '#4F46E5' },
-  filterText: { fontSize: 13, color: '#94A3B8' },
-  filterTextActive: { color: '#FFFFFF', fontWeight: '600' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  listContainer: { padding: 20, paddingTop: 0 },
-  txCard: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#1E293B', borderRadius: 12,
-    padding: 16, marginBottom: 8, borderWidth: 1, borderColor: '#334155',
-  },
-  txIcon: {
-    width: 44, height: 44, borderRadius: 22,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  txInfo: { flex: 1, marginLeft: 12 },
-  txType: { fontSize: 15, fontWeight: '600', color: '#FFFFFF' },
-  txDesc: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
-  txDate: { fontSize: 11, color: '#64748B', marginTop: 4 },
-  txRight: { alignItems: 'flex-end' },
-  txAmount: { fontSize: 15, fontWeight: '700' },
-  txStatusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginTop: 4 },
-  txStatusText: { fontSize: 10, fontWeight: '600', textTransform: 'capitalize' },
-  emptyContainer: { alignItems: 'center', paddingVertical: 60 },
-  emptyText: { fontSize: 16, color: '#94A3B8', marginTop: 12 },
-  emptySubtext: { fontSize: 13, color: '#64748B', marginTop: 4 },
-  // Detail Modal
-  detailOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end',
-  },
-  detailContent: {
-    backgroundColor: '#1E293B', borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: 24, paddingBottom: 40,
-  },
-  detailHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginBottom: 20,
-  },
-  detailTitle: { fontSize: 20, fontWeight: 'bold', color: '#FFFFFF' },
-  detailBody: { gap: 16 },
-  detailAmountRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginBottom: 8,
-  },
-  detailAmount: { fontSize: 28, fontWeight: 'bold' },
-  detailStatusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
-  detailStatusText: { fontSize: 12, fontWeight: '600', textTransform: 'capitalize' },
-  detailRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#334155',
-  },
-  detailLabel: { fontSize: 14, color: '#94A3B8' },
-  detailValue: { fontSize: 14, color: '#FFFFFF', fontWeight: '500', maxWidth: '60%', textAlign: 'right' },
-});
+function createStyles(colors: ColorTokens) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.background },
+    header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 },
+    title: { fontSize: 24, fontWeight: 'bold', color: colors.textPrimary },
+    searchContainer: {
+      flexDirection: 'row', alignItems: 'center',
+      backgroundColor: colors.surface, borderRadius: 12,
+      marginHorizontal: 20, marginBottom: 12,
+      paddingHorizontal: 14, paddingVertical: 10,
+      borderWidth: 1, borderColor: colors.border,
+    },
+    searchInput: { flex: 1, marginLeft: 8, fontSize: 15, color: colors.inputText },
+    filterRow: {
+      flexDirection: 'row', paddingHorizontal: 20, gap: 8, marginBottom: 12,
+      flexWrap: 'wrap',
+    },
+    filterChip: {
+      paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16,
+      backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    },
+    filterChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+    filterText: { fontSize: 13, color: colors.textSecondary },
+    filterTextActive: { color: colors.primaryForeground, fontWeight: '600' },
+    loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    listContainer: { padding: 20, paddingTop: 0 },
+    txCard: {
+      flexDirection: 'row', alignItems: 'center',
+      backgroundColor: colors.surface, borderRadius: 12,
+      padding: 16, marginBottom: 8, borderWidth: 1, borderColor: colors.border,
+    },
+    txIcon: {
+      width: 44, height: 44, borderRadius: 22,
+      justifyContent: 'center', alignItems: 'center',
+    },
+    txInfo: { flex: 1, marginLeft: 12 },
+    txType: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
+    txDesc: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+    txDate: { fontSize: 11, color: colors.textTertiary, marginTop: 4 },
+    txRight: { alignItems: 'flex-end' },
+    txAmount: { fontSize: 15, fontWeight: '700' },
+    txStatusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginTop: 4 },
+    txStatusText: { fontSize: 10, fontWeight: '600', textTransform: 'capitalize' },
+    emptyContainer: { alignItems: 'center', paddingVertical: 60 },
+    emptyText: { fontSize: 16, color: colors.textSecondary, marginTop: 12 },
+    emptySubtext: { fontSize: 13, color: colors.textTertiary, marginTop: 4 },
+    // Detail Modal
+    detailOverlay: {
+      flex: 1, backgroundColor: colors.modalOverlay, justifyContent: 'flex-end',
+    },
+    detailContent: {
+      backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+      padding: 24, paddingBottom: 40,
+    },
+    detailHeader: {
+      flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+      marginBottom: 20,
+    },
+    detailTitle: { fontSize: 20, fontWeight: 'bold', color: colors.textPrimary },
+    detailBody: { gap: 16 },
+    detailAmountRow: {
+      flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+      marginBottom: 8,
+    },
+    detailAmount: { fontSize: 28, fontWeight: 'bold' },
+    detailStatusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+    detailStatusText: { fontSize: 12, fontWeight: '600', textTransform: 'capitalize' },
+    detailRow: {
+      flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+      paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border,
+    },
+    detailLabel: { fontSize: 14, color: colors.textSecondary },
+    detailValue: { fontSize: 14, color: colors.textPrimary, fontWeight: '500', maxWidth: '60%', textAlign: 'right' },
+  });
+}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../lib/auth-context';
+import { useTheme } from '../lib/theme-context';
+import { ColorTokens } from '../lib/colors';
 
 interface SignupScreenProps {
   navigation: any;
@@ -46,6 +48,8 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   const handleSignup = async () => {
     if (!fullName.trim() || !email.trim() || !password || !confirmPassword) {
@@ -103,7 +107,7 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
               <TextInput
                 style={styles.input}
                 placeholder="Enter your full name"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholderText}
                 value={fullName}
                 onChangeText={setFullName}
                 autoCapitalize="words"
@@ -115,7 +119,7 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
               <TextInput
                 style={styles.input}
                 placeholder="Enter your work email"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholderText}
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"
@@ -128,7 +132,7 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
               <TextInput
                 style={styles.input}
                 placeholder="Enter company name"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholderText}
                 value={companyName}
                 onChangeText={setCompanyName}
               />
@@ -140,7 +144,7 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
                 <TextInput
                   style={styles.passwordInput}
                   placeholder="Create a password"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.placeholderText}
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
@@ -152,7 +156,7 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
                   <Ionicons
                     name={showPassword ? 'eye-off-outline' : 'eye-outline'}
                     size={22}
-                    color="#94A3B8"
+                    color={colors.textSecondary}
                   />
                 </TouchableOpacity>
               </View>
@@ -164,7 +168,7 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
                 <TextInput
                   style={styles.passwordInput}
                   placeholder="Confirm your password"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.placeholderText}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
                   secureTextEntry={!showConfirmPassword}
@@ -176,7 +180,7 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
                   <Ionicons
                     name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
                     size={22}
-                    color="#94A3B8"
+                    color={colors.textSecondary}
                   />
                 </TouchableOpacity>
               </View>
@@ -189,7 +193,7 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
             >
               <View style={[styles.checkbox, agreedToTerms && styles.checkboxChecked]}>
                 {agreedToTerms && (
-                  <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                  <Ionicons name="checkmark" size={14} color={colors.primaryForeground} />
                 )}
               </View>
               <Text style={styles.termsText}>
@@ -206,7 +210,7 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
               disabled={loading || !agreedToTerms}
             >
               {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
+                <ActivityIndicator color={colors.primaryForeground} />
               ) : (
                 <Text style={styles.buttonText}>Create Account</Text>
               )}
@@ -227,134 +231,136 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 48,
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 36,
-  },
-  logo: {
-    fontSize: 42,
-    fontWeight: 'bold',
-    color: '#818CF8',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#94A3B8',
-    marginTop: 8,
-  },
-  trialText: {
-    fontSize: 13,
-    color: '#64748B',
-    marginTop: 4,
-  },
-  form: {
-    gap: 16,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#CBD5E1',
-    marginBottom: 6,
-  },
-  optionalText: {
-    fontSize: 12,
-    color: '#64748B',
-    fontWeight: '400',
-  },
-  input: {
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  passwordContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  passwordInput: {
-    flex: 1,
-    padding: 16,
-    fontSize: 16,
-    color: '#FFFFFF',
-  },
-  eyeButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 16,
-  },
-  termsRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#475569',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 1,
-  },
-  checkboxChecked: {
-    backgroundColor: '#4F46E5',
-    borderColor: '#4F46E5',
-  },
-  termsText: {
-    flex: 1,
-    fontSize: 13,
-    color: '#94A3B8',
-    lineHeight: 20,
-  },
-  termsLink: {
-    color: '#818CF8',
-    fontWeight: '500',
-  },
-  button: {
-    backgroundColor: '#4F46E5',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  linkButton: {
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  linkText: {
-    color: '#94A3B8',
-    fontSize: 14,
-  },
-  linkBold: {
-    color: '#818CF8',
-    fontWeight: '600',
-  },
-});
+function createStyles(colors: ColorTokens) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    scrollContent: {
+      flexGrow: 1,
+    },
+    content: {
+      flex: 1,
+      justifyContent: 'center',
+      paddingHorizontal: 24,
+      paddingVertical: 48,
+    },
+    header: {
+      alignItems: 'center',
+      marginBottom: 36,
+    },
+    logo: {
+      fontSize: 42,
+      fontWeight: 'bold',
+      color: colors.accent,
+    },
+    subtitle: {
+      fontSize: 16,
+      color: colors.textSecondary,
+      marginTop: 8,
+    },
+    trialText: {
+      fontSize: 13,
+      color: colors.textTertiary,
+      marginTop: 4,
+    },
+    form: {
+      gap: 16,
+    },
+    label: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: colors.textBody,
+      marginBottom: 6,
+    },
+    optionalText: {
+      fontSize: 12,
+      color: colors.textTertiary,
+      fontWeight: '400',
+    },
+    input: {
+      backgroundColor: colors.inputBackground,
+      borderRadius: 12,
+      padding: 16,
+      fontSize: 16,
+      color: colors.inputText,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+    },
+    passwordContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.inputBackground,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+    },
+    passwordInput: {
+      flex: 1,
+      padding: 16,
+      fontSize: 16,
+      color: colors.inputText,
+    },
+    eyeButton: {
+      paddingHorizontal: 14,
+      paddingVertical: 16,
+    },
+    termsRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    checkbox: {
+      width: 22,
+      height: 22,
+      borderRadius: 6,
+      borderWidth: 2,
+      borderColor: colors.textTertiary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 1,
+    },
+    checkboxChecked: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    termsText: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.textSecondary,
+      lineHeight: 20,
+    },
+    termsLink: {
+      color: colors.accent,
+      fontWeight: '500',
+    },
+    button: {
+      backgroundColor: colors.primary,
+      borderRadius: 12,
+      padding: 16,
+      alignItems: 'center',
+      marginTop: 8,
+    },
+    buttonDisabled: {
+      opacity: 0.7,
+    },
+    buttonText: {
+      color: colors.primaryForeground,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    linkButton: {
+      alignItems: 'center',
+      marginTop: 16,
+    },
+    linkText: {
+      color: colors.textSecondary,
+      fontSize: 14,
+    },
+    linkBold: {
+      color: colors.accent,
+      fontWeight: '600',
+    },
+  });
+}

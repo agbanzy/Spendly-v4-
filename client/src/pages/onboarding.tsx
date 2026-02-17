@@ -19,16 +19,34 @@ import {
 } from "lucide-react";
 
 const COUNTRIES = [
+  // Stripe - North America
   { code: "US", name: "United States" },
-  { code: "GB", name: "United Kingdom" },
   { code: "CA", name: "Canada" },
-  { code: "NG", name: "Nigeria" },
-  { code: "GH", name: "Ghana" },
-  { code: "KE", name: "Kenya" },
-  { code: "ZA", name: "South Africa" },
+  // Stripe - Europe
+  { code: "GB", name: "United Kingdom" },
   { code: "DE", name: "Germany" },
   { code: "FR", name: "France" },
+  { code: "ES", name: "Spain" },
+  { code: "IT", name: "Italy" },
+  { code: "NL", name: "Netherlands" },
+  { code: "BE", name: "Belgium" },
+  { code: "AT", name: "Austria" },
+  { code: "CH", name: "Switzerland" },
+  { code: "SE", name: "Sweden" },
+  { code: "NO", name: "Norway" },
+  { code: "DK", name: "Denmark" },
+  { code: "FI", name: "Finland" },
+  { code: "IE", name: "Ireland" },
+  { code: "PT", name: "Portugal" },
   { code: "AU", name: "Australia" },
+  // Paystack - Africa
+  { code: "NG", name: "Nigeria" },
+  { code: "GH", name: "Ghana" },
+  { code: "ZA", name: "South Africa" },
+  { code: "KE", name: "Kenya" },
+  { code: "EG", name: "Egypt" },
+  { code: "RW", name: "Rwanda" },
+  { code: "CI", name: "Côte d'Ivoire" },
 ];
 
 const ID_TYPES = [
@@ -86,9 +104,9 @@ const STEPS = [
 ];
 
 // Countries that support Paystack BVN verification
-const PAYSTACK_COUNTRIES = ["NG", "GH", "KE", "ZA"];
+const PAYSTACK_COUNTRIES = ["NG", "GH", "KE", "ZA", "EG", "RW", "CI"];
 // Countries that support Stripe Identity verification
-const STRIPE_COUNTRIES = ["US", "GB", "CA", "DE", "FR", "AU"];
+const STRIPE_COUNTRIES = ["US", "GB", "CA", "DE", "FR", "AU", "ES", "IT", "NL", "BE", "AT", "CH", "SE", "NO", "DK", "FI", "IE", "PT"];
 
 interface Bank {
   id: number;
@@ -148,6 +166,22 @@ export default function Onboarding() {
     businessDocumentUrl: "",
     acceptTerms: false,
   });
+
+  // Persist form data to sessionStorage for resume
+  useEffect(() => {
+    const saved = sessionStorage.getItem('spendly_onboarding_form');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setFormData(prev => ({ ...prev, ...parsed }));
+        if (parsed._step) setCurrentStep(parsed._step);
+      } catch {}
+    }
+  }, []);
+
+  useEffect(() => {
+    sessionStorage.setItem('spendly_onboarding_form', JSON.stringify({ ...formData, _step: currentStep }));
+  }, [formData, currentStep]);
 
   const { data: userProfile, isLoading: profileLoading } = useQuery({
     queryKey: ["/api/user-profile", user?.id],
@@ -215,6 +249,7 @@ export default function Onboarding() {
       return res.json();
     },
     onSuccess: () => {
+      sessionStorage.removeItem('spendly_onboarding_form');
       queryClient.invalidateQueries({ queryKey: ["/api/user-profile"] });
       toast({
         title: "KYC Submitted Successfully",
@@ -557,23 +592,23 @@ export default function Onboarding() {
         </div>
 
         <div className="mb-8">
-          <div className="flex justify-between mb-2">
+          <div className="flex justify-between mb-2 overflow-x-auto gap-1 sm:gap-0 pb-2 sm:pb-0">
             {STEPS.map((step) => (
-              <div 
+              <div
                 key={step.id}
-                className={`flex flex-col items-center ${currentStep >= step.id ? 'text-indigo-600' : 'text-muted-foreground'}`}
+                className={`flex flex-col items-center flex-shrink-0 ${currentStep >= step.id ? 'text-indigo-600' : 'text-muted-foreground'}`}
               >
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center mb-2 ${
-                  currentStep > step.id 
-                    ? 'bg-indigo-600 text-white' 
-                    : currentStep === step.id 
-                    ? 'bg-indigo-100 dark:bg-indigo-900 text-indigo-600 border-2 border-indigo-600' 
+                <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center mb-2 ${
+                  currentStep > step.id
+                    ? 'bg-indigo-600 text-white'
+                    : currentStep === step.id
+                    ? 'bg-indigo-100 dark:bg-indigo-900 text-indigo-600 border-2 border-indigo-600'
                     : 'bg-slate-100 dark:bg-slate-700'
                 }`}>
                   {currentStep > step.id ? (
-                    <CheckCircle2 className="h-5 w-5" />
+                    <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5" />
                   ) : (
-                    <step.icon className="h-5 w-5" />
+                    <step.icon className="h-4 w-4 sm:h-5 sm:w-5" />
                   )}
                 </div>
                 <span className="text-xs font-medium hidden sm:block">{step.title}</span>
@@ -1111,7 +1146,7 @@ export default function Onboarding() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>ID Front</Label>
-                      <div className="border-2 border-dashed rounded-lg p-6 text-center hover-elevate cursor-pointer">
+                      <div className="border-2 border-dashed rounded-lg p-4 sm:p-6 text-center hover-elevate cursor-pointer active:bg-muted/50 transition-colors">
                         <input
                           type="file"
                           accept="image/*,.pdf"
@@ -1130,7 +1165,7 @@ export default function Onboarding() {
                     </div>
                     <div className="space-y-2">
                       <Label>ID Back</Label>
-                      <div className="border-2 border-dashed rounded-lg p-6 text-center hover-elevate cursor-pointer">
+                      <div className="border-2 border-dashed rounded-lg p-4 sm:p-6 text-center hover-elevate cursor-pointer active:bg-muted/50 transition-colors">
                         <input
                           type="file"
                           accept="image/*,.pdf"
@@ -1152,7 +1187,7 @@ export default function Onboarding() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Selfie with ID</Label>
-                      <div className="border-2 border-dashed rounded-lg p-6 text-center hover-elevate cursor-pointer">
+                      <div className="border-2 border-dashed rounded-lg p-4 sm:p-6 text-center hover-elevate cursor-pointer active:bg-muted/50 transition-colors">
                         <input
                           type="file"
                           accept="image/*"
@@ -1171,7 +1206,7 @@ export default function Onboarding() {
                     </div>
                     <div className="space-y-2">
                       <Label>Proof of Address</Label>
-                      <div className="border-2 border-dashed rounded-lg p-6 text-center hover-elevate cursor-pointer">
+                      <div className="border-2 border-dashed rounded-lg p-4 sm:p-6 text-center hover-elevate cursor-pointer active:bg-muted/50 transition-colors">
                         <input
                           type="file"
                           accept="image/*,.pdf"

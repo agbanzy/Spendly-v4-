@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,8 +14,11 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { useTheme } from '../lib/theme-context';
+import { ColorTokens } from '../lib/colors';
 
 interface Balance {
   id: string;
@@ -50,7 +53,10 @@ interface Transaction {
 }
 
 export default function WalletScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const queryClient = useQueryClient();
+  const navigation = useNavigation<any>();
   const [fundModalVisible, setFundModalVisible] = useState(false);
   const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
   const [sendModalVisible, setSendModalVisible] = useState(false);
@@ -115,9 +121,9 @@ export default function WalletScreen() {
 
   const getTransactionColor = (type: string): string => {
     const lowerType = type.toLowerCase();
-    if (lowerType.includes('deposit') || lowerType.includes('funding')) return '#34D399';
-    if (lowerType.includes('payout') || lowerType.includes('bill') || lowerType.includes('transfer')) return '#F87171';
-    return '#818CF8';
+    if (lowerType.includes('deposit') || lowerType.includes('funding')) return colors.colorGreen;
+    if (lowerType.includes('payout') || lowerType.includes('bill') || lowerType.includes('transfer')) return colors.colorRed;
+    return colors.accent;
   };
 
   const getStatusStyle = (status: string) => {
@@ -144,7 +150,10 @@ export default function WalletScreen() {
       setFundAmount('');
     },
     onError: (error: any) => {
-      Alert.alert('Error', error?.message || 'Failed to fund wallet');
+      Alert.alert('Funding Failed', error?.message || 'Failed to fund wallet', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Retry', onPress: () => fundMutation.mutate(fundAmount) },
+      ]);
     },
   });
 
@@ -172,7 +181,10 @@ export default function WalletScreen() {
       setWithdrawBankName('');
     },
     onError: (error: any) => {
-      Alert.alert('Error', error?.message || 'Failed to withdraw');
+      Alert.alert('Withdrawal Failed', error?.message || 'Failed to withdraw', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Retry', onPress: () => withdrawMutation.mutate({ amount: withdrawAmount, accountNumber: withdrawAccountNumber.trim(), bankName: withdrawBankName.trim() }) },
+      ]);
     },
   });
 
@@ -202,7 +214,10 @@ export default function WalletScreen() {
       setSendNote('');
     },
     onError: (error: any) => {
-      Alert.alert('Error', error?.message || 'Failed to send money');
+      Alert.alert('Transfer Failed', error?.message || 'Failed to send money', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Retry', onPress: () => sendMutation.mutate({ amount: sendAmount, accountNumber: sendAccountNumber.trim(), bankName: sendBankName.trim(), note: sendNote.trim() }) },
+      ]);
     },
   });
 
@@ -254,7 +269,7 @@ export default function WalletScreen() {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#818CF8" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -271,7 +286,7 @@ export default function WalletScreen() {
       <ScrollView
         style={styles.container}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#818CF8" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
         }
       >
         <View style={styles.header}>
@@ -304,20 +319,20 @@ export default function WalletScreen() {
 
         <View style={styles.quickActions}>
           <TouchableOpacity style={styles.actionButton} onPress={() => setFundModalVisible(true)}>
-            <View style={[styles.actionIcon, { backgroundColor: '#065F46' }]}>
-              <Ionicons name="add" size={24} color="#34D399" />
+            <View style={[styles.actionIcon, { backgroundColor: colors.successSubtle }]}>
+              <Ionicons name="add" size={24} color={colors.colorGreen} />
             </View>
             <Text style={styles.actionText}>Fund</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.actionButton} onPress={() => setWithdrawModalVisible(true)}>
-            <View style={[styles.actionIcon, { backgroundColor: '#92400E' }]}>
-              <Ionicons name="arrow-up" size={24} color="#FBBF24" />
+            <View style={[styles.actionIcon, { backgroundColor: colors.kycPendingBg }]}>
+              <Ionicons name="arrow-up" size={24} color={colors.warningLight} />
             </View>
             <Text style={styles.actionText}>Withdraw</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.actionButton} onPress={() => setSendModalVisible(true)}>
-            <View style={[styles.actionIcon, { backgroundColor: '#312E81' }]}>
-              <Ionicons name="send" size={24} color="#818CF8" />
+            <View style={[styles.actionIcon, { backgroundColor: colors.accentBackground }]}>
+              <Ionicons name="send" size={24} color={colors.accent} />
             </View>
             <Text style={styles.actionText}>Send</Text>
           </TouchableOpacity>
@@ -329,7 +344,7 @@ export default function WalletScreen() {
             {virtualAccounts.map((account) => (
               <TouchableOpacity key={account.id} style={styles.virtualAccountCard}>
                 <View style={styles.accountIconContainer}>
-                  <Ionicons name="card" size={24} color="#818CF8" />
+                  <Ionicons name="card" size={24} color={colors.accent} />
                 </View>
                 <View style={styles.accountDetailsLeft}>
                   <Text style={styles.accountName}>{account.name}</Text>
@@ -350,7 +365,7 @@ export default function WalletScreen() {
         {(!virtualAccounts || virtualAccounts.length === 0) && (
           <View style={styles.section}>
             <View style={styles.emptyContainer}>
-              <Ionicons name="card-outline" size={48} color="#334155" />
+              <Ionicons name="card-outline" size={48} color={colors.border} />
               <Text style={styles.emptyText}>No virtual accounts</Text>
               <Text style={styles.emptySubtext}>Create a virtual account to get started</Text>
             </View>
@@ -360,7 +375,7 @@ export default function WalletScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Recent Transactions</Text>
-            <TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate('Transactions')}>
               <Text style={styles.viewAll}>View All</Text>
             </TouchableOpacity>
           </View>
@@ -377,7 +392,7 @@ export default function WalletScreen() {
                 </View>
                 <View style={styles.txRight}>
                   <Text style={[styles.txAmount, { color: getTransactionColor(tx.type) }]}>
-                    {getTransactionColor(tx.type) === '#34D399' ? '+' : '-'}
+                    {getTransactionColor(tx.type) === colors.colorGreen ? '+' : '-'}
                     {formatCurrency(Math.abs(parseFloat(tx.amount)), tx.currency)}
                   </Text>
                   <View style={[styles.txStatusBadge, getStatusStyle(tx.status)]}>
@@ -389,7 +404,7 @@ export default function WalletScreen() {
             ))
           ) : (
             <View style={styles.emptyContainer}>
-              <Ionicons name="wallet-outline" size={48} color="#334155" />
+              <Ionicons name="wallet-outline" size={48} color={colors.border} />
               <Text style={styles.emptyText}>No transactions yet</Text>
               <Text style={styles.emptySubtext}>Fund your wallet to get started</Text>
             </View>
@@ -406,7 +421,7 @@ export default function WalletScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Fund Wallet</Text>
               <TouchableOpacity onPress={() => setFundModalVisible(false)}>
-                <Ionicons name="close" size={24} color="#94A3B8" />
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -419,7 +434,7 @@ export default function WalletScreen() {
             <TextInput
               style={styles.modalInput}
               placeholder="0.00"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={colors.placeholderText}
               keyboardType="numeric"
               value={fundAmount}
               onChangeText={setFundAmount}
@@ -440,7 +455,7 @@ export default function WalletScreen() {
             </View>
 
             <View style={styles.infoRow}>
-              <Ionicons name="checkmark-circle" size={16} color="#34D399" />
+              <Ionicons name="checkmark-circle" size={16} color={colors.colorGreen} />
               <Text style={styles.infoText}>Instant funding with zero fees.</Text>
             </View>
 
@@ -454,7 +469,7 @@ export default function WalletScreen() {
                 disabled={fundMutation.isPending}
               >
                 {fundMutation.isPending ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
+                  <ActivityIndicator color={colors.primaryForeground} size="small" />
                 ) : (
                   <Text style={styles.modalSubmitText}>Fund Wallet</Text>
                 )}
@@ -472,7 +487,7 @@ export default function WalletScreen() {
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Withdraw Funds</Text>
                 <TouchableOpacity onPress={() => setWithdrawModalVisible(false)}>
-                  <Ionicons name="close" size={24} color="#94A3B8" />
+                  <Ionicons name="close" size={24} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
 
@@ -485,7 +500,7 @@ export default function WalletScreen() {
               <TextInput
                 style={styles.modalInput}
                 placeholder="Enter bank name"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholderText}
                 value={withdrawBankName}
                 onChangeText={setWithdrawBankName}
               />
@@ -494,7 +509,7 @@ export default function WalletScreen() {
               <TextInput
                 style={styles.modalInput}
                 placeholder="Enter account number"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholderText}
                 keyboardType="numeric"
                 value={withdrawAccountNumber}
                 onChangeText={setWithdrawAccountNumber}
@@ -504,7 +519,7 @@ export default function WalletScreen() {
               <TextInput
                 style={styles.modalInput}
                 placeholder="0.00"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholderText}
                 keyboardType="numeric"
                 value={withdrawAmount}
                 onChangeText={setWithdrawAmount}
@@ -525,7 +540,7 @@ export default function WalletScreen() {
               </View>
 
               <View style={styles.warningRow}>
-                <Ionicons name="alert-circle" size={16} color="#FBBF24" />
+                <Ionicons name="alert-circle" size={16} color={colors.warningLight} />
                 <Text style={styles.warningText}>Withdrawals are typically processed within 1-3 business days.</Text>
               </View>
 
@@ -539,7 +554,7 @@ export default function WalletScreen() {
                   disabled={withdrawMutation.isPending}
                 >
                   {withdrawMutation.isPending ? (
-                    <ActivityIndicator color="#FFFFFF" size="small" />
+                    <ActivityIndicator color={colors.primaryForeground} size="small" />
                   ) : (
                     <Text style={styles.modalSubmitText}>Withdraw</Text>
                   )}
@@ -558,7 +573,7 @@ export default function WalletScreen() {
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Send Money</Text>
                 <TouchableOpacity onPress={() => setSendModalVisible(false)}>
-                  <Ionicons name="close" size={24} color="#94A3B8" />
+                  <Ionicons name="close" size={24} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
 
@@ -571,7 +586,7 @@ export default function WalletScreen() {
               <TextInput
                 style={styles.modalInput}
                 placeholder="Enter recipient's bank name"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholderText}
                 value={sendBankName}
                 onChangeText={setSendBankName}
               />
@@ -580,7 +595,7 @@ export default function WalletScreen() {
               <TextInput
                 style={styles.modalInput}
                 placeholder="Enter account number"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholderText}
                 keyboardType="numeric"
                 value={sendAccountNumber}
                 onChangeText={setSendAccountNumber}
@@ -590,7 +605,7 @@ export default function WalletScreen() {
               <TextInput
                 style={styles.modalInput}
                 placeholder="0.00"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholderText}
                 keyboardType="numeric"
                 value={sendAmount}
                 onChangeText={setSendAmount}
@@ -600,7 +615,7 @@ export default function WalletScreen() {
               <TextInput
                 style={styles.modalInput}
                 placeholder="Add a note for the recipient"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholderText}
                 value={sendNote}
                 onChangeText={setSendNote}
               />
@@ -613,7 +628,7 @@ export default function WalletScreen() {
                   </View>
                   <View style={styles.summaryRow}>
                     <Text style={styles.summaryLabel}>Fee</Text>
-                    <Text style={[styles.summaryValue, { color: '#34D399' }]}>{formatCurrency(0, localCurrency)}</Text>
+                    <Text style={[styles.summaryValue, { color: colors.colorGreen }]}>{formatCurrency(0, localCurrency)}</Text>
                   </View>
                   <View style={[styles.summaryRow, styles.summaryTotal]}>
                     <Text style={styles.summaryTotalLabel}>Total</Text>
@@ -632,7 +647,7 @@ export default function WalletScreen() {
                   disabled={sendMutation.isPending}
                 >
                   {sendMutation.isPending ? (
-                    <ActivityIndicator color="#FFFFFF" size="small" />
+                    <ActivityIndicator color={colors.primaryForeground} size="small" />
                   ) : (
                     <Text style={styles.modalSubmitText}>Send Money</Text>
                   )}
@@ -646,435 +661,437 @@ export default function WalletScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 20,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#94A3B8',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginTop: 4,
-  },
-  mainBalanceCard: {
-    backgroundColor: '#1E293B',
-    marginHorizontal: 20,
-    borderRadius: 16,
-    padding: 24,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  balanceLabel: {
-    fontSize: 14,
-    color: '#94A3B8',
-  },
-  mainBalance: {
-    fontSize: 40,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginTop: 8,
-  },
-  currencyLabel: {
-    fontSize: 12,
-    color: '#818CF8',
-    marginTop: 4,
-  },
-  subBalancesContainer: {
-    flexDirection: 'row',
-    marginTop: 16,
-    gap: 12,
-  },
-  subBalance: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-    borderRadius: 12,
-    padding: 12,
-  },
-  subBalanceLabel: {
-    fontSize: 12,
-    color: '#94A3B8',
-  },
-  subBalanceAmount: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#E2E8F0',
-    marginTop: 4,
-  },
-  quickActions: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    gap: 12,
-    marginBottom: 24,
-  },
-  actionButton: {
-    flex: 1,
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-  },
-  actionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  actionText: {
-    fontSize: 12,
-    color: '#E2E8F0',
-  },
-  section: {
-    paddingHorizontal: 20,
-    marginBottom: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  viewAll: {
-    fontSize: 14,
-    color: '#818CF8',
-  },
-  virtualAccountCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  accountIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: '#0F172A',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  accountDetailsLeft: {
-    flex: 1,
-  },
-  accountName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  accountNumber: {
-    fontSize: 12,
-    color: '#94A3B8',
-    marginTop: 2,
-    fontFamily: 'monospace',
-  },
-  accountBank: {
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  accountDetailsRight: {
-    alignItems: 'flex-end',
-  },
-  accountBalance: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  accountStatusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    marginTop: 6,
-  },
-  accountStatusText: {
-    fontSize: 10,
-    color: '#FFFFFF',
-    textTransform: 'capitalize',
-    fontWeight: '500',
-  },
-  statusActive: { backgroundColor: '#065F46' },
-  statusInactive: { backgroundColor: '#4B5563' },
-  statusCompleted: { backgroundColor: '#065F46' },
-  statusPending: { backgroundColor: '#92400E' },
-  statusFailed: { backgroundColor: '#991B1B' },
-  txItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
-  },
-  txIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  txDetails: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  txDescription: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    fontWeight: '500',
-  },
-  txType: {
-    fontSize: 12,
-    color: '#94A3B8',
-    marginTop: 2,
-    textTransform: 'capitalize',
-  },
-  txRight: {
-    alignItems: 'flex-end',
-  },
-  txAmount: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  txStatusBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginTop: 4,
-  },
-  txStatusText: {
-    fontSize: 9,
-    color: '#FFFFFF',
-    textTransform: 'capitalize',
-  },
-  txDate: {
-    fontSize: 10,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  emptyText: {
-    color: '#94A3B8',
-    fontSize: 16,
-    marginTop: 12,
-  },
-  emptySubtext: {
-    color: '#64748B',
-    fontSize: 13,
-    marginTop: 4,
-  },
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'flex-end',
-  },
-  modalScrollContent: {
-    flexGrow: 1,
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#1E293B',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-    paddingBottom: 40,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  modalBalanceCard: {
-    backgroundColor: '#0F172A',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  modalBalanceLabel: {
-    fontSize: 12,
-    color: '#94A3B8',
-    marginBottom: 4,
-  },
-  modalBalanceAmount: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  modalInputLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#CBD5E1',
-    marginBottom: 6,
-    marginTop: 12,
-  },
-  modalInput: {
-    backgroundColor: '#0F172A',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  presetRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 12,
-    flexWrap: 'wrap',
-  },
-  presetButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#475569',
-    backgroundColor: '#0F172A',
-  },
-  presetButtonActive: {
-    borderColor: '#818CF8',
-    backgroundColor: '#312E81',
-  },
-  presetText: {
-    fontSize: 13,
-    color: '#94A3B8',
-    fontWeight: '600',
-  },
-  presetTextActive: {
-    color: '#818CF8',
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#064E3B',
-    borderRadius: 10,
-    padding: 12,
-    marginTop: 16,
-  },
-  infoText: {
-    fontSize: 13,
-    color: '#34D399',
-    flex: 1,
-  },
-  warningRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#78350F',
-    borderRadius: 10,
-    padding: 12,
-    marginTop: 16,
-  },
-  warningText: {
-    fontSize: 13,
-    color: '#FBBF24',
-    flex: 1,
-  },
-  summaryCard: {
-    backgroundColor: '#0F172A',
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  summaryLabel: {
-    fontSize: 14,
-    color: '#94A3B8',
-  },
-  summaryValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  summaryTotal: {
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-    paddingTop: 8,
-    marginBottom: 0,
-  },
-  summaryTotalLabel: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  summaryTotalValue: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#818CF8',
-  },
-  modalActions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 24,
-  },
-  modalCancelButton: {
-    flex: 1,
-    backgroundColor: '#334155',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-  },
-  modalCancelText: {
-    color: '#CBD5E1',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  modalSubmitButton: {
-    flex: 1,
-    backgroundColor: '#4F46E5',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-  },
-  modalSubmitText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-});
+function createStyles(colors: ColorTokens) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    loadingContainer: {
+      flex: 1,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    header: {
+      paddingHorizontal: 20,
+      paddingTop: 60,
+      paddingBottom: 20,
+    },
+    subtitle: {
+      fontSize: 14,
+      color: colors.textSecondary,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: 'bold',
+      color: colors.textPrimary,
+      marginTop: 4,
+    },
+    mainBalanceCard: {
+      backgroundColor: colors.surface,
+      marginHorizontal: 20,
+      borderRadius: 16,
+      padding: 24,
+      marginBottom: 20,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    balanceLabel: {
+      fontSize: 14,
+      color: colors.textSecondary,
+    },
+    mainBalance: {
+      fontSize: 40,
+      fontWeight: 'bold',
+      color: colors.textPrimary,
+      marginTop: 8,
+    },
+    currencyLabel: {
+      fontSize: 12,
+      color: colors.accent,
+      marginTop: 4,
+    },
+    subBalancesContainer: {
+      flexDirection: 'row',
+      marginTop: 16,
+      gap: 12,
+    },
+    subBalance: {
+      flex: 1,
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 12,
+    },
+    subBalanceLabel: {
+      fontSize: 12,
+      color: colors.textSecondary,
+    },
+    subBalanceAmount: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.textSoft,
+      marginTop: 4,
+    },
+    quickActions: {
+      flexDirection: 'row',
+      paddingHorizontal: 20,
+      gap: 12,
+      marginBottom: 24,
+    },
+    actionButton: {
+      flex: 1,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      alignItems: 'center',
+    },
+    actionIcon: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 8,
+    },
+    actionText: {
+      fontSize: 12,
+      color: colors.textSoft,
+    },
+    section: {
+      paddingHorizontal: 20,
+      marginBottom: 24,
+    },
+    sectionHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    sectionTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    viewAll: {
+      fontSize: 14,
+      color: colors.accent,
+    },
+    virtualAccountCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    accountIconContainer: {
+      width: 48,
+      height: 48,
+      borderRadius: 12,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 12,
+    },
+    accountDetailsLeft: {
+      flex: 1,
+    },
+    accountName: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    accountNumber: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      marginTop: 2,
+      fontFamily: 'monospace',
+    },
+    accountBank: {
+      fontSize: 11,
+      color: colors.textTertiary,
+      marginTop: 2,
+    },
+    accountDetailsRight: {
+      alignItems: 'flex-end',
+    },
+    accountBalance: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    accountStatusBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
+      marginTop: 6,
+    },
+    accountStatusText: {
+      fontSize: 10,
+      color: colors.textPrimary,
+      textTransform: 'capitalize',
+      fontWeight: '500',
+    },
+    statusActive: { backgroundColor: colors.successSubtle },
+    statusInactive: { backgroundColor: colors.badgeInactive },
+    statusCompleted: { backgroundColor: colors.successSubtle },
+    statusPending: { backgroundColor: colors.kycPendingBg },
+    statusFailed: { backgroundColor: colors.dangerSubtle },
+    txItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 8,
+    },
+    txIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    txDetails: {
+      flex: 1,
+      marginLeft: 12,
+    },
+    txDescription: {
+      fontSize: 14,
+      color: colors.textPrimary,
+      fontWeight: '500',
+    },
+    txType: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      marginTop: 2,
+      textTransform: 'capitalize',
+    },
+    txRight: {
+      alignItems: 'flex-end',
+    },
+    txAmount: {
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    txStatusBadge: {
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+      marginTop: 4,
+    },
+    txStatusText: {
+      fontSize: 9,
+      color: colors.textPrimary,
+      textTransform: 'capitalize',
+    },
+    txDate: {
+      fontSize: 10,
+      color: colors.textTertiary,
+      marginTop: 2,
+    },
+    emptyContainer: {
+      alignItems: 'center',
+      paddingVertical: 40,
+    },
+    emptyText: {
+      color: colors.textSecondary,
+      fontSize: 16,
+      marginTop: 12,
+    },
+    emptySubtext: {
+      color: colors.textTertiary,
+      fontSize: 13,
+      marginTop: 4,
+    },
+    // Modal Styles
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: colors.modalOverlay,
+      justifyContent: 'flex-end',
+    },
+    modalScrollContent: {
+      flexGrow: 1,
+      justifyContent: 'flex-end',
+    },
+    modalContent: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      padding: 24,
+      paddingBottom: 40,
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 20,
+    },
+    modalTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: colors.textPrimary,
+    },
+    modalBalanceCard: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 20,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    modalBalanceLabel: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      marginBottom: 4,
+    },
+    modalBalanceAmount: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: colors.textPrimary,
+    },
+    modalInputLabel: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: colors.textBody,
+      marginBottom: 6,
+      marginTop: 12,
+    },
+    modalInput: {
+      backgroundColor: colors.inputBackground,
+      borderRadius: 12,
+      padding: 16,
+      fontSize: 16,
+      color: colors.inputText,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+    },
+    presetRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 12,
+      flexWrap: 'wrap',
+    },
+    presetButton: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+    },
+    presetButtonActive: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accentBackground,
+    },
+    presetText: {
+      fontSize: 13,
+      color: colors.textSecondary,
+      fontWeight: '600',
+    },
+    presetTextActive: {
+      color: colors.accent,
+    },
+    infoRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.successSubtle,
+      borderRadius: 10,
+      padding: 12,
+      marginTop: 16,
+    },
+    infoText: {
+      fontSize: 13,
+      color: colors.colorGreen,
+      flex: 1,
+    },
+    warningRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.warningSubtle,
+      borderRadius: 10,
+      padding: 12,
+      marginTop: 16,
+    },
+    warningText: {
+      fontSize: 13,
+      color: colors.warningLight,
+      flex: 1,
+    },
+    summaryCard: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 16,
+      marginTop: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    summaryRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginBottom: 8,
+    },
+    summaryLabel: {
+      fontSize: 14,
+      color: colors.textSecondary,
+    },
+    summaryValue: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    summaryTotal: {
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      paddingTop: 8,
+      marginBottom: 0,
+    },
+    summaryTotalLabel: {
+      fontSize: 14,
+      fontWeight: 'bold',
+      color: colors.textPrimary,
+    },
+    summaryTotalValue: {
+      fontSize: 14,
+      fontWeight: 'bold',
+      color: colors.accent,
+    },
+    modalActions: {
+      flexDirection: 'row',
+      gap: 12,
+      marginTop: 24,
+    },
+    modalCancelButton: {
+      flex: 1,
+      backgroundColor: colors.border,
+      borderRadius: 12,
+      padding: 16,
+      alignItems: 'center',
+    },
+    modalCancelText: {
+      color: colors.textBody,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    modalSubmitButton: {
+      flex: 1,
+      backgroundColor: colors.primary,
+      borderRadius: 12,
+      padding: 16,
+      alignItems: 'center',
+    },
+    modalSubmitText: {
+      color: colors.primaryForeground,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    buttonDisabled: {
+      opacity: 0.7,
+    },
+  });
+}

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,10 +10,13 @@ import {
   Modal,
   TextInput,
   Alert,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { useTheme } from '../lib/theme-context';
+import { ColorTokens } from '../lib/colors';
 
 interface Report {
   id: number;
@@ -35,15 +38,18 @@ const reportTypeIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
   custom: 'construct-outline',
 };
 
-const reportTypeColors: Record<string, string> = {
-  expense: '#F87171',
-  revenue: '#34D399',
-  budget: '#818CF8',
-  tax: '#FBBF24',
-  custom: '#94A3B8',
-};
-
 export default function ReportsScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
+  const reportTypeColors: Record<string, string> = {
+    expense: colors.dangerLight,
+    revenue: colors.colorGreen,
+    budget: colors.accent,
+    tax: colors.warningLight,
+    custom: colors.textSecondary,
+  };
+
   const queryClient = useQueryClient();
 
   const { data: reports, isLoading, refetch } = useQuery({
@@ -126,6 +132,23 @@ export default function ReportsScreen() {
     });
   };
 
+  const handleDownloadReport = async (report: Report) => {
+    if (report.status.toLowerCase() !== 'completed') {
+      Alert.alert('Not Ready', 'This report is still being generated. Please wait until it completes.');
+      return;
+    }
+    try {
+      const result = await api.get<{ url: string; message?: string }>(`/api/reports/${report.id}/download`);
+      if (result.url) {
+        await Linking.openURL(result.url);
+      } else {
+        Alert.alert('Success', result.message || 'Report download initiated.');
+      }
+    } catch (error: any) {
+      Alert.alert('Download Failed', error?.message || 'Failed to download report. Please try again.');
+    }
+  };
+
   const handleDeleteReport = (report: Report) => {
     Alert.alert(
       'Delete Report',
@@ -160,7 +183,7 @@ export default function ReportsScreen() {
   };
 
   const getReportColor = (type: string): string => {
-    return reportTypeColors[type.toLowerCase()] || '#94A3B8';
+    return reportTypeColors[type.toLowerCase()] || colors.textSecondary;
   };
 
   const filteredReports = React.useMemo(() => {
@@ -174,7 +197,7 @@ export default function ReportsScreen() {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer} testID="loading-reports">
-        <ActivityIndicator size="large" color="#818CF8" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -184,7 +207,7 @@ export default function ReportsScreen() {
       <ScrollView
         style={styles.scrollView}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#818CF8" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
         }
         testID="reports-screen"
       >
@@ -230,7 +253,7 @@ export default function ReportsScreen() {
               testID="button-generate-report"
             >
               <View style={styles.generateButton}>
-                <Ionicons name="add" size={18} color="#FFFFFF" />
+                <Ionicons name="add" size={18} color={colors.primaryForeground} />
                 <Text style={styles.generateButtonText}>Generate</Text>
               </View>
             </TouchableOpacity>
@@ -257,15 +280,15 @@ export default function ReportsScreen() {
                   <Text style={styles.statusText}>{report.status}</Text>
                 </View>
                 <View style={styles.reportActions}>
-                  <TouchableOpacity style={styles.downloadBtn} testID={`button-download-report-${report.id}`}>
-                    <Ionicons name="download-outline" size={18} color="#818CF8" />
+                  <TouchableOpacity style={styles.downloadBtn} onPress={() => handleDownloadReport(report)} testID={`button-download-report-${report.id}`}>
+                    <Ionicons name="download-outline" size={18} color={colors.accent} />
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.deleteBtn}
                     onPress={() => handleDeleteReport(report)}
                     testID={`button-delete-report-${report.id}`}
                   >
-                    <Ionicons name="trash-outline" size={18} color="#F87171" />
+                    <Ionicons name="trash-outline" size={18} color={colors.dangerLight} />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -274,7 +297,7 @@ export default function ReportsScreen() {
 
           {filteredReports.length === 0 && !isLoading && (
             <View style={styles.emptyContainer} testID="empty-reports">
-              <Ionicons name="document-text-outline" size={48} color="#334155" />
+              <Ionicons name="document-text-outline" size={48} color={colors.border} />
               <Text style={styles.emptyText}>No reports generated</Text>
               <Text style={styles.emptySubtext}>Generate your first financial report</Text>
             </View>
@@ -301,7 +324,7 @@ export default function ReportsScreen() {
                 }}
                 testID="button-close-generate-modal"
               >
-                <Ionicons name="close" size={24} color="#94A3B8" />
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -309,7 +332,7 @@ export default function ReportsScreen() {
             <TextInput
               style={styles.textInput}
               placeholder="Enter report name"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={colors.placeholderText}
               value={reportName}
               onChangeText={setReportName}
               testID="input-report-name"
@@ -334,7 +357,7 @@ export default function ReportsScreen() {
                     <Ionicons
                       name={icon}
                       size={16}
-                      color={reportType === type ? color : '#64748B'}
+                      color={reportType === type ? color : colors.placeholderText}
                     />
                     <Text
                       style={[
@@ -352,11 +375,11 @@ export default function ReportsScreen() {
             <Text style={styles.inputLabel}>Date Range</Text>
             <View style={styles.dateRangeRow}>
               <View style={styles.dateInputWrapper}>
-                <Ionicons name="calendar-outline" size={16} color="#64748B" style={styles.dateIcon} />
+                <Ionicons name="calendar-outline" size={16} color={colors.placeholderText} style={styles.dateIcon} />
                 <TextInput
                   style={styles.dateInput}
                   placeholder="Start (YYYY-MM-DD)"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.placeholderText}
                   value={startDate}
                   onChangeText={setStartDate}
                   testID="input-start-date"
@@ -364,11 +387,11 @@ export default function ReportsScreen() {
               </View>
               <Text style={styles.dateSeparator}>to</Text>
               <View style={styles.dateInputWrapper}>
-                <Ionicons name="calendar-outline" size={16} color="#64748B" style={styles.dateIcon} />
+                <Ionicons name="calendar-outline" size={16} color={colors.placeholderText} style={styles.dateIcon} />
                 <TextInput
                   style={styles.dateInput}
                   placeholder="End (YYYY-MM-DD)"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.placeholderText}
                   value={endDate}
                   onChangeText={setEndDate}
                   testID="input-end-date"
@@ -383,10 +406,10 @@ export default function ReportsScreen() {
               testID="button-submit-report"
             >
               {createReportMutation.isPending ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
+                <ActivityIndicator size="small" color={colors.primaryForeground} />
               ) : (
                 <>
-                  <Ionicons name="analytics" size={18} color="#FFFFFF" />
+                  <Ionicons name="analytics" size={18} color={colors.primaryForeground} />
                   <Text style={styles.submitButtonText}>Generate Report</Text>
                 </>
               )}
@@ -398,313 +421,315 @@ export default function ReportsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 20,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#94A3B8',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginTop: 4,
-  },
-  typeFilters: {
-    paddingHorizontal: 20,
-    gap: 8,
-    marginBottom: 24,
-  },
-  filterChip: {
-    backgroundColor: '#1E293B',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  filterChipActive: {
-    backgroundColor: '#4F46E5',
-    borderColor: '#4F46E5',
-  },
-  filterText: {
-    fontSize: 13,
-    color: '#94A3B8',
-  },
-  filterTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '500',
-  },
-  section: {
-    paddingHorizontal: 20,
-    marginBottom: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  generateButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#4F46E5',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    gap: 4,
-  },
-  generateButtonText: {
-    fontSize: 13,
-    color: '#FFFFFF',
-    fontWeight: '500',
-  },
-  reportItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  reportIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  reportDetails: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  reportTitle: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    fontWeight: '500',
-  },
-  reportMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-    gap: 6,
-  },
-  typeBadge: {
-    backgroundColor: '#334155',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  typeText: {
-    fontSize: 10,
-    color: '#E2E8F0',
-    textTransform: 'capitalize',
-  },
-  reportDates: {
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 4,
-  },
-  reportRight: {
-    alignItems: 'flex-end',
-    gap: 8,
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  statusCompleted: {
-    backgroundColor: '#065F46',
-  },
-  statusGenerating: {
-    backgroundColor: '#1E40AF',
-  },
-  statusDraft: {
-    backgroundColor: '#334155',
-  },
-  statusText: {
-    fontSize: 10,
-    color: '#FFFFFF',
-    textTransform: 'capitalize',
-  },
-  reportActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  downloadBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: '#0F172A',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  deleteBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: '#0F172A',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  emptyText: {
-    color: '#94A3B8',
-    fontSize: 16,
-    marginTop: 12,
-  },
-  emptySubtext: {
-    color: '#64748B',
-    fontSize: 13,
-    marginTop: 4,
-  },
-  // Modal styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#1E293B',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-    paddingBottom: 40,
-    borderWidth: 1,
-    borderColor: '#334155',
-    borderBottomWidth: 0,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  inputLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#94A3B8',
-    marginBottom: 8,
-    marginTop: 4,
-  },
-  textInput: {
-    backgroundColor: '#0F172A',
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 15,
-    color: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#334155',
-    marginBottom: 16,
-  },
-  typeSelector: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 16,
-  },
-  typeSelectorItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#0F172A',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  typeSelectorItemActive: {
-    backgroundColor: '#0F172A',
-  },
-  typeSelectorText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#64748B',
-    textTransform: 'capitalize',
-  },
-  dateRangeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 20,
-  },
-  dateInputWrapper: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#0F172A',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#334155',
-    paddingHorizontal: 12,
-  },
-  dateIcon: {
-    marginRight: 8,
-  },
-  dateInput: {
-    flex: 1,
-    paddingVertical: 14,
-    fontSize: 13,
-    color: '#FFFFFF',
-  },
-  dateSeparator: {
-    fontSize: 13,
-    color: '#64748B',
-  },
-  submitButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#4F46E5',
-    borderRadius: 12,
-    paddingVertical: 14,
-    gap: 8,
-    marginTop: 8,
-  },
-  submitButtonDisabled: {
-    opacity: 0.6,
-  },
-  submitButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-});
+function createStyles(colors: ColorTokens) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    scrollView: {
+      flex: 1,
+    },
+    loadingContainer: {
+      flex: 1,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    header: {
+      paddingHorizontal: 20,
+      paddingTop: 60,
+      paddingBottom: 20,
+    },
+    subtitle: {
+      fontSize: 14,
+      color: colors.textSecondary,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: 'bold',
+      color: colors.textPrimary,
+      marginTop: 4,
+    },
+    typeFilters: {
+      paddingHorizontal: 20,
+      gap: 8,
+      marginBottom: 24,
+    },
+    filterChip: {
+      backgroundColor: colors.surface,
+      borderRadius: 20,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    filterChipActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    filterText: {
+      fontSize: 13,
+      color: colors.textSecondary,
+    },
+    filterTextActive: {
+      color: colors.primaryForeground,
+      fontWeight: '500',
+    },
+    section: {
+      paddingHorizontal: 20,
+      marginBottom: 24,
+    },
+    sectionHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    sectionTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    generateButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.primary,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      gap: 4,
+    },
+    generateButtonText: {
+      fontSize: 13,
+      color: colors.primaryForeground,
+      fontWeight: '500',
+    },
+    reportItem: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    reportIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    reportDetails: {
+      flex: 1,
+      marginLeft: 12,
+    },
+    reportTitle: {
+      fontSize: 14,
+      color: colors.textPrimary,
+      fontWeight: '500',
+    },
+    reportMeta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 4,
+      gap: 6,
+    },
+    typeBadge: {
+      backgroundColor: colors.border,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 4,
+    },
+    typeText: {
+      fontSize: 10,
+      color: colors.textSoft,
+      textTransform: 'capitalize',
+    },
+    reportDates: {
+      fontSize: 11,
+      color: colors.textTertiary,
+      marginTop: 4,
+    },
+    reportRight: {
+      alignItems: 'flex-end',
+      gap: 8,
+    },
+    statusBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 4,
+    },
+    statusCompleted: {
+      backgroundColor: colors.successSubtle,
+    },
+    statusGenerating: {
+      backgroundColor: colors.infoSubtle,
+    },
+    statusDraft: {
+      backgroundColor: colors.border,
+    },
+    statusText: {
+      fontSize: 10,
+      color: colors.textPrimary,
+      textTransform: 'capitalize',
+    },
+    reportActions: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    downloadBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: 8,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    deleteBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: 8,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    emptyContainer: {
+      alignItems: 'center',
+      paddingVertical: 40,
+    },
+    emptyText: {
+      color: colors.textSecondary,
+      fontSize: 16,
+      marginTop: 12,
+    },
+    emptySubtext: {
+      color: colors.textTertiary,
+      fontSize: 13,
+      marginTop: 4,
+    },
+    // Modal styles
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: colors.modalOverlay,
+      justifyContent: 'flex-end',
+    },
+    modalContent: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      padding: 24,
+      paddingBottom: 40,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderBottomWidth: 0,
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 24,
+    },
+    modalTitle: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.textPrimary,
+    },
+    inputLabel: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textSecondary,
+      marginBottom: 8,
+      marginTop: 4,
+    },
+    textInput: {
+      backgroundColor: colors.background,
+      borderRadius: 10,
+      padding: 14,
+      fontSize: 15,
+      color: colors.inputText,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+      marginBottom: 16,
+    },
+    typeSelector: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: 16,
+    },
+    typeSelectorItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 8,
+      backgroundColor: colors.background,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+    },
+    typeSelectorItemActive: {
+      backgroundColor: colors.background,
+    },
+    typeSelectorText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.placeholderText,
+      textTransform: 'capitalize',
+    },
+    dateRangeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginBottom: 20,
+    },
+    dateInputWrapper: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.background,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+      paddingHorizontal: 12,
+    },
+    dateIcon: {
+      marginRight: 8,
+    },
+    dateInput: {
+      flex: 1,
+      paddingVertical: 14,
+      fontSize: 13,
+      color: colors.inputText,
+    },
+    dateSeparator: {
+      fontSize: 13,
+      color: colors.placeholderText,
+    },
+    submitButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primary,
+      borderRadius: 12,
+      paddingVertical: 14,
+      gap: 8,
+      marginTop: 8,
+    },
+    submitButtonDisabled: {
+      opacity: 0.6,
+    },
+    submitButtonText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.primaryForeground,
+    },
+  });
+}

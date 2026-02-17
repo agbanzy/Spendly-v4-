@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { useTheme } from '../lib/theme-context';
+import { ColorTokens } from '../lib/colors';
 
 
 // Type definitions
@@ -81,37 +83,44 @@ interface StatCardProps {
   value: string;
   color: string;
   testID?: string;
+  colors: ColorTokens;
 }
 
-const StatCard: React.FC<StatCardProps> = ({ icon, label, value, color, testID }) => (
-  <View style={[styles.statCard, { borderLeftColor: color, borderLeftWidth: 3 }]} testID={testID}>
-    <View style={[styles.statIconContainer, { backgroundColor: color + '15' }]}>
-      <Ionicons name={icon as any} size={24} color={color} />
+const StatCard: React.FC<StatCardProps> = ({ icon, label, value, color, testID, colors }) => {
+  const cardStyles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <View style={[cardStyles.statCard, { borderLeftColor: color, borderLeftWidth: 3 }]} testID={testID}>
+      <View style={[cardStyles.statIconContainer, { backgroundColor: color + '15' }]}>
+        <Ionicons name={icon as any} size={24} color={color} />
+      </View>
+      <Text style={cardStyles.statLabel}>{label}</Text>
+      <Text style={cardStyles.statValue} testID={`${testID}-value`}>{value}</Text>
     </View>
-    <Text style={styles.statLabel}>{label}</Text>
-    <Text style={styles.statValue} testID={`${testID}-value`}>{value}</Text>
-  </View>
-);
+  );
+};
 
 // Insight card component
 interface InsightCardProps {
   insight: Insight;
   testID?: string;
+  colors: ColorTokens;
 }
 
-const InsightCard: React.FC<InsightCardProps> = ({ insight, testID }) => {
+const InsightCard: React.FC<InsightCardProps> = ({ insight, testID, colors }) => {
+  const cardStyles = useMemo(() => createStyles(colors), [colors]);
+
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case 'critical':
-        return '#EF4444';
+        return colors.danger;
       case 'warning':
-        return '#F59E0B';
+        return colors.warning;
       case 'info':
-        return '#3B82F6';
+        return colors.info;
       case 'success':
-        return '#10B981';
+        return colors.success;
       default:
-        return '#3B82F6';
+        return colors.info;
     }
   };
 
@@ -133,22 +142,22 @@ const InsightCard: React.FC<InsightCardProps> = ({ insight, testID }) => {
   const severityColor = getSeverityColor(insight.severity);
 
   return (
-    <View style={styles.insightCard} testID={testID}>
-      <View style={styles.insightHeader}>
-        <View style={[styles.severityBadge, { backgroundColor: severityColor + '20' }]}>
+    <View style={cardStyles.insightCard} testID={testID}>
+      <View style={cardStyles.insightHeader}>
+        <View style={[cardStyles.severityBadge, { backgroundColor: severityColor + '20' }]}>
           <Ionicons name={getSeverityIcon(insight.severity) as any} size={16} color={severityColor} />
-          <Text style={[styles.severityText, { color: severityColor }]}>
+          <Text style={[cardStyles.severityText, { color: severityColor }]}>
             {insight.severity.charAt(0).toUpperCase() + insight.severity.slice(1)}
           </Text>
         </View>
       </View>
-      <Text style={styles.insightTitle}>{insight.title}</Text>
-      <Text style={styles.insightSummary}>{insight.summary}</Text>
-      <View style={styles.insightMetric}>
-        <Text style={styles.metricLabel}>{insight.metric}:</Text>
-        <Text style={styles.metricValue}>{insight.metricValue}</Text>
+      <Text style={cardStyles.insightTitle}>{insight.title}</Text>
+      <Text style={cardStyles.insightSummary}>{insight.summary}</Text>
+      <View style={cardStyles.insightMetric}>
+        <Text style={cardStyles.metricLabel}>{insight.metric}:</Text>
+        <Text style={cardStyles.metricValue}>{insight.metricValue}</Text>
       </View>
-      <Text style={styles.insightRecommendation}>{insight.recommendation}</Text>
+      <Text style={cardStyles.insightRecommendation}>{insight.recommendation}</Text>
     </View>
   );
 };
@@ -158,30 +167,35 @@ interface MonthlyBarProps {
   data: MonthlyData;
   maxValue: number;
   testID?: string;
+  colors: ColorTokens;
 }
 
-const MonthlyBar: React.FC<MonthlyBarProps> = ({ data, maxValue, testID }) => {
+const MonthlyBar: React.FC<MonthlyBarProps> = ({ data, maxValue, testID, colors }) => {
+  const barStyles = useMemo(() => createStyles(colors), [colors]);
   const inflowHeight = (data.inflow / maxValue) * 100;
   const outflowHeight = (data.outflow / maxValue) * 100;
 
   return (
-    <View style={styles.monthlyBarContainer} testID={testID}>
-      <View style={styles.barsWrapper}>
-        <View style={styles.barPair}>
-          <View style={[styles.barColumn, { height: `${inflowHeight}%` }]}>
-            <View style={[styles.bar, styles.inflowBar]} />
+    <View style={barStyles.monthlyBarContainer} testID={testID}>
+      <View style={barStyles.barsWrapper}>
+        <View style={barStyles.barPair}>
+          <View style={[barStyles.barColumn, { height: `${inflowHeight}%` }]}>
+            <View style={[barStyles.bar, barStyles.inflowBar]} />
           </View>
-          <View style={[styles.barColumn, { height: `${outflowHeight}%` }]}>
-            <View style={[styles.bar, styles.outflowBar]} />
+          <View style={[barStyles.barColumn, { height: `${outflowHeight}%` }]}>
+            <View style={[barStyles.bar, barStyles.outflowBar]} />
           </View>
         </View>
       </View>
-      <Text style={styles.monthLabel}>{data.month.slice(0, 3)}</Text>
+      <Text style={barStyles.monthLabel}>{data.month.slice(0, 3)}</Text>
     </View>
   );
 };
 
 export default function AnalyticsScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   const [refreshing, setRefreshing] = React.useState(false);
 
   // Fetch KPI data
@@ -238,7 +252,7 @@ export default function AnalyticsScreen() {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer} testID="loading-analytics">
-        <ActivityIndicator size="large" color="#818CF8" />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -247,7 +261,7 @@ export default function AnalyticsScreen() {
     <ScrollView
       style={styles.container}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#818CF8" />
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
       }
       testID="analytics-screen"
     >
@@ -267,43 +281,49 @@ export default function AnalyticsScreen() {
               icon="trending-up"
               label="Total Revenue"
               value={formatCurrency(kpiData.totalRevenue)}
-              color="#10B981"
+              color={colors.success}
               testID="kpi-revenue"
+              colors={colors}
             />
             <StatCard
               icon="trending-down"
               label="Total Expenses"
               value={formatCurrency(kpiData.totalExpenses)}
-              color="#EF4444"
+              color={colors.danger}
               testID="kpi-expenses"
+              colors={colors}
             />
             <StatCard
               icon="cash"
               label="Net Cash Flow"
               value={formatCurrency(kpiData.netCashFlow)}
-              color={kpiData.netCashFlow >= 0 ? '#10B981' : '#EF4444'}
+              color={kpiData.netCashFlow >= 0 ? colors.success : colors.danger}
               testID="kpi-cash-flow"
+              colors={colors}
             />
             <StatCard
               icon="percent"
               label="Profit Margin"
               value={formatPercent(kpiData.profitMargin)}
-              color="#3B82F6"
+              color={colors.info}
               testID="kpi-margin"
+              colors={colors}
             />
             <StatCard
               icon="flash"
               label="Burn Rate"
               value={formatCurrency(kpiData.burnRate)}
-              color="#F59E0B"
+              color={colors.warning}
               testID="kpi-burn-rate"
+              colors={colors}
             />
             <StatCard
               icon="hourglass"
               label="Runway"
               value={formatRunway(kpiData.runwayMonths)}
-              color="#818CF8"
+              color={colors.accent}
               testID="kpi-runway"
+              colors={colors}
             />
           </View>
         ) : (
@@ -340,6 +360,7 @@ export default function AnalyticsScreen() {
                     data={month}
                     maxValue={maxCashFlowValue}
                     testID={`monthly-bar-${index}`}
+                    colors={colors}
                   />
                 ))}
               </View>
@@ -388,12 +409,13 @@ export default function AnalyticsScreen() {
                 key={index}
                 insight={insight}
                 testID={`insight-card-${index}`}
+                colors={colors}
               />
             ))}
           </View>
         ) : (
           <View style={styles.emptyContainer} testID="empty-insights">
-            <Ionicons name="insights-outline" size={48} color="#334155" />
+            <Ionicons name="bulb-outline" size={48} color={colors.border} />
             <Text style={styles.emptyText}>No insights available</Text>
           </View>
         )}
@@ -405,268 +427,270 @@ export default function AnalyticsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 24,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#94A3B8',
-    fontWeight: '400',
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginTop: 8,
-  },
-  section: {
-    paddingHorizontal: 20,
-    marginBottom: 32,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginBottom: 16,
-  },
+function createStyles(colors: ColorTokens) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    loadingContainer: {
+      flex: 1,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    header: {
+      paddingHorizontal: 20,
+      paddingTop: 60,
+      paddingBottom: 24,
+    },
+    subtitle: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      fontWeight: '400',
+    },
+    title: {
+      fontSize: 32,
+      fontWeight: 'bold',
+      color: colors.textPrimary,
+      marginTop: 8,
+    },
+    section: {
+      paddingHorizontal: 20,
+      marginBottom: 32,
+    },
+    sectionTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: colors.textPrimary,
+      marginBottom: 16,
+    },
 
-  // KPI Grid
-  statGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    justifyContent: 'space-between',
-  },
-  statCard: {
-    width: '48%',
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
-  },
-  statIconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#94A3B8',
-    fontWeight: '500',
-    marginBottom: 6,
-    textTransform: 'capitalize',
-  },
-  statValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
+    // KPI Grid
+    statGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 12,
+      justifyContent: 'space-between',
+    },
+    statCard: {
+      width: '48%',
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    statIconContainer: {
+      width: 44,
+      height: 44,
+      borderRadius: 8,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    statLabel: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      fontWeight: '500',
+      marginBottom: 6,
+      textTransform: 'capitalize',
+    },
+    statValue: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.textPrimary,
+    },
 
-  // Cash Flow
-  cashFlowLegend: {
-    flexDirection: 'row',
-    marginBottom: 16,
-    gap: 20,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  legendColor: {
-    width: 12,
-    height: 12,
-    borderRadius: 2,
-  },
-  inflowColor: {
-    backgroundColor: '#10B981',
-  },
-  outflowColor: {
-    backgroundColor: '#EF4444',
-  },
-  legendText: {
-    fontSize: 12,
-    color: '#94A3B8',
-    fontWeight: '500',
-  },
-  horizontalScroll: {
-    marginHorizontal: -20,
-    paddingHorizontal: 20,
-    marginBottom: 20,
-  },
-  cashFlowContainer: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingRight: 20,
-  },
-  monthlyBarContainer: {
-    width: 60,
-    height: 140,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-  },
-  barsWrapper: {
-    height: 110,
-    width: '100%',
-    justifyContent: 'flex-end',
-  },
-  barPair: {
-    flexDirection: 'row',
-    gap: 4,
-    height: '100%',
-    alignItems: 'flex-end',
-  },
-  barColumn: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  bar: {
-    width: '100%',
-    borderRadius: 2,
-  },
-  inflowBar: {
-    backgroundColor: '#10B981',
-  },
-  outflowBar: {
-    backgroundColor: '#EF4444',
-  },
-  monthLabel: {
-    fontSize: 10,
-    color: '#94A3B8',
-    marginTop: 8,
-    fontWeight: '500',
-  },
-  cashFlowSummary: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 12,
-  },
-  summaryItem: {
-    flex: 1,
-    backgroundColor: '#1E293B',
-    borderRadius: 8,
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
-  },
-  summaryLabel: {
-    fontSize: 11,
-    color: '#94A3B8',
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  summaryValue: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  inflowText: {
-    color: '#10B981',
-  },
-  outflowText: {
-    color: '#EF4444',
-  },
-  positiveText: {
-    color: '#10B981',
-  },
-  negativeText: {
-    color: '#EF4444',
-  },
+    // Cash Flow
+    cashFlowLegend: {
+      flexDirection: 'row',
+      marginBottom: 16,
+      gap: 20,
+    },
+    legendItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    legendColor: {
+      width: 12,
+      height: 12,
+      borderRadius: 2,
+    },
+    inflowColor: {
+      backgroundColor: colors.success,
+    },
+    outflowColor: {
+      backgroundColor: colors.danger,
+    },
+    legendText: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      fontWeight: '500',
+    },
+    horizontalScroll: {
+      marginHorizontal: -20,
+      paddingHorizontal: 20,
+      marginBottom: 20,
+    },
+    cashFlowContainer: {
+      flexDirection: 'row',
+      gap: 12,
+      paddingRight: 20,
+    },
+    monthlyBarContainer: {
+      width: 60,
+      height: 140,
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+    },
+    barsWrapper: {
+      height: 110,
+      width: '100%',
+      justifyContent: 'flex-end',
+    },
+    barPair: {
+      flexDirection: 'row',
+      gap: 4,
+      height: '100%',
+      alignItems: 'flex-end',
+    },
+    barColumn: {
+      flex: 1,
+      justifyContent: 'flex-end',
+    },
+    bar: {
+      width: '100%',
+      borderRadius: 2,
+    },
+    inflowBar: {
+      backgroundColor: colors.success,
+    },
+    outflowBar: {
+      backgroundColor: colors.danger,
+    },
+    monthLabel: {
+      fontSize: 10,
+      color: colors.textSecondary,
+      marginTop: 8,
+      fontWeight: '500',
+    },
+    cashFlowSummary: {
+      flexDirection: 'row',
+      gap: 12,
+      marginTop: 12,
+    },
+    summaryItem: {
+      flex: 1,
+      backgroundColor: colors.surface,
+      borderRadius: 8,
+      padding: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    summaryLabel: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      fontWeight: '500',
+      marginBottom: 4,
+    },
+    summaryValue: {
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    inflowText: {
+      color: colors.success,
+    },
+    outflowText: {
+      color: colors.danger,
+    },
+    positiveText: {
+      color: colors.success,
+    },
+    negativeText: {
+      color: colors.danger,
+    },
 
-  // Insights
-  insightCard: {
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderLeftWidth: 1,
-    borderLeftColor: '#334155',
-  },
-  insightHeader: {
-    marginBottom: 12,
-  },
-  severityBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-    alignSelf: 'flex-start',
-  },
-  severityText: {
-    fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'capitalize',
-  },
-  insightTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 6,
-  },
-  insightSummary: {
-    fontSize: 13,
-    color: '#CBD5E1',
-    lineHeight: 18,
-    marginBottom: 10,
-  },
-  insightMetric: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: '#0F172A',
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    marginBottom: 10,
-  },
-  metricLabel: {
-    fontSize: 12,
-    color: '#94A3B8',
-    fontWeight: '500',
-  },
-  metricValue: {
-    fontSize: 12,
-    color: '#818CF8',
-    fontWeight: '700',
-  },
-  insightRecommendation: {
-    fontSize: 12,
-    color: '#A1A5B4',
-    lineHeight: 16,
-    fontStyle: 'italic',
-  },
+    // Insights
+    insightCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 12,
+      borderLeftWidth: 1,
+      borderLeftColor: colors.border,
+    },
+    insightHeader: {
+      marginBottom: 12,
+    },
+    severityBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingVertical: 4,
+      paddingHorizontal: 8,
+      borderRadius: 6,
+      alignSelf: 'flex-start',
+    },
+    severityText: {
+      fontSize: 11,
+      fontWeight: '600',
+      textTransform: 'capitalize',
+    },
+    insightTitle: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.textPrimary,
+      marginBottom: 6,
+    },
+    insightSummary: {
+      fontSize: 13,
+      color: colors.textBody,
+      lineHeight: 18,
+      marginBottom: 10,
+    },
+    insightMetric: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      backgroundColor: colors.background,
+      borderRadius: 8,
+      paddingVertical: 8,
+      paddingHorizontal: 10,
+      marginBottom: 10,
+    },
+    metricLabel: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      fontWeight: '500',
+    },
+    metricValue: {
+      fontSize: 12,
+      color: colors.accent,
+      fontWeight: '700',
+    },
+    insightRecommendation: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      lineHeight: 16,
+      fontStyle: 'italic',
+    },
 
-  // Empty state
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  emptyText: {
-    color: '#64748B',
-    textAlign: 'center',
-    marginTop: 12,
-    fontSize: 14,
-  },
+    // Empty state
+    emptyContainer: {
+      alignItems: 'center',
+      paddingVertical: 40,
+    },
+    emptyText: {
+      color: colors.textTertiary,
+      textAlign: 'center',
+      marginTop: 12,
+      fontSize: 14,
+    },
 
-  // Bottom padding
-  bottomPadding: {
-    height: 40,
-  },
-});
+    // Bottom padding
+    bottomPadding: {
+      height: 40,
+    },
+  });
+}

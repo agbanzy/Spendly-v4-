@@ -2,6 +2,7 @@ export const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$', EUR: '\u20AC', GBP: '\u00A3', NGN: '\u20A6',
   KES: 'KSh', GHS: '\u20B5', ZAR: 'R', EGP: 'E\u00A3',
   RWF: 'RF', XOF: 'CFA', CAD: 'C$', AUD: 'A$',
+  CHF: 'CHF', SEK: 'kr', NOK: 'kr', DKK: 'kr',
 };
 
 export function getCurrencySymbol(currency: string): string {

@@ -33,7 +33,7 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   
-  getExpenses(): Promise<Expense[]>;
+  getExpenses(companyId?: string): Promise<Expense[]>;
   getExpense(id: string): Promise<Expense | undefined>;
   createExpense(expense: Omit<Expense, 'id'>): Promise<Expense>;
   updateExpense(id: string, expense: Partial<Omit<Expense, 'id'>>): Promise<Expense | undefined>;
@@ -46,19 +46,19 @@ export interface IStorage {
   updateTransaction(id: string, transaction: Partial<Omit<Transaction, 'id'>>): Promise<Transaction | undefined>;
   deleteTransaction(id: string): Promise<boolean>;
   
-  getBills(): Promise<Bill[]>;
+  getBills(companyId?: string): Promise<Bill[]>;
   getBill(id: string): Promise<Bill | undefined>;
   createBill(bill: Omit<Bill, 'id'>): Promise<Bill>;
   updateBill(id: string, bill: Partial<Omit<Bill, 'id'>>): Promise<Bill | undefined>;
   deleteBill(id: string): Promise<boolean>;
   
-  getBudgets(): Promise<Budget[]>;
+  getBudgets(companyId?: string): Promise<Budget[]>;
   getBudget(id: string): Promise<Budget | undefined>;
   createBudget(budget: Omit<Budget, 'id'>): Promise<Budget>;
   updateBudget(id: string, budget: Partial<Omit<Budget, 'id'>>): Promise<Budget | undefined>;
   deleteBudget(id: string): Promise<boolean>;
   
-  getCards(): Promise<VirtualCard[]>;
+  getCards(companyId?: string): Promise<VirtualCard[]>;
   getCard(id: string): Promise<VirtualCard | undefined>;
   createCard(card: Omit<VirtualCard, 'id'>): Promise<VirtualCard>;
   updateCard(id: string, card: Partial<Omit<VirtualCard, 'id'>>): Promise<VirtualCard | undefined>;
@@ -67,18 +67,18 @@ export interface IStorage {
   getCardTransactions(cardId: string): Promise<CardTransaction[]>;
   createCardTransaction(tx: Omit<CardTransaction, 'id'>): Promise<CardTransaction>;
   
-  getVirtualAccounts(): Promise<VirtualAccount[]>;
+  getVirtualAccounts(companyId?: string): Promise<VirtualAccount[]>;
   getVirtualAccount(id: string): Promise<VirtualAccount | undefined>;
   createVirtualAccount(account: Omit<VirtualAccount, 'id'>): Promise<VirtualAccount>;
   updateVirtualAccount(id: string, data: Partial<VirtualAccount>): Promise<VirtualAccount | undefined>;
   
-  getDepartments(): Promise<Department[]>;
+  getDepartments(companyId?: string): Promise<Department[]>;
   getDepartment(id: string): Promise<Department | undefined>;
   createDepartment(dept: Omit<Department, 'id'>): Promise<Department>;
   updateDepartment(id: string, dept: Partial<Omit<Department, 'id'>>): Promise<Department | undefined>;
   deleteDepartment(id: string): Promise<boolean>;
 
-  getTeam(): Promise<TeamMember[]>;
+  getTeam(companyId?: string): Promise<TeamMember[]>;
   getTeamMember(id: string): Promise<TeamMember | undefined>;
   getTeamMemberByEmail(email: string): Promise<TeamMember | undefined>;
   getTeamMembersByEmail(email: string): Promise<TeamMember[]>;
@@ -101,25 +101,25 @@ export interface IStorage {
   
   getInsights(): Promise<AIInsight[]>;
   
-  getPayroll(): Promise<PayrollEntry[]>;
+  getPayroll(companyId?: string): Promise<PayrollEntry[]>;
   getPayrollEntry(id: string): Promise<PayrollEntry | undefined>;
   createPayrollEntry(entry: Omit<PayrollEntry, 'id'>): Promise<PayrollEntry>;
   updatePayrollEntry(id: string, entry: Partial<Omit<PayrollEntry, 'id'>>): Promise<PayrollEntry | undefined>;
   deletePayrollEntry(id: string): Promise<boolean>;
   
-  getInvoices(): Promise<Invoice[]>;
+  getInvoices(companyId?: string): Promise<Invoice[]>;
   getInvoice(id: string): Promise<Invoice | undefined>;
   createInvoice(invoice: Omit<Invoice, 'id'>): Promise<Invoice>;
   updateInvoice(id: string, invoice: Partial<Omit<Invoice, 'id'>>): Promise<Invoice | undefined>;
   deleteInvoice(id: string): Promise<boolean>;
   
-  getVendors(): Promise<Vendor[]>;
+  getVendors(companyId?: string): Promise<Vendor[]>;
   getVendor(id: string): Promise<Vendor | undefined>;
   createVendor(vendor: Omit<Vendor, 'id'>): Promise<Vendor>;
   updateVendor(id: string, vendor: Partial<Omit<Vendor, 'id'>>): Promise<Vendor | undefined>;
   deleteVendor(id: string): Promise<boolean>;
   
-  getReports(): Promise<Report[]>;
+  getReports(companyId?: string): Promise<Report[]>;
   getReport(id: string): Promise<Report | undefined>;
   createReport(report: Omit<Report, 'id'>): Promise<Report>;
   updateReportStatus(id: string, update: { status: string; fileSize?: string }): Promise<Report | undefined>;
@@ -159,7 +159,7 @@ export interface IStorage {
   deactivatePushToken(token: string): Promise<void>;
   
   // Admin methods
-  getAuditLogs(): Promise<AuditLog[]>;
+  getAuditLogs(companyId?: string): Promise<AuditLog[]>;
   createAuditLog(log: Omit<AuditLog, 'id'>): Promise<AuditLog>;
   getOrganizationSettings(): Promise<OrganizationSettings | undefined>;
   updateOrganizationSettings(data: Partial<OrganizationSettings>): Promise<OrganizationSettings>;
@@ -170,12 +170,17 @@ export interface IStorage {
   
   // Wallet methods
   getWallets(userId?: string): Promise<Wallet[]>;
+  getWalletsByCompany(companyId: string): Promise<Wallet[]>;
   getWallet(id: string): Promise<Wallet | undefined>;
   getWalletByUserId(userId: string, currency?: string): Promise<Wallet | undefined>;
   createWallet(wallet: InsertWallet): Promise<Wallet>;
   updateWallet(id: string, data: Partial<Wallet>): Promise<Wallet | undefined>;
   creditWallet(walletId: string, amount: number, type: string, description: string, reference: string, metadata?: Record<string, unknown>): Promise<WalletTransaction>;
   debitWallet(walletId: string, amount: number, type: string, description: string, reference: string, metadata?: Record<string, unknown>): Promise<WalletTransaction>;
+  atomicBillPayment(params: { walletId: string; billId: string; amount: number; reference: string; paidBy: string }): Promise<{ walletTx: WalletTransaction; bill: Bill }>;
+  atomicCardFunding(params: { walletId: string; cardId: string; amount: number; reference: string }): Promise<{ walletTx: WalletTransaction; card: VirtualCard }>;
+  atomicWalletTransfer(params: { sourceWalletId: string; destWalletId: string; amount: number; description: string; reference: string; exchangeRate?: number }): Promise<{ debitTx: WalletTransaction; creditTx: WalletTransaction }>;
+  atomicReversal(params: { walletId: string; originalTxId: string; amount: number; reason: string; reversedBy: string }): Promise<WalletTransaction>;
   
   // Wallet Transactions
   getWalletTransactions(walletId: string): Promise<WalletTransaction[]>;
@@ -287,7 +292,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== EXPENSES ====================
-  async getExpenses(): Promise<Expense[]> {
+  async getExpenses(companyId?: string): Promise<Expense[]> {
+    if (companyId) {
+      const result = await db.select().from(expenses)
+        .where(eq(expenses.companyId, companyId))
+        .orderBy(desc(expenses.date));
+      return result;
+    }
     const result = await db.select().from(expenses).orderBy(desc(expenses.date));
     return result;
   }
@@ -346,7 +357,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== BILLS ====================
-  async getBills(): Promise<Bill[]> {
+  async getBills(companyId?: string): Promise<Bill[]> {
+    if (companyId) {
+      const result = await db.select().from(bills)
+        .where(eq(bills.companyId, companyId))
+        .orderBy(desc(bills.dueDate));
+      return result;
+    }
     const result = await db.select().from(bills).orderBy(desc(bills.dueDate));
     return result;
   }
@@ -372,7 +389,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== BUDGETS ====================
-  async getBudgets(): Promise<Budget[]> {
+  async getBudgets(companyId?: string): Promise<Budget[]> {
+    if (companyId) {
+      const result = await db.select().from(budgets)
+        .where(eq(budgets.companyId, companyId));
+      return result;
+    }
     const result = await db.select().from(budgets);
     return result;
   }
@@ -398,7 +420,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== CARDS ====================
-  async getCards(): Promise<VirtualCard[]> {
+  async getCards(companyId?: string): Promise<VirtualCard[]> {
+    if (companyId) {
+      const result = await db.select().from(virtualCards)
+        .where(eq(virtualCards.companyId, companyId));
+      return result;
+    }
     const result = await db.select().from(virtualCards);
     return result;
   }
@@ -437,7 +464,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== VIRTUAL ACCOUNTS ====================
-  async getVirtualAccounts(): Promise<VirtualAccount[]> {
+  async getVirtualAccounts(companyId?: string): Promise<VirtualAccount[]> {
+    if (companyId) {
+      const result = await db.select().from(virtualAccounts)
+        .where(eq(virtualAccounts.companyId, companyId));
+      return result;
+    }
     const result = await db.select().from(virtualAccounts);
     return result;
   }
@@ -458,7 +490,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== DEPARTMENTS ====================
-  async getDepartments(): Promise<Department[]> {
+  async getDepartments(companyId?: string): Promise<Department[]> {
+    if (companyId) {
+      const result = await db.select().from(departments)
+        .where(eq(departments.companyId, companyId));
+      return result;
+    }
     const result = await db.select().from(departments);
     return result;
   }
@@ -484,7 +521,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== TEAM ====================
-  async getTeam(): Promise<TeamMember[]> {
+  async getTeam(companyId?: string): Promise<TeamMember[]> {
+    if (companyId) {
+      const result = await db.select().from(teamMembers)
+        .where(eq(teamMembers.companyId, companyId));
+      return result;
+    }
     const result = await db.select().from(teamMembers);
     return result;
   }
@@ -656,7 +698,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== PAYROLL ====================
-  async getPayroll(): Promise<PayrollEntry[]> {
+  async getPayroll(companyId?: string): Promise<PayrollEntry[]> {
+    if (companyId) {
+      const result = await db.select().from(payrollEntries)
+        .where(eq(payrollEntries.companyId, companyId))
+        .orderBy(desc(payrollEntries.payDate));
+      return result;
+    }
     const result = await db.select().from(payrollEntries).orderBy(desc(payrollEntries.payDate));
     return result;
   }
@@ -682,7 +730,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== INVOICES ====================
-  async getInvoices(): Promise<Invoice[]> {
+  async getInvoices(companyId?: string): Promise<Invoice[]> {
+    if (companyId) {
+      const result = await db.select().from(invoices)
+        .where(eq(invoices.companyId, companyId))
+        .orderBy(desc(invoices.issuedDate));
+      return result;
+    }
     const result = await db.select().from(invoices).orderBy(desc(invoices.issuedDate));
     return result;
   }
@@ -708,7 +762,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== VENDORS ====================
-  async getVendors(): Promise<Vendor[]> {
+  async getVendors(companyId?: string): Promise<Vendor[]> {
+    if (companyId) {
+      const result = await db.select().from(vendors)
+        .where(eq(vendors.companyId, companyId));
+      return result;
+    }
     const result = await db.select().from(vendors);
     return result;
   }
@@ -734,7 +793,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== REPORTS ====================
-  async getReports(): Promise<Report[]> {
+  async getReports(companyId?: string): Promise<Report[]> {
+    if (companyId) {
+      const result = await db.select().from(reports)
+        .where(eq(reports.companyId, companyId))
+        .orderBy(desc(reports.createdAt));
+      return result;
+    }
     const result = await db.select().from(reports).orderBy(desc(reports.createdAt));
     return result;
   }
@@ -907,7 +972,13 @@ export class DatabaseStorage implements IStorage {
 
   // ==================== ADMIN METHODS ====================
 
-  async getAuditLogs(): Promise<AuditLog[]> {
+  async getAuditLogs(companyId?: string): Promise<AuditLog[]> {
+    if (companyId) {
+      return await db.select().from(auditLogs)
+        .where(eq(auditLogs.companyId, companyId))
+        .orderBy(desc(auditLogs.createdAt))
+        .limit(100);
+    }
     return await db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(100);
   }
 
@@ -979,6 +1050,10 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(wallets);
   }
 
+  async getWalletsByCompany(companyId: string): Promise<Wallet[]> {
+    return await db.select().from(wallets).where(eq(wallets.companyId, companyId));
+  }
+
   async getWallet(id: string): Promise<Wallet | undefined> {
     const result = await db.select().from(wallets).where(eq(wallets.id, id)).limit(1);
     return result[0];
@@ -1017,90 +1092,370 @@ export class DatabaseStorage implements IStorage {
   }
 
   async creditWallet(
-    walletId: string, 
-    amount: number, 
-    type: string, 
-    description: string, 
+    walletId: string,
+    amount: number,
+    type: string,
+    description: string,
     reference: string,
     metadata?: Record<string, unknown>
   ): Promise<WalletTransaction> {
-    const wallet = await this.getWallet(walletId);
-    if (!wallet) throw new Error('Wallet not found');
-    
-    const balanceBefore = parseFloat(wallet.balance || '0');
-    const balanceAfter = balanceBefore + amount;
-    const now = new Date().toISOString();
-    
-    await db.update(wallets)
-      .set({ 
+    return await db.transaction(async (tx) => {
+      const walletRows = await tx.execute(
+        sql`SELECT * FROM wallets WHERE id = ${walletId} FOR UPDATE`
+      );
+      const wallet = walletRows.rows[0] as any;
+      if (!wallet) throw new Error('Wallet not found');
+
+      const balanceBefore = parseFloat(wallet.balance || '0');
+      const balanceAfter = Math.round((balanceBefore + amount) * 100) / 100;
+      const availBefore = parseFloat(wallet.available_balance || '0');
+      const availAfter = Math.round((availBefore + amount) * 100) / 100;
+      const now = new Date().toISOString();
+
+      await tx.update(wallets).set({
         balance: balanceAfter.toFixed(2),
-        availableBalance: (parseFloat(wallet.availableBalance || '0') + amount).toFixed(2),
+        availableBalance: availAfter.toFixed(2),
         updatedAt: now
-      } as any)
-      .where(eq(wallets.id, walletId));
-    
-    const txResult = await db.insert(walletTransactions).values({
-      walletId,
-      type,
-      amount: amount.toFixed(2),
-      currency: wallet.currency,
-      direction: 'credit',
-      balanceBefore: balanceBefore.toFixed(2),
-      balanceAfter: balanceAfter.toFixed(2),
-      description,
-      reference,
-      metadata,
-      status: 'completed',
-      createdAt: now,
-    } as any).returning();
-    
-    return txResult[0];
+      } as any).where(eq(wallets.id, walletId));
+
+      const txResult = await tx.insert(walletTransactions).values({
+        walletId,
+        type,
+        amount: amount.toFixed(2),
+        currency: wallet.currency,
+        direction: 'credit',
+        balanceBefore: balanceBefore.toFixed(2),
+        balanceAfter: balanceAfter.toFixed(2),
+        description,
+        reference,
+        metadata,
+        status: 'completed',
+        createdAt: now,
+      } as any).returning();
+
+      return txResult[0];
+    });
   }
 
   async debitWallet(
-    walletId: string, 
-    amount: number, 
-    type: string, 
-    description: string, 
+    walletId: string,
+    amount: number,
+    type: string,
+    description: string,
     reference: string,
     metadata?: Record<string, unknown>
   ): Promise<WalletTransaction> {
-    const wallet = await this.getWallet(walletId);
-    if (!wallet) throw new Error('Wallet not found');
-    
-    const availableBalance = parseFloat(wallet.availableBalance || '0');
-    if (availableBalance < amount) {
-      throw new Error('Insufficient funds');
-    }
-    
-    const balanceBefore = parseFloat(wallet.balance || '0');
-    const balanceAfter = balanceBefore - amount;
-    const now = new Date().toISOString();
-    
-    await db.update(wallets)
-      .set({ 
+    return await db.transaction(async (tx) => {
+      const walletRows = await tx.execute(
+        sql`SELECT * FROM wallets WHERE id = ${walletId} FOR UPDATE`
+      );
+      const wallet = walletRows.rows[0] as any;
+      if (!wallet) throw new Error('Wallet not found');
+
+      const availableBalance = parseFloat(wallet.available_balance || '0');
+      if (availableBalance < amount) {
+        throw new Error('Insufficient funds');
+      }
+
+      const balanceBefore = parseFloat(wallet.balance || '0');
+      const balanceAfter = Math.round((balanceBefore - amount) * 100) / 100;
+      const availAfter = Math.round((availableBalance - amount) * 100) / 100;
+      const now = new Date().toISOString();
+
+      await tx.update(wallets).set({
         balance: balanceAfter.toFixed(2),
-        availableBalance: (availableBalance - amount).toFixed(2),
+        availableBalance: availAfter.toFixed(2),
         updatedAt: now
-      } as any)
-      .where(eq(wallets.id, walletId));
-    
-    const txResult = await db.insert(walletTransactions).values({
-      walletId,
-      type,
-      amount: amount.toFixed(2),
-      currency: wallet.currency,
-      direction: 'debit',
-      balanceBefore: balanceBefore.toFixed(2),
-      balanceAfter: balanceAfter.toFixed(2),
-      description,
-      reference,
-      metadata,
-      status: 'completed',
-      createdAt: now,
-    } as any).returning();
-    
-    return txResult[0];
+      } as any).where(eq(wallets.id, walletId));
+
+      const txResult = await tx.insert(walletTransactions).values({
+        walletId,
+        type,
+        amount: amount.toFixed(2),
+        currency: wallet.currency,
+        direction: 'debit',
+        balanceBefore: balanceBefore.toFixed(2),
+        balanceAfter: balanceAfter.toFixed(2),
+        description,
+        reference,
+        metadata,
+        status: 'completed',
+        createdAt: now,
+      } as any).returning();
+
+      return txResult[0];
+    });
+  }
+
+  // ==================== ATOMIC WALLET OPERATIONS ====================
+  async atomicBillPayment(params: {
+    walletId: string;
+    billId: string;
+    amount: number;
+    reference: string;
+    paidBy: string;
+  }): Promise<{ walletTx: WalletTransaction; bill: Bill }> {
+    return await db.transaction(async (tx) => {
+      const walletRows = await tx.execute(
+        sql`SELECT * FROM wallets WHERE id = ${params.walletId} FOR UPDATE`
+      );
+      const wallet = walletRows.rows[0] as any;
+      if (!wallet) throw new Error('Wallet not found');
+
+      const availableBalance = parseFloat(wallet.available_balance || '0');
+      if (availableBalance < params.amount) {
+        throw new Error('Insufficient funds');
+      }
+
+      const balanceBefore = parseFloat(wallet.balance || '0');
+      const balanceAfter = Math.round((balanceBefore - params.amount) * 100) / 100;
+      const availAfter = Math.round((availableBalance - params.amount) * 100) / 100;
+      const now = new Date().toISOString();
+
+      await tx.update(wallets).set({
+        balance: balanceAfter.toFixed(2),
+        availableBalance: availAfter.toFixed(2),
+        updatedAt: now
+      } as any).where(eq(wallets.id, params.walletId));
+
+      const walletTxResult = await tx.insert(walletTransactions).values({
+        walletId: params.walletId,
+        type: 'bill_payment',
+        amount: params.amount.toFixed(2),
+        currency: wallet.currency,
+        direction: 'debit',
+        balanceBefore: balanceBefore.toFixed(2),
+        balanceAfter: balanceAfter.toFixed(2),
+        description: `Bill payment for bill ${params.billId}`,
+        reference: params.reference,
+        metadata: { billId: params.billId, paidBy: params.paidBy },
+        status: 'completed',
+        createdAt: now,
+      } as any).returning();
+
+      const billResult = await tx.update(bills)
+        .set({
+          status: 'paid',
+          paidAmount: params.amount.toFixed(2),
+          paidDate: now,
+          updatedAt: now,
+        } as any)
+        .where(eq(bills.id, params.billId))
+        .returning();
+
+      return {
+        walletTx: walletTxResult[0],
+        bill: billResult[0],
+      };
+    });
+  }
+
+  async atomicCardFunding(params: {
+    walletId: string;
+    cardId: string;
+    amount: number;
+    reference: string;
+  }): Promise<{ walletTx: WalletTransaction; card: VirtualCard }> {
+    return await db.transaction(async (tx) => {
+      const walletRows = await tx.execute(
+        sql`SELECT * FROM wallets WHERE id = ${params.walletId} FOR UPDATE`
+      );
+      const wallet = walletRows.rows[0] as any;
+      if (!wallet) throw new Error('Wallet not found');
+
+      const availableBalance = parseFloat(wallet.available_balance || '0');
+      if (availableBalance < params.amount) {
+        throw new Error('Insufficient funds');
+      }
+
+      const balanceBefore = parseFloat(wallet.balance || '0');
+      const balanceAfter = Math.round((balanceBefore - params.amount) * 100) / 100;
+      const availAfter = Math.round((availableBalance - params.amount) * 100) / 100;
+      const now = new Date().toISOString();
+
+      await tx.update(wallets).set({
+        balance: balanceAfter.toFixed(2),
+        availableBalance: availAfter.toFixed(2),
+        updatedAt: now
+      } as any).where(eq(wallets.id, params.walletId));
+
+      const walletTxResult = await tx.insert(walletTransactions).values({
+        walletId: params.walletId,
+        type: 'card_funding',
+        amount: params.amount.toFixed(2),
+        currency: wallet.currency,
+        direction: 'debit',
+        balanceBefore: balanceBefore.toFixed(2),
+        balanceAfter: balanceAfter.toFixed(2),
+        description: `Card funding for card ${params.cardId}`,
+        reference: params.reference,
+        metadata: { cardId: params.cardId },
+        status: 'completed',
+        createdAt: now,
+      } as any).returning();
+
+      const cardResult = await tx.update(virtualCards)
+        .set({
+          balance: (parseFloat((await tx.select().from(virtualCards).where(eq(virtualCards.id, params.cardId)).limit(1))[0].balance || '0') + params.amount).toFixed(2),
+          updatedAt: now,
+        } as any)
+        .where(eq(virtualCards.id, params.cardId))
+        .returning();
+
+      return {
+        walletTx: walletTxResult[0],
+        card: cardResult[0],
+      };
+    });
+  }
+
+  async atomicWalletTransfer(params: {
+    sourceWalletId: string;
+    destWalletId: string;
+    amount: number;
+    description: string;
+    reference: string;
+    exchangeRate?: number;
+  }): Promise<{ debitTx: WalletTransaction; creditTx: WalletTransaction }> {
+    return await db.transaction(async (tx) => {
+      const sourceRows = await tx.execute(
+        sql`SELECT * FROM wallets WHERE id = ${params.sourceWalletId} FOR UPDATE`
+      );
+      const sourceWallet = sourceRows.rows[0] as any;
+      if (!sourceWallet) throw new Error('Source wallet not found');
+
+      const destRows = await tx.execute(
+        sql`SELECT * FROM wallets WHERE id = ${params.destWalletId} FOR UPDATE`
+      );
+      const destWallet = destRows.rows[0] as any;
+      if (!destWallet) throw new Error('Destination wallet not found');
+
+      const sourceAvail = parseFloat(sourceWallet.available_balance || '0');
+      if (sourceAvail < params.amount) {
+        throw new Error('Insufficient funds in source wallet');
+      }
+
+      const now = new Date().toISOString();
+      const rate = params.exchangeRate || 1;
+      const destAmount = Math.round((params.amount * rate) * 100) / 100;
+
+      const sourceBefore = parseFloat(sourceWallet.balance || '0');
+      const sourceAfter = Math.round((sourceBefore - params.amount) * 100) / 100;
+      const sourceAvailAfter = Math.round((sourceAvail - params.amount) * 100) / 100;
+
+      const destBefore = parseFloat(destWallet.balance || '0');
+      const destAfter = Math.round((destBefore + destAmount) * 100) / 100;
+      const destAvailAfter = Math.round((parseFloat(destWallet.available_balance || '0') + destAmount) * 100) / 100;
+
+      await tx.update(wallets).set({
+        balance: sourceAfter.toFixed(2),
+        availableBalance: sourceAvailAfter.toFixed(2),
+        updatedAt: now
+      } as any).where(eq(wallets.id, params.sourceWalletId));
+
+      await tx.update(wallets).set({
+        balance: destAfter.toFixed(2),
+        availableBalance: destAvailAfter.toFixed(2),
+        updatedAt: now
+      } as any).where(eq(wallets.id, params.destWalletId));
+
+      const debitTxResult = await tx.insert(walletTransactions).values({
+        walletId: params.sourceWalletId,
+        type: 'wallet_transfer',
+        amount: params.amount.toFixed(2),
+        currency: sourceWallet.currency,
+        direction: 'debit',
+        balanceBefore: sourceBefore.toFixed(2),
+        balanceAfter: sourceAfter.toFixed(2),
+        description: params.description,
+        reference: params.reference,
+        metadata: { destWalletId: params.destWalletId, exchangeRate: rate },
+        status: 'completed',
+        createdAt: now,
+      } as any).returning();
+
+      const creditTxResult = await tx.insert(walletTransactions).values({
+        walletId: params.destWalletId,
+        type: 'wallet_transfer_in',
+        amount: destAmount.toFixed(2),
+        currency: destWallet.currency,
+        direction: 'credit',
+        balanceBefore: destBefore.toFixed(2),
+        balanceAfter: destAfter.toFixed(2),
+        description: params.description,
+        reference: params.reference,
+        metadata: { sourceWalletId: params.sourceWalletId, exchangeRate: rate },
+        status: 'completed',
+        createdAt: now,
+      } as any).returning();
+
+      return {
+        debitTx: debitTxResult[0],
+        creditTx: creditTxResult[0],
+      };
+    });
+  }
+
+  async atomicReversal(params: {
+    walletId: string;
+    originalTxId: string;
+    amount: number;
+    reason: string;
+    reversedBy: string;
+  }): Promise<WalletTransaction> {
+    return await db.transaction(async (tx) => {
+      const walletRows = await tx.execute(
+        sql`SELECT * FROM wallets WHERE id = ${params.walletId} FOR UPDATE`
+      );
+      const wallet = walletRows.rows[0] as any;
+      if (!wallet) throw new Error('Wallet not found');
+
+      const originalTx = await tx.select().from(walletTransactions)
+        .where(eq(walletTransactions.id, params.originalTxId))
+        .limit(1);
+      if (originalTx.length === 0) throw new Error('Original transaction not found');
+
+      const now = new Date().toISOString();
+      const balanceBefore = parseFloat(wallet.balance || '0');
+      let balanceAfter: number;
+      let availAfter: number;
+      const availBefore = parseFloat(wallet.available_balance || '0');
+
+      if (originalTx[0].direction === 'debit') {
+        balanceAfter = Math.round((balanceBefore + params.amount) * 100) / 100;
+        availAfter = Math.round((availBefore + params.amount) * 100) / 100;
+      } else {
+        balanceAfter = Math.round((balanceBefore - params.amount) * 100) / 100;
+        availAfter = Math.round((availBefore - params.amount) * 100) / 100;
+      }
+
+      await tx.update(wallets).set({
+        balance: balanceAfter.toFixed(2),
+        availableBalance: availAfter.toFixed(2),
+        updatedAt: now
+      } as any).where(eq(wallets.id, params.walletId));
+
+      const reversalTxResult = await tx.insert(walletTransactions).values({
+        walletId: params.walletId,
+        type: 'reversal',
+        amount: params.amount.toFixed(2),
+        currency: wallet.currency,
+        direction: originalTx[0].direction === 'debit' ? 'credit' : 'debit',
+        balanceBefore: balanceBefore.toFixed(2),
+        balanceAfter: balanceAfter.toFixed(2),
+        description: `Reversal of transaction ${params.originalTxId}`,
+        reference: `REVERSAL-${params.originalTxId}`,
+        metadata: {
+          originalTxId: params.originalTxId,
+          reason: params.reason,
+          reversedBy: params.reversedBy,
+        },
+        status: 'completed',
+        createdAt: now,
+      } as any).returning();
+
+      return reversalTxResult[0];
+    });
   }
 
   // ==================== WALLET TRANSACTIONS ====================

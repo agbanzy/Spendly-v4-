@@ -231,6 +231,8 @@ export const virtualCards = pgTable("virtual_cards", {
   color: text("color").notNull().default('indigo'),
   currency: text("currency").notNull().default('USD'),
   status: text("status").notNull().default('Active'),
+  stripeCardId: text("stripe_card_id"),
+  stripeCardholderId: text("stripe_cardholder_id"),
 });
 
 // Departments table
@@ -334,14 +336,19 @@ export const cardTransactions = pgTable("card_transactions", {
 export const virtualAccounts = pgTable("virtual_accounts", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   userId: text("user_id"),
+  companyId: text("company_id"),
   name: text("name").notNull(),
   accountNumber: text("account_number").notNull(),
+  accountName: text("account_name"),
   bankName: text("bank_name").notNull(),
   bankCode: text("bank_code").notNull(),
   currency: text("currency").notNull().default('USD'),
   balance: decimal("balance", { precision: 12, scale: 2 }).notNull().default('0'),
   type: text("type").notNull().default('collection'),
   status: text("status").notNull().default('active'),
+  provider: text("provider").notNull().default('stripe'),
+  providerAccountId: text("provider_account_id"),
+  providerCustomerCode: text("provider_customer_code"),
   createdAt: text("created_at").notNull(),
 });
 

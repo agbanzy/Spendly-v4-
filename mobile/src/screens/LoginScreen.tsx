@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,11 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../lib/auth-context';
+import { useTheme } from '../lib/theme-context';
+import { ColorTokens } from '../lib/colors';
+import { isBiometricAvailable, getBiometricType, authenticateWithBiometric, isBiometricEnabled, setBiometricEnabled } from '../lib/biometric';
 
 interface LoginScreenProps {
   navigation: any;
@@ -42,7 +46,50 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricType, setBiometricType] = useState('Biometric');
   const { login } = useAuth();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
+  useEffect(() => {
+    checkBiometric();
+  }, []);
+
+  const checkBiometric = async () => {
+    const available = await isBiometricAvailable();
+    const enabled = await isBiometricEnabled();
+    setBiometricAvailable(available && enabled);
+    if (available) {
+      const type = await getBiometricType();
+      setBiometricType(type);
+      // Auto-trigger biometric if enabled
+      if (enabled) {
+        handleBiometricLogin();
+      }
+    }
+  };
+
+  const handleBiometricLogin = async () => {
+    const success = await authenticateWithBiometric();
+    if (success) {
+      // Retrieve stored credentials
+      const storedEmail = await AsyncStorage.getItem('biometric_email');
+      const storedPassword = await AsyncStorage.getItem('biometric_password');
+      if (storedEmail && storedPassword) {
+        setLoading(true);
+        try {
+          await login(storedEmail, storedPassword);
+        } catch (error: any) {
+          Alert.alert('Error', 'Biometric login failed. Please sign in manually.');
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        Alert.alert('Setup Required', 'Please sign in with your credentials first to enable biometric login.');
+      }
+    }
+  };
 
   const handleLogin = async () => {
     if (!email.trim() || !password) {
@@ -53,6 +100,13 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
     setLoading(true);
     try {
       await login(email.trim(), password);
+      // Save credentials for biometric login
+      const bioAvail = await isBiometricAvailable();
+      if (bioAvail) {
+        await AsyncStorage.setItem('biometric_email', email.trim());
+        await AsyncStorage.setItem('biometric_password', password);
+        await setBiometricEnabled(true);
+      }
     } catch (error: any) {
       const errorCode = error?.code || '';
       Alert.alert('Login Failed', getFirebaseErrorMessage(errorCode));
@@ -79,7 +133,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
               <TextInput
                 style={styles.input}
                 placeholder="Enter your email"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholderText}
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"
@@ -93,7 +147,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
                 <TextInput
                   style={styles.passwordInput}
                   placeholder="Enter your password"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.placeholderText}
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
@@ -105,7 +159,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
                   <Ionicons
                     name={showPassword ? 'eye-off-outline' : 'eye-outline'}
                     size={22}
-                    color="#94A3B8"
+                    color={colors.textSecondary}
                   />
                 </TouchableOpacity>
               </View>
@@ -124,7 +178,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
+                <ActivityIndicator color={colors.primaryForeground} />
               ) : (
                 <Text style={styles.buttonText}>Sign In</Text>
               )}
@@ -138,6 +192,13 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
                 Don't have an account? <Text style={styles.linkBold}>Sign up</Text>
               </Text>
             </TouchableOpacity>
+
+            {biometricAvailable && (
+              <TouchableOpacity style={styles.biometricButton} onPress={handleBiometricLogin}>
+                <Ionicons name={biometricType === 'Face ID' ? 'scan-outline' : 'finger-print-outline'} size={28} color={colors.accent} />
+                <Text style={styles.biometricText}>Sign in with {biometricType}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </ScrollView>
@@ -145,102 +206,121 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 48,
-  },
-  logo: {
-    fontSize: 42,
-    fontWeight: 'bold',
-    color: '#818CF8',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#94A3B8',
-    marginTop: 8,
-  },
-  form: {
-    gap: 16,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#CBD5E1',
-    marginBottom: 6,
-  },
-  input: {
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  passwordContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  passwordInput: {
-    flex: 1,
-    padding: 16,
-    fontSize: 16,
-    color: '#FFFFFF',
-  },
-  eyeButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 16,
-  },
-  forgotButton: {
-    alignSelf: 'flex-end',
-  },
-  forgotText: {
-    color: '#818CF8',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  button: {
-    backgroundColor: '#4F46E5',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  linkButton: {
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  linkText: {
-    color: '#94A3B8',
-    fontSize: 14,
-  },
-  linkBold: {
-    color: '#818CF8',
-    fontWeight: '600',
-  },
-});
+function createStyles(colors: ColorTokens) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    scrollContent: {
+      flexGrow: 1,
+    },
+    content: {
+      flex: 1,
+      justifyContent: 'center',
+      paddingHorizontal: 24,
+    },
+    header: {
+      alignItems: 'center',
+      marginBottom: 48,
+    },
+    logo: {
+      fontSize: 42,
+      fontWeight: 'bold',
+      color: colors.accent,
+    },
+    subtitle: {
+      fontSize: 16,
+      color: colors.textSecondary,
+      marginTop: 8,
+    },
+    form: {
+      gap: 16,
+    },
+    label: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: colors.textBody,
+      marginBottom: 6,
+    },
+    input: {
+      backgroundColor: colors.inputBackground,
+      borderRadius: 12,
+      padding: 16,
+      fontSize: 16,
+      color: colors.inputText,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+    },
+    passwordContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.inputBackground,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.inputBorder,
+    },
+    passwordInput: {
+      flex: 1,
+      padding: 16,
+      fontSize: 16,
+      color: colors.inputText,
+    },
+    eyeButton: {
+      paddingHorizontal: 14,
+      paddingVertical: 16,
+    },
+    forgotButton: {
+      alignSelf: 'flex-end',
+    },
+    forgotText: {
+      color: colors.accent,
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    button: {
+      backgroundColor: colors.primary,
+      borderRadius: 12,
+      padding: 16,
+      alignItems: 'center',
+      marginTop: 8,
+    },
+    buttonDisabled: {
+      opacity: 0.7,
+    },
+    buttonText: {
+      color: colors.primaryForeground,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    linkButton: {
+      alignItems: 'center',
+      marginTop: 16,
+    },
+    linkText: {
+      color: colors.textSecondary,
+      fontSize: 14,
+    },
+    linkBold: {
+      color: colors.accent,
+      fontWeight: '600',
+    },
+    biometricButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 12,
+      marginTop: 24,
+      paddingVertical: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+    },
+    biometricText: {
+      color: colors.accent,
+      fontSize: 16,
+      fontWeight: '500',
+    },
+  });
+}
