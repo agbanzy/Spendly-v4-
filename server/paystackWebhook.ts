@@ -46,14 +46,15 @@ export function verifyPaystackSignature(
   }
 
   try {
-    // Create HMAC SHA-512 hash of the payload
     const hash = crypto
       .createHmac('sha512', PAYSTACK_SECRET_KEY)
       .update(payload)
       .digest('hex');
 
-    // Compare with provided signature
-    return hash === signature;
+    if (hash.length !== signature.length) {
+      return false;
+    }
+    return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(signature));
   } catch (error) {
     console.error('PAYSTACK WEBHOOK ERROR: Signature verification failed', {
       error: error instanceof Error ? error.message : String(error),

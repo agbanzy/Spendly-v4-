@@ -403,6 +403,11 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid amount" });
       }
 
+      const MAX_DEPOSIT_AMOUNT = 1000000;
+      if (parsedAmount > MAX_DEPOSIT_AMOUNT) {
+        return res.status(400).json({ error: `Deposit amount cannot exceed ${MAX_DEPOSIT_AMOUNT}` });
+      }
+
       const currentBalances = await storage.getBalances();
       const currentLocal = parseFloat(String(currentBalances?.local || 0));
       const newLocal = currentLocal + parsedAmount;
@@ -835,6 +840,9 @@ export async function registerRoutes(
       }
       const { name, provider, amount, dueDate, category, recurring, frequency, userId } = result.data;
 
+      const settings = await storage.getSettings();
+      const billCurrency = settings?.currency || 'USD';
+
       const bill = await storage.createBill({
         name,
         provider: provider || '',
@@ -842,7 +850,7 @@ export async function registerRoutes(
         dueDate,
         category: category || 'Other',
         status: 'Unpaid',
-        currency: 'USD',
+        currency: billCurrency,
         logo: null,
         userId: userId || null,
         recurring: recurring || false,
@@ -1455,7 +1463,14 @@ export async function registerRoutes(
 
       if (provider === 'paystack') {
         // --- PAYSTACK DVA (Dedicated Virtual Account) ---
-        // Requires user identity for BVN-based account assignment
+        // DVA only supports Nigeria (NG) and Ghana (GH) per Paystack API docs.
+        const DVA_SUPPORTED_COUNTRIES = ['NG', 'GH'];
+        if (!DVA_SUPPORTED_COUNTRIES.includes(effectiveCountry.toUpperCase())) {
+          return res.status(400).json({
+            error: `Paystack Dedicated Virtual Accounts are only available in Nigeria and Ghana. Country '${effectiveCountry}' is not supported for DVA.`,
+            supportedCountries: DVA_SUPPORTED_COUNTRIES,
+          });
+        }
         const userProfile = userId ? await storage.getUserProfile(userId) : null;
         const userEmail = email || (userProfile as any)?.email;
         const userFirstName = firstName || (userProfile as any)?.firstName || name;

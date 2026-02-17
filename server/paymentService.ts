@@ -124,7 +124,10 @@ export const paymentService = {
 
     return paymentLogger.trackOperation('create_payment_intent', { provider, amount, currency, countryCode }, async () => {
       if (provider === 'paystack') {
-        const email = metadata?.email || 'customer@example.com';
+        const email = metadata?.email;
+        if (!email || typeof email !== 'string' || !email.includes('@')) {
+          throw new Error('A valid customer email is required for Paystack transactions');
+        }
         const paystackCallback = callbackUrl || (process.env.REPLIT_DOMAINS ?
           `https://${process.env.REPLIT_DOMAINS.split(',')[0]}/api/paystack/callback` :
           undefined);
@@ -137,10 +140,14 @@ export const paymentService = {
         };
       } else {
         const stripe = await getUncachableStripeClient();
+        const idempotencyKey = `pi-${currency}-${amount}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const paymentIntent = await stripe.paymentIntents.create({
           amount: Money.toMinor(amount),
           currency: currency.toLowerCase(),
+          automatic_payment_methods: { enabled: true },
           metadata,
+        }, {
+          idempotencyKey,
         });
         return {
           provider: 'stripe' as const,
@@ -185,11 +192,14 @@ export const paymentService = {
 
         // If stripeAccountId is provided, use Connect Transfer (marketplace model)
         if (recipientDetails.stripeAccountId) {
+          const transferIdempotencyKey = `txfr-${recipientDetails.stripeAccountId}-${amount}-${Date.now()}`;
           const transfer = await stripe.transfers.create({
             amount: Money.toMinor(amount),
             currency: recipientDetails.currency || currency.toLowerCase(),
             destination: recipientDetails.stripeAccountId,
             description: reason,
+          }, {
+            idempotencyKey: transferIdempotencyKey,
           });
           return {
             provider: 'stripe' as const,
@@ -660,39 +670,24 @@ export const paymentService = {
 
   // ==================== UTILITY PAYMENTS (AIRTIME, DATA, BILLS) ====================
 
-  /**
-   * Known Paystack biller codes for common providers.
-   * In production, call listBillers() to fetch dynamically and cache.
-   */
-  BILLER_CODES: {
-    // Nigerian telecom billers
-    'mtn': { billerCode: 'BIL099', itemCode: 'MD136' },
-    'glo': { billerCode: 'BIL102', itemCode: 'MD139' },
-    'airtel': { billerCode: 'BIL100', itemCode: 'MD137' },
-    '9mobile': { billerCode: 'BIL103', itemCode: 'MD140' },
-    // Data
-    'mtn-data': { billerCode: 'BIL099', itemCode: 'MD136' },
-    'glo-data': { billerCode: 'BIL102', itemCode: 'MD139' },
-    'airtel-data': { billerCode: 'BIL100', itemCode: 'MD137' },
-    '9mobile-data': { billerCode: 'BIL103', itemCode: 'MD140' },
-    // Electricity
-    'eko': { billerCode: 'BIL112', itemCode: 'MD151' },
-    'ikeja': { billerCode: 'BIL113', itemCode: 'MD152' },
-    'abuja': { billerCode: 'BIL114', itemCode: 'MD153' },
-    'ibadan': { billerCode: 'BIL115', itemCode: 'MD154' },
-    // Cable TV
-    'dstv': { billerCode: 'BIL121', itemCode: 'MD161' },
-    'gotv': { billerCode: 'BIL122', itemCode: 'MD162' },
-    'startimes': { billerCode: 'BIL123', itemCode: 'MD163' },
-    // Internet
-    'spectranet': { billerCode: 'BIL130', itemCode: 'MD170' },
-    'smile': { billerCode: 'BIL131', itemCode: 'MD171' },
-  } as Record<string, { billerCode: string; itemCode: string }>,
+  UTILITY_AMOUNT_LIMITS: {
+    airtime: { min: 0.5, max: 50000 },
+    data: { min: 1, max: 100000 },
+    electricity: { min: 5, max: 500000 },
+    cable: { min: 1, max: 100000 },
+    internet: { min: 5, max: 200000 },
+  } as Record<string, { min: number; max: number }>,
 
   /**
    * Process a utility payment (airtime, data, electricity, cable, internet).
-   * Uses Paystack's bill payment API for African countries.
-   * For non-African countries, initiates a generic charge via Stripe.
+   * For African countries: Uses Paystack Transaction Initialize API to collect payment,
+   * then utility fulfillment is tracked via webhook + metadata.
+   * For non-African countries: Creates a Stripe PaymentIntent with utility metadata.
+   *
+   * NOTE: Paystack does NOT have a native bill payment API.
+   * The previous /integration/payment/ endpoints were undocumented and non-functional.
+   * Utility fulfillment should be handled via a dedicated provider (e.g., Reloadly)
+   * after payment confirmation via webhook.
    */
   async processUtilityPayment(params: {
     type: 'airtime' | 'data' | 'electricity' | 'cable' | 'internet';
@@ -705,6 +700,11 @@ export const paymentService = {
   }) {
     const paymentProviderType = getPaymentProvider(params.countryCode);
 
+    const limits = this.UTILITY_AMOUNT_LIMITS[params.type] || { min: 0.5, max: 1000000 };
+    if (params.amount < limits.min || params.amount > limits.max) {
+      throw new Error(`${params.type} amount must be between ${limits.min} and ${limits.max}`);
+    }
+
     return paymentLogger.trackOperation('utility_payment', {
       type: params.type,
       provider: params.provider,
@@ -713,97 +713,49 @@ export const paymentService = {
       paymentProvider: paymentProviderType,
     }, async () => {
       if (paymentProviderType === 'paystack') {
-        // --- PAYSTACK BILL PAYMENT ---
-        const providerKey = params.provider.toLowerCase();
-        const billerInfo = this.BILLER_CODES[providerKey];
+        const email = params.email;
+        if (!email || !email.includes('@')) {
+          throw new Error('A valid customer email is required for Paystack utility payments');
+        }
 
-        if (billerInfo) {
-          // Use known biller codes for direct payment
-          try {
-            // 1. Validate customer first
-            const validation = await paystackClient.validateBillCustomer(
-              billerInfo.itemCode,
-              billerInfo.billerCode,
-              params.customer
-            );
+        const { currency: countryCurrency } = getCurrencyForCountry(params.countryCode);
 
-            if (!validation.status) {
-              paymentLogger.warn('bill_customer_validation_failed', {
-                customer: params.customer,
-                provider: params.provider,
-              });
-              // Continue anyway — some billers don't support pre-validation
+        try {
+          const result = await paystackClient.processUtilityCharge(
+            params.amount,
+            email,
+            params.type,
+            params.provider,
+            params.customer,
+            countryCurrency,
+            {
+              ...params.metadata,
+              country_code: params.countryCode,
             }
+          );
 
-            // 2. Create the bill payment order
-            const order = await paystackClient.createBillPayment(
-              params.amount,
-              billerInfo.billerCode,
-              billerInfo.itemCode,
-              params.customer,
-              {
-                ...params.metadata,
-                utility_type: params.type,
-                provider_name: params.provider,
-                country_code: params.countryCode,
-              }
-            );
-
-            return {
-              success: true,
-              provider: 'paystack',
-              orderId: order.data?.id || order.data?.reference,
-              reference: order.data?.reference || `UTIL-${Date.now()}`,
-              status: order.data?.status || 'pending',
-              message: order.message || `${params.type} payment submitted to ${params.provider}`,
-            };
-          } catch (billerErr: any) {
-            paymentLogger.warn('biller_order_failed', { error: billerErr.message, provider: params.provider });
-            throw new Error(`${params.type} payment failed: ${billerErr.message}`);
-          }
-        } else {
-          // Unknown biller — try fetching billers dynamically
-          try {
-            const billers = await paystackClient.listBillers(params.type);
-            const matchedBiller = (billers.data || []).find(
-              (b: any) => b.name?.toLowerCase().includes(providerKey) || b.slug?.includes(providerKey)
-            );
-
-            if (matchedBiller) {
-              const order = await paystackClient.createBillPayment(
-                params.amount,
-                matchedBiller.biller_code,
-                matchedBiller.item_code || matchedBiller.items?.[0]?.item_code,
-                params.customer,
-                { utility_type: params.type, provider_name: params.provider }
-              );
-              return {
-                success: true,
-                provider: 'paystack',
-                orderId: order.data?.id,
-                reference: order.data?.reference || `UTIL-${Date.now()}`,
-                status: order.data?.status || 'pending',
-                message: `${params.type} payment submitted`,
-              };
-            }
-
-            throw new Error(`Provider "${params.provider}" not found for ${params.type} in ${params.countryCode}`);
-          } catch (fetchErr: any) {
-            throw new Error(`Utility payment failed: ${fetchErr.message}`);
-          }
+          return {
+            success: true,
+            provider: 'paystack',
+            authorizationUrl: result.data?.authorization_url,
+            reference: result.data?.reference,
+            accessCode: result.data?.access_code,
+            status: 'pending',
+            message: `${params.type} payment initiated for ${params.provider}. Complete payment via the authorization URL.`,
+          };
+        } catch (err: any) {
+          paymentLogger.warn('utility_charge_failed', { error: err.message, provider: params.provider });
+          throw new Error(`${params.type} payment failed: ${err.message}`);
         }
       } else {
-        // --- NON-AFRICAN (STRIPE) ---
-        // For non-African countries, utility payments are typically handled via
-        // the provider's own platform. We create a payment intent that can be
-        // used for the user to complete payment on the utility's site, or we
-        // process it as a generic charge.
         const stripe = await getUncachableStripeClient();
         const { currency } = getCurrencyForCountry(params.countryCode);
+        const idempotencyKey = `util-${params.type}-${params.customer}-${Date.now()}`;
 
         const paymentIntent = await stripe.paymentIntents.create({
           amount: Money.toMinor(params.amount),
           currency: currency.toLowerCase(),
+          automatic_payment_methods: { enabled: true },
           metadata: {
             type: 'utility_payment',
             utility_type: params.type,
@@ -812,6 +764,8 @@ export const paymentService = {
             country: params.countryCode,
           },
           description: `${params.type} - ${params.provider} (${params.customer})`,
+        }, {
+          idempotencyKey,
         });
 
         return {
@@ -828,32 +782,44 @@ export const paymentService = {
   },
 
   /**
-   * List available billers/providers for a utility category in a given country.
+   * List available utility providers for a given category and country.
+   * Returns a static curated list since Paystack does not have a biller listing API.
    */
   async listUtilityProviders(type: string, countryCode: string) {
     const paymentProviderType = getPaymentProvider(countryCode);
 
-    if (paymentProviderType === 'paystack') {
-      try {
-        const billers = await paystackClient.listBillers(type);
-        return {
-          provider: 'paystack',
-          billers: (billers.data || []).map((b: any) => ({
-            name: b.name,
-            slug: b.slug,
-            billerCode: b.biller_code,
-            itemCode: b.item_code,
-            country: b.country,
-          })),
-        };
-      } catch (err: any) {
-        paymentLogger.warn('list_billers_failed', { type, error: err.message });
-        return { provider: 'paystack', billers: [], error: err.message };
-      }
-    }
+    const africanProviders: Record<string, Record<string, string[]>> = {
+      NG: {
+        airtime: ['MTN', 'Glo', 'Airtel', '9mobile'],
+        data: ['MTN Data', 'Glo Data', 'Airtel Data', '9mobile Data'],
+        electricity: ['Eko Electricity', 'Ikeja Electric', 'Abuja Electricity', 'Ibadan Electricity'],
+        cable: ['DSTV', 'GOtv', 'StarTimes'],
+        internet: ['Spectranet', 'Smile', 'Swift'],
+      },
+      GH: {
+        airtime: ['MTN Ghana', 'Vodafone Ghana', 'AirtelTigo'],
+        data: ['MTN Data Ghana', 'Vodafone Data Ghana'],
+        electricity: ['ECG', 'NEDCO'],
+        cable: ['DSTV Ghana', 'GOtv Ghana'],
+        internet: ['Surfline', 'Busy Internet'],
+      },
+      KE: {
+        airtime: ['Safaricom', 'Airtel Kenya', 'Telkom Kenya'],
+        data: ['Safaricom Data', 'Airtel Kenya Data'],
+        electricity: ['Kenya Power'],
+        cable: ['DSTV Kenya', 'GOtv Kenya', 'StarTimes Kenya'],
+        internet: ['Safaricom Home', 'Zuku'],
+      },
+      ZA: {
+        airtime: ['Vodacom', 'MTN SA', 'Cell C', 'Telkom SA'],
+        data: ['Vodacom Data', 'MTN SA Data'],
+        electricity: ['Eskom', 'City Power'],
+        cable: ['DSTV SA', 'GOtv SA'],
+        internet: ['Telkom SA Fibre', 'Afrihost'],
+      },
+    };
 
-    // For non-African countries, return static list
-    const staticProviders: Record<string, string[]> = {
+    const westernProviders: Record<string, string[]> = {
       airtime: ['Verizon', 'T-Mobile', 'AT&T', 'Vodafone', 'EE', 'O2'],
       data: ['Verizon Data', 'T-Mobile Data', 'AT&T Data'],
       electricity: ['PG&E', 'ConEd', 'Duke Energy', 'EDF', 'British Gas'],
@@ -861,9 +827,21 @@ export const paymentService = {
       internet: ['Xfinity', 'Spectrum', 'AT&T Fiber', 'Virgin Media', 'BT'],
     };
 
+    if (paymentProviderType === 'paystack') {
+      const countryProviders = africanProviders[countryCode] || {};
+      const providers = countryProviders[type] || [];
+      return {
+        provider: 'paystack',
+        billers: providers.map(name => ({
+          name,
+          slug: name.toLowerCase().replace(/\s+/g, '-'),
+        })),
+      };
+    }
+
     return {
       provider: 'stripe',
-      billers: (staticProviders[type] || []).map(name => ({
+      billers: (westernProviders[type] || []).map(name => ({
         name,
         slug: name.toLowerCase().replace(/\s+/g, '-'),
       })),

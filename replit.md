@@ -31,7 +31,7 @@ Spendly is a comprehensive financial operating system for high-growth teams, off
     - MFA, session timeout, password policies, and API access controls.
     - Transaction PIN system with bcrypt hashing.
 - **KYC & Onboarding**: Multi-step verification using Stripe Identity (US/Europe) and Paystack BVN (Africa) based on user's country, storing submissions in `kycSubmissions` table.
-- **Virtual Accounts**: User-generated virtual account numbers linked to wallets, with SMS notifications via Paystack webhooks.
+- **Virtual Accounts**: User-generated virtual account numbers linked to wallets, with SMS notifications via Paystack webhooks. Paystack DVA only supports Nigeria (NG) and Ghana (GH).
 - **Multi-Currency Support**: Virtual cards and exchange rates support USD, EUR, GBP, NGN, GHS, KES, ZAR. Live market rates from `exchangerate-api.com` with admin-configurable buy/sell markups.
 - **Notifications**: Comprehensive email notification system (8 templates) via AWS SES and SMS via AWS SNS, triggered by user actions (signup, payout, invoice, payroll, login security).
 - **Organization Settings**: Customizable company profile, currency, timezone, fiscal year, branding (logo, colors, tagline), and invoice settings.
@@ -89,7 +89,18 @@ SES is currently in **sandbox mode**. Only verified email addresses can receive 
 ## External Dependencies
 - **Firebase**: Authentication (email/password, Google Sign-in) and Firebase Admin SDK.
 - **Stripe**: Payment gateway for virtual cards and Stripe Identity for KYC.
-- **Paystack**: Payment gateway for virtual cards, BVN verification, bank account validation, subscriptions, and charge authorizations.
+- **Paystack**: Payment gateway for virtual cards, BVN verification, bank account validation, subscriptions, and charge authorizations. NOTE: Paystack does NOT have a native bill payment API — utility payments use Transaction Initialize API for payment collection, with fulfillment via separate providers.
 - **AWS SES/SNS**: Email and SMS notification services.
 - **exchangerate-api.com**: Live currency exchange rates.
 - **PostgreSQL**: Primary database (hosted on Neon).
+
+## Recent Changes (Feb 2026)
+- **Paystack Bill Payment Fix**: Removed non-existent `/integration/payment/` endpoints (biller, create-order, validate-customer). Replaced with Paystack Transaction Initialize API (`/transaction/initialize`) for payment collection with utility metadata. Utility fulfillment should use a dedicated provider (e.g., Reloadly).
+- **Stripe Idempotency**: Added idempotency keys to all Stripe PaymentIntent and Transfer creation calls per latest Stripe API best practices.
+- **Stripe automatic_payment_methods**: Added `automatic_payment_methods: { enabled: true }` to PaymentIntent creation.
+- **Webhook Security**: Updated Paystack webhook signature verification to use `crypto.timingSafeEqual()` for timing-attack resistance.
+- **Email Validation**: Removed hardcoded `customer@example.com` email fallback in Paystack transactions. All transactions now require a valid customer email.
+- **Bill Currency**: Bill creation now uses company settings currency instead of hardcoded 'USD'.
+- **DVA Country Restriction**: Added validation that Paystack DVA only supports Nigeria (NG) and Ghana (GH) per API docs.
+- **Amount Limits**: Added maximum deposit amount validation ($1,000,000) and per-type utility payment amount limits.
+- **Provider Lists**: Replaced non-functional Paystack biller listing with curated static provider lists per African country (NG, GH, KE, ZA).

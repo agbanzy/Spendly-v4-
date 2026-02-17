@@ -331,84 +331,84 @@ export const paystackClient = {
   },
 
   // ==================== BILL PAYMENTS / UTILITIES ====================
+  // NOTE: Paystack does NOT have a dedicated bill payment API.
+  // The /integration/payment/ endpoints are not documented in the current API.
+  // For utility payments (airtime, data, electricity, cable, internet),
+  // use the Paystack Charge API (/charge) or integrate a third-party
+  // utility payment provider like Reloadly.
 
   /**
-   * List available bill payment providers (billers) for a category.
-   * Paystack charges API (formerly bills API) uses the /integration endpoint
-   * to fetch available billers for categories like airtime, data, power, tv, internet.
-   */
-  async listBillers(category?: string) {
-    const query = category ? `?category=${encodeURIComponent(category)}` : '';
-    return paystackRequest(`/integration/payment/biller${query}`, 'GET');
-  },
-
-  /**
-   * Validate a customer reference (phone number, meter number, smartcard number)
-   * before making a bill payment.
-   */
-  async validateBillCustomer(itemCode: string, code: string, customer: string) {
-    return paystackRequest('/integration/payment/validate-customer', 'POST', {
-      item_code: itemCode,
-      code,
-      customer,
-    });
-  },
-
-  /**
-   * Create a bill payment order (airtime, data, electricity, cable, internet).
-   * This is the core method for all utility payments through Paystack.
+   * Process a utility payment via Paystack's Charge API.
+   * Since Paystack has no native bill payment API, this creates a charge
+   * with metadata describing the utility payment intent. The actual utility
+   * fulfillment must be handled separately (e.g., via Reloadly or provider API).
    *
-   * @param amount Amount in major units (naira). Will be converted to kobo internally by Paystack for some billers.
-   * @param billerCode The biller's code from listBillers
-   * @param itemCode The specific item/plan code
-   * @param customer Customer reference (phone, meter, smartcard number)
-   * @param metadata Optional metadata
+   * @param amount Amount in major units (naira/cedis). Converted to kobo/pesewas.
+   * @param email Customer's valid email address (required by Paystack).
+   * @param utilityType Type of utility (airtime, data, electricity, cable, internet).
+   * @param provider Provider name (e.g., MTN, DSTV).
+   * @param customerRef Customer reference (phone, meter, smartcard number).
+   * @param metadata Optional additional metadata.
    */
-  async createBillPayment(amount: number, billerCode: string, itemCode: string, customer: string, metadata?: any) {
-    return paystackRequest('/integration/payment/create-order', 'POST', {
-      amount,
-      biller_code: billerCode,
-      item_code: itemCode,
-      customer,
-      metadata,
-    });
-  },
-
-  /**
-   * Purchase airtime directly via Paystack.
-   * Simplified wrapper for common airtime purchases.
-   */
-  async purchaseAirtime(amount: number, phone: string, countryCode: string = 'NG') {
-    // Paystack's dedicated airtime endpoint
-    return paystackRequest('/charge', 'POST', {
-      amount: Math.round(amount * 100), // kobo
-      email: `airtime-${phone}@spendly.internal`, // Paystack requires email
+  async processUtilityCharge(
+    amount: number,
+    email: string,
+    utilityType: string,
+    provider: string,
+    customerRef: string,
+    currency?: string,
+    metadata?: Record<string, any>
+  ) {
+    if (!email || !email.includes('@')) {
+      throw new Error('A valid customer email is required for utility payments');
+    }
+    if (amount <= 0 || amount > 1000000) {
+      throw new Error('Utility payment amount must be between 0 and 1,000,000');
+    }
+    const reference = `UTIL-${utilityType}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const payload: Record<string, any> = {
+      amount: Math.round(amount * 100),
+      email,
+      reference,
+    };
+    if (currency) {
+      payload.currency = currency.toUpperCase();
+    }
+    return paystackRequest('/transaction/initialize', 'POST', {
+      ...payload,
       metadata: {
+        ...metadata,
         custom_fields: [
-          { display_name: 'Phone Number', variable_name: 'phone', value: phone },
-          { display_name: 'Type', variable_name: 'type', value: 'airtime' },
-          { display_name: 'Country', variable_name: 'country', value: countryCode },
+          { display_name: 'Utility Type', variable_name: 'utility_type', value: utilityType },
+          { display_name: 'Provider', variable_name: 'provider', value: provider },
+          { display_name: 'Customer Reference', variable_name: 'customer_ref', value: customerRef },
         ],
+        utility_type: utilityType,
+        provider_name: provider,
+        customer_ref: customerRef,
+        is_utility_payment: true,
       },
     });
   },
 
   /**
-   * Fetch the status of a bill payment order.
+   * Verify a Paystack transaction by reference.
+   * Use this to confirm payment status after charge completion.
    */
-  async getBillPaymentStatus(orderId: string) {
-    return paystackRequest(`/integration/payment/order/${orderId}`, 'GET');
+  async verifyTransaction(reference: string) {
+    return paystackRequest(`/transaction/verify/${encodeURIComponent(reference)}`, 'GET');
   },
 
   /**
-   * List bill payment history.
+   * List transactions with optional filters.
    */
-  async listBillPayments(params?: { perPage?: number; page?: number; from?: string; to?: string }) {
+  async listTransactions(params?: { perPage?: number; page?: number; from?: string; to?: string; status?: string }) {
     const query = new URLSearchParams();
     if (params?.perPage) query.append('perPage', String(params.perPage));
     if (params?.page) query.append('page', String(params.page));
     if (params?.from) query.append('from', params.from);
     if (params?.to) query.append('to', params.to);
-    return paystackRequest(`/integration/payment/orders?${query.toString()}`, 'GET');
+    if (params?.status) query.append('status', params.status);
+    return paystackRequest(`/transaction?${query.toString()}`, 'GET');
   },
 };
