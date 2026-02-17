@@ -19,6 +19,7 @@ import {
 import { requireAuth, requireAdmin } from "./middleware/auth";
 import { verifyPaystackSignature, PaystackWebhookHandler } from './paystackWebhook';
 import { mapPaymentError, Money, paymentLogger } from './utils/paymentUtils';
+import { computeNextDate, runRecurringScheduler } from './recurringScheduler';
 
 const uploadDir = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -268,6 +269,9 @@ const payrollSchema = z.object({
   bonus: z.union([z.string(), z.number()]).optional().transform(val => String(val || '0')),
   deductions: z.union([z.string(), z.number()]).optional().transform(val => String(val || '0')),
   payDate: z.string().optional(),
+  recurring: z.boolean().optional().default(false),
+  frequency: z.enum(['once', 'weekly', 'monthly', 'quarterly', 'yearly']).optional().default('monthly'),
+  email: z.string().email().optional().or(z.literal('')),
 });
 
 const invoiceSchema = z.object({
@@ -702,6 +706,45 @@ export async function registerRoutes(
             merchant: expense.merchant,
             amount: parseFloat(expense.amount),
           }).catch(console.error);
+
+          if (expense.payoutStatus === 'not_started' || !expense.payoutStatus) {
+            try {
+              const destinations = await storage.getPayoutDestinations(expense.userId);
+              const defaultDest = destinations?.find((d: any) => d.isDefault) || destinations?.[0];
+
+              if (defaultDest) {
+                const settings = await storage.getOrganizationSettings();
+                const currency = settings?.currency || expense.currency || 'USD';
+                const provider = getPaymentProvider((defaultDest as any).country || 'US');
+                const approverUserId = (req as any).user?.uid || 'system';
+
+                const payout = await storage.createPayout({
+                  type: 'expense_reimbursement',
+                  amount: expense.amount,
+                  currency,
+                  status: 'pending',
+                  recipientType: 'employee',
+                  recipientId: expense.userId,
+                  recipientName: expense.user,
+                  destinationId: defaultDest.id,
+                  provider,
+                  relatedEntityType: 'expense',
+                  relatedEntityId: expense.id,
+                  initiatedBy: approverUserId,
+                  approvalStatus: 'pending',
+                } as any);
+
+                await storage.updateExpense(expense.id, {
+                  payoutStatus: 'pending_approval',
+                  payoutId: payout.id,
+                });
+
+                console.log(`[Auto-Disburse] Created payout ${payout.id} for approved expense ${expense.id}`);
+              }
+            } catch (disbErr: any) {
+              console.error(`[Auto-Disburse] Failed for expense ${expense.id}:`, disbErr.message);
+            }
+          }
         } else if (expense.status === 'REJECTED') {
           notificationService.notifyExpenseRejected(userId, {
             id: expense.id,
@@ -2726,12 +2769,14 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid payroll data", details: result.error.issues });
       }
-      const { employeeId, employeeName, department, salary, bonus, deductions, payDate } = result.data;
+      const { employeeId, employeeName, department, salary, bonus, deductions, payDate, recurring, frequency, email } = result.data;
+      const company = await resolveUserCompany(req);
 
       const salaryNum = parseFloat(salary);
       const bonusNum = parseFloat(bonus || '0');
       const deductionsNum = parseFloat(deductions || '0');
       const netPayNum = salaryNum + bonusNum - deductionsNum;
+      const actualPayDate = payDate || new Date().toISOString().split('T')[0];
       
       const entry = await storage.createPayrollEntry({
         employeeId: employeeId || String(Date.now()),
@@ -2742,8 +2787,13 @@ export async function registerRoutes(
         deductions: deductions || '0',
         netPay: String(netPayNum),
         status: 'pending',
-        payDate: payDate || new Date().toISOString().split('T')[0],
-      });
+        payDate: actualPayDate,
+        recurring: recurring || false,
+        frequency: recurring ? (frequency || 'monthly') : 'once',
+        nextPayDate: recurring ? computeNextDate(actualPayDate, frequency || 'monthly') : null,
+        companyId: company?.companyId,
+        email: email || null,
+      } as any);
       
       res.status(201).json(entry);
     } catch (error) {
@@ -4208,6 +4258,8 @@ export async function registerRoutes(
       stripeAccountId: z.string().optional(),
     }),
     reason: z.string().default('Payout'),
+    recurring: z.boolean().optional().default(false),
+    frequency: z.enum(['once', 'weekly', 'monthly', 'quarterly', 'yearly']).optional().default('monthly'),
   });
 
   app.post("/api/wallet/payout", requireAuth, financialLimiter, async (req, res) => {
@@ -4265,11 +4317,12 @@ export async function registerRoutes(
         currency,
       });
 
+      const userId = (req as any).user?.uid || 'system';
       try {
         const auditName = await getAuditUserName(req);
         await storage.createAuditLog({
           action: 'payout_processed',
-          userId: (req as any).user?.uid || 'system',
+          userId,
           userName: auditName,
           entityType: 'payout',
           entityId: transferResult?.reference || `PAY-${Date.now()}`,
@@ -4280,9 +4333,35 @@ export async function registerRoutes(
         } as any);
       } catch (e) { /* audit log failure should not block operation */ }
 
+      if (result.data.recurring && result.data.frequency !== 'once') {
+        try {
+          const company = await resolveUserCompany(req);
+          const nextDate = computeNextDate(new Date().toISOString().split('T')[0], result.data.frequency);
+          await storage.createScheduledPayment({
+            type: 'payout',
+            sourceType: 'wallet_payout',
+            sourceId: transferResult?.reference || `PAY-${Date.now()}`,
+            amount: String(amount),
+            currency,
+            frequency: result.data.frequency,
+            nextRunDate: nextDate,
+            recipientType: 'bank_account',
+            recipientId: recipientDetails.accountNumber || '',
+            recipientName: recipientDetails.accountName || 'Recipient',
+            metadata: { countryCode, reason, recipientDetails } as any,
+            companyId: company?.companyId,
+            createdBy: userId,
+          } as any);
+        } catch (e) {
+          console.error('[Recurring] Failed to create scheduled payout:', e);
+        }
+      }
+
       res.json({
         success: true,
         transferDetails: transferResult,
+        recurring: result.data.recurring,
+        frequency: result.data.recurring ? result.data.frequency : undefined,
         balanceDeducted: {
           amount,
           currency,
@@ -7917,11 +7996,10 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Payout not found" });
       }
 
-      if (payout.status !== 'pending') {
-        return res.status(400).json({ error: "Payout already processed" });
+      if (!['pending', 'approved'].includes(payout.status)) {
+        return res.status(400).json({ error: `Payout cannot be processed in '${payout.status}' status. Must be 'pending' or 'approved'.` });
       }
 
-      // Get destination details
       const destination = payout.destinationId 
         ? await storage.getPayoutDestination(payout.destinationId)
         : null;
@@ -8031,6 +8109,161 @@ export async function registerRoutes(
     } catch (error: any) {
       const mapped = mapPaymentError(error, 'payout');
       res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
+    }
+  });
+
+  app.post("/api/payouts/:id/reject", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const userId = (req as any).user?.uid;
+      const userName = await getAuditUserName(req);
+      const { reason } = req.body;
+
+      const payout = await storage.getPayout(req.params.id);
+      if (!payout) {
+        return res.status(404).json({ error: "Payout not found" });
+      }
+
+      if (!['pending', 'pending_second_approval', 'approved'].includes(payout.status)) {
+        return res.status(400).json({ error: "Payout is not in a rejectable status" });
+      }
+
+      const updatedPayout = await storage.updatePayout(payout.id, {
+        status: 'rejected',
+        failureReason: reason || 'Rejected by admin',
+      });
+
+      await logAudit(
+        'payout',
+        payout.id,
+        'rejected',
+        userId,
+        userName,
+        { status: payout.status },
+        { status: 'rejected' },
+        { reason: reason || 'No reason provided', rejectedBy: userId, amount: payout.amount }
+      );
+
+      if (payout.relatedEntityType === 'expense' && payout.relatedEntityId) {
+        await storage.updateExpense(payout.relatedEntityId, {
+          payoutStatus: 'rejected',
+        });
+      }
+
+      res.json(updatedPayout);
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to reject payout" });
+    }
+  });
+
+  // ==================== SCHEDULED PAYMENTS ====================
+
+  const scheduledPaymentSchema = z.object({
+    type: z.enum(['bill', 'payout', 'payroll', 'transfer']),
+    sourceType: z.string().min(1),
+    sourceId: z.string().min(1),
+    amount: z.number().positive(),
+    currency: z.string().length(3).default('USD'),
+    frequency: z.enum(['weekly', 'monthly', 'quarterly', 'yearly']).default('monthly'),
+    nextRunDate: z.string().min(1),
+    recipientType: z.string().optional(),
+    recipientId: z.string().optional(),
+    recipientName: z.string().optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  app.get("/api/scheduled-payments", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const company = await resolveUserCompany(req);
+      const { status, type } = req.query;
+      const payments = await storage.getScheduledPayments({
+        status: status as string,
+        type: type as string,
+        companyId: company?.companyId,
+      });
+      res.json(payments);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch scheduled payments" });
+    }
+  });
+
+  app.post("/api/scheduled-payments", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const result = scheduledPaymentSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid scheduled payment data", details: result.error.issues });
+      }
+
+      const company = await resolveUserCompany(req);
+      const userId = (req as any).user?.uid || 'system';
+
+      const payment = await storage.createScheduledPayment({
+        ...result.data,
+        amount: String(result.data.amount),
+        status: 'active',
+        companyId: company?.companyId,
+        createdBy: userId,
+      } as any);
+
+      res.status(201).json(payment);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create scheduled payment" });
+    }
+  });
+
+  app.patch("/api/scheduled-payments/:id", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const payment = await storage.updateScheduledPayment(req.params.id, req.body);
+      if (!payment) {
+        return res.status(404).json({ error: "Scheduled payment not found" });
+      }
+      res.json(payment);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update scheduled payment" });
+    }
+  });
+
+  app.delete("/api/scheduled-payments/:id", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const deleted = await storage.deleteScheduledPayment(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Scheduled payment not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete scheduled payment" });
+    }
+  });
+
+  app.post("/api/scheduled-payments/:id/pause", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const payment = await storage.updateScheduledPayment(req.params.id, { status: 'paused' });
+      if (!payment) {
+        return res.status(404).json({ error: "Scheduled payment not found" });
+      }
+      res.json(payment);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to pause scheduled payment" });
+    }
+  });
+
+  app.post("/api/scheduled-payments/:id/resume", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const payment = await storage.updateScheduledPayment(req.params.id, { status: 'active' });
+      if (!payment) {
+        return res.status(404).json({ error: "Scheduled payment not found" });
+      }
+      res.json(payment);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to resume scheduled payment" });
+    }
+  });
+
+  app.post("/api/admin/run-scheduler", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      await runRecurringScheduler();
+      res.json({ success: true, message: "Recurring scheduler executed successfully" });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to run scheduler", detail: error.message });
     }
   });
 

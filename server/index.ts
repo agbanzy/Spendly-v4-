@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { apiLimiter } from "./middleware/rateLimiter";
+import { startRecurringScheduler } from "./recurringScheduler";
 
 const app = express();
 app.set('trust proxy', 1);
@@ -103,6 +104,7 @@ app.use((req, res, next) => {
     },
     () => {
       log(`serving on port ${port}`);
+      startRecurringScheduler(3600000);
     },
   );
 })();

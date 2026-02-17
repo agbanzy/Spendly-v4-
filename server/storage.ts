@@ -20,7 +20,10 @@ import {
   type Wallet, type InsertWallet, type WalletTransaction, type InsertWalletTransaction,
   type ExchangeRate, type InsertExchangeRate, type ExchangeRateSettings,
   type PayoutDestination, type InsertPayoutDestination,
-  type Payout, type InsertPayout, type FundingSource, type InsertFundingSource,
+  type Payout, type InsertPayout,
+  type ScheduledPayment, type InsertScheduledPayment,
+  scheduledPayments,
+  type FundingSource, type InsertFundingSource,
   type AdminSettings, type InsertAdminSettings,
   type Company, type InsertCompany, type CompanyMember, type InsertCompanyMember,
   type CompanyInvitation, type InsertCompanyInvitation,
@@ -208,6 +211,17 @@ export interface IStorage {
   getPayout(id: string): Promise<Payout | undefined>;
   createPayout(payout: InsertPayout): Promise<Payout>;
   updatePayout(id: string, data: Partial<Payout>): Promise<Payout | undefined>;
+
+  // Scheduled Payments
+  getScheduledPayments(filters?: { status?: string; type?: string; companyId?: string }): Promise<ScheduledPayment[]>;
+  getScheduledPayment(id: string): Promise<ScheduledPayment | undefined>;
+  createScheduledPayment(payment: InsertScheduledPayment): Promise<ScheduledPayment>;
+  updateScheduledPayment(id: string, data: Partial<ScheduledPayment>): Promise<ScheduledPayment | undefined>;
+  deleteScheduledPayment(id: string): Promise<boolean>;
+  getDueScheduledPayments(beforeDate: string): Promise<ScheduledPayment[]>;
+
+  // Recurring payroll helpers
+  getRecurringPayrollEntries(companyId?: string): Promise<PayrollEntry[]>;
   
   // Funding Sources
   getFundingSources(userId: string): Promise<FundingSource[]>;
@@ -1628,6 +1642,77 @@ export class DatabaseStorage implements IStorage {
       .where(eq(payouts.id, id))
       .returning();
     return result[0];
+  }
+
+  // ==================== SCHEDULED PAYMENTS ====================
+  async getScheduledPayments(filters?: { status?: string; type?: string; companyId?: string }): Promise<ScheduledPayment[]> {
+    const conditions: any[] = [];
+    if (filters?.companyId) {
+      conditions.push(eq(scheduledPayments.companyId, filters.companyId));
+    }
+    if (filters?.status) {
+      conditions.push(eq(scheduledPayments.status, filters.status));
+    }
+    if (filters?.type) {
+      conditions.push(eq(scheduledPayments.type, filters.type));
+    }
+    if (conditions.length > 0) {
+      return await db.select().from(scheduledPayments)
+        .where(and(...conditions))
+        .orderBy(desc(scheduledPayments.nextRunDate));
+    }
+    return await db.select().from(scheduledPayments).orderBy(desc(scheduledPayments.nextRunDate));
+  }
+
+  async getScheduledPayment(id: string): Promise<ScheduledPayment | undefined> {
+    const result = await db.select().from(scheduledPayments).where(eq(scheduledPayments.id, id)).limit(1);
+    return result[0];
+  }
+
+  async createScheduledPayment(payment: InsertScheduledPayment): Promise<ScheduledPayment> {
+    const now = new Date().toISOString();
+    const result = await db.insert(scheduledPayments).values({
+      ...payment,
+      createdAt: now,
+      updatedAt: now,
+    } as any).returning();
+    return result[0];
+  }
+
+  async updateScheduledPayment(id: string, data: Partial<ScheduledPayment>): Promise<ScheduledPayment | undefined> {
+    const now = new Date().toISOString();
+    const result = await db.update(scheduledPayments)
+      .set({ ...data, updatedAt: now } as any)
+      .where(eq(scheduledPayments.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteScheduledPayment(id: string): Promise<boolean> {
+    const result = await db.delete(scheduledPayments).where(eq(scheduledPayments.id, id)).returning();
+    return result.length > 0;
+  }
+
+  async getDueScheduledPayments(beforeDate: string): Promise<ScheduledPayment[]> {
+    return await db.select().from(scheduledPayments)
+      .where(and(
+        eq(scheduledPayments.status, 'active'),
+        sql`${scheduledPayments.nextRunDate} <= ${beforeDate}`
+      ));
+  }
+
+  async getRecurringPayrollEntries(companyId?: string): Promise<PayrollEntry[]> {
+    if (companyId) {
+      return await db.select().from(payrollEntries)
+        .where(and(
+          eq(payrollEntries.recurring, true),
+          eq(payrollEntries.companyId, companyId)
+        ))
+        .orderBy(desc(payrollEntries.payDate));
+    }
+    return await db.select().from(payrollEntries)
+      .where(eq(payrollEntries.recurring, true))
+      .orderBy(desc(payrollEntries.payDate));
   }
 
   // ==================== FUNDING SOURCES ====================

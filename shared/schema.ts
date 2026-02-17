@@ -280,6 +280,11 @@ export const payrollEntries = pgTable("payroll_entries", {
   bankName: text("bank_name"),
   accountNumber: text("account_number"),
   accountName: text("account_name"),
+  recurring: boolean("recurring").default(false),
+  frequency: text("frequency").default('monthly'),
+  nextPayDate: text("next_pay_date"),
+  companyId: text("company_id"),
+  email: text("email"),
 });
 
 // Invoices table
@@ -673,7 +678,33 @@ export const payouts = pgTable("payouts", {
   metadata: jsonb("metadata").$type<Record<string, unknown>>(),
   initiatedBy: text("initiated_by"),
   approvedBy: text("approved_by"),
+  firstApprovedBy: text("first_approved_by"),
+  approvalStatus: text("approval_status").default('none'),
   processedAt: text("processed_at"),
+  recurring: boolean("recurring").default(false),
+  frequency: text("frequency").default('monthly'),
+  nextRunDate: text("next_run_date"),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+});
+
+export const scheduledPayments = pgTable("scheduled_payments", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  type: text("type").notNull(),
+  sourceType: text("source_type").notNull(),
+  sourceId: text("source_id").notNull(),
+  amount: decimal("amount", { precision: 16, scale: 2 }).notNull(),
+  currency: text("currency").notNull().default('USD'),
+  frequency: text("frequency").notNull().default('monthly'),
+  nextRunDate: text("next_run_date").notNull(),
+  lastRunDate: text("last_run_date"),
+  status: text("status").notNull().default('active'),
+  recipientType: text("recipient_type"),
+  recipientId: text("recipient_id"),
+  recipientName: text("recipient_name"),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+  companyId: text("company_id"),
+  createdBy: text("created_by"),
   createdAt: text("created_at").notNull().default(sql`now()`),
   updatedAt: text("updated_at").notNull().default(sql`now()`),
 });
@@ -742,6 +773,7 @@ export const insertExchangeRateSchema = createInsertSchema(exchangeRates).omit({
 export const insertExchangeRateSettingsSchema = createInsertSchema(exchangeRateSettings).omit({ id: true });
 export const insertPayoutDestinationSchema = createInsertSchema(payoutDestinations).omit({ id: true });
 export const insertPayoutSchema = createInsertSchema(payouts).omit({ id: true });
+export const insertScheduledPaymentSchema = createInsertSchema(scheduledPayments).omit({ id: true });
 export const insertFundingSourceSchema = createInsertSchema(fundingSources).omit({ id: true });
 export const insertAdminSettingsSchema = createInsertSchema(adminSettings).omit({ id: true });
 export const insertCompanySchema = createInsertSchema(companies).omit({ id: true });
@@ -827,6 +859,9 @@ export type PayoutDestination = typeof payoutDestinations.$inferSelect;
 
 export type InsertPayout = z.infer<typeof insertPayoutSchema>;
 export type Payout = typeof payouts.$inferSelect;
+
+export type InsertScheduledPayment = z.infer<typeof insertScheduledPaymentSchema>;
+export type ScheduledPayment = typeof scheduledPayments.$inferSelect;
 
 export type InsertFundingSource = z.infer<typeof insertFundingSourceSchema>;
 export type FundingSource = typeof fundingSources.$inferSelect;
