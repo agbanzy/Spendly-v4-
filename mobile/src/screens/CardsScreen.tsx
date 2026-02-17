@@ -71,6 +71,11 @@ export default function CardsScreen() {
   const [newCardName, setNewCardName] = React.useState('');
   const [newCardType, setNewCardType] = React.useState('virtual');
 
+  const { data: wallets } = useQuery({
+    queryKey: ['wallets'],
+    queryFn: () => api.get<Array<{ currency: string; balance: string }>>('/api/wallets'),
+  });
+
   const freezeMutation = useMutation({
     mutationFn: ({ id, action }: { id: number; action: 'freeze' | 'unfreeze' }) =>
       api.post<VirtualCard>(`/api/cards/${id}/${action}`, {}),
@@ -358,49 +363,101 @@ export default function CardsScreen() {
             </View>
 
             <View style={styles.modalBody}>
-              {selectedCard && (
-                <View style={styles.fundCardInfo}>
-                  <Ionicons name="card" size={24} color={colors.accent} />
-                  <View style={styles.fundCardDetails}>
-                    <Text style={styles.fundCardName}>{selectedCard.cardholderName}</Text>
-                    <Text style={styles.fundCardNumber}>
-                      **** {selectedCard.cardNumber.slice(-4)}
-                    </Text>
-                  </View>
-                  <Text style={styles.fundCardBalance}>
-                    {formatCurrency(selectedCard.balance, selectedCard.currency)}
-                  </Text>
-                </View>
-              )}
+              {selectedCard && (() => {
+                const cardCurrency = selectedCard.currency || 'USD';
+                const wallet = wallets?.find(w => w.currency === cardCurrency);
+                const walletBalance = wallet ? parseFloat(wallet.balance || '0') : 0;
+                const enteredAmount = parseFloat(fundAmount) || 0;
+                const insufficientFunds = enteredAmount > 0 && enteredAmount > walletBalance;
+                const quickAmounts = [50, 100, 250, 500, 1000];
 
-              <Text style={styles.inputLabel}>Amount</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="0.00"
-                placeholderTextColor={colors.placeholderText}
-                keyboardType="decimal-pad"
-                value={fundAmount}
-                onChangeText={setFundAmount}
-                testID="input-fund-amount"
-              />
+                return (
+                  <>
+                    <View style={styles.fundCardInfo}>
+                      <Ionicons name="card" size={24} color={colors.accent} />
+                      <View style={styles.fundCardDetails}>
+                        <Text style={styles.fundCardName}>{selectedCard.cardholderName}</Text>
+                        <Text style={styles.fundCardNumber}>
+                          **** {selectedCard.cardNumber.slice(-4)}
+                        </Text>
+                      </View>
+                      <Text style={styles.fundCardBalance}>
+                        {formatCurrency(selectedCard.balance, cardCurrency)}
+                      </Text>
+                    </View>
+
+                    <View style={styles.walletBalanceRow} testID="text-wallet-balance">
+                      <Ionicons name="wallet" size={16} color={colors.accent} />
+                      <Text style={styles.walletBalanceLabel}>Wallet Balance ({cardCurrency}):</Text>
+                      <Text style={styles.walletBalanceValue}>{formatCurrency(walletBalance, cardCurrency)}</Text>
+                    </View>
+
+                    <Text style={styles.inputLabel}>Amount</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="0.00"
+                      placeholderTextColor={colors.placeholderText}
+                      keyboardType="decimal-pad"
+                      value={fundAmount}
+                      onChangeText={setFundAmount}
+                      testID="input-fund-amount"
+                    />
+
+                    <View style={styles.quickAmountsRow}>
+                      {quickAmounts.map((amt) => (
+                        <TouchableOpacity
+                          key={amt}
+                          style={[styles.quickAmountChip, fundAmount === String(amt) && styles.quickAmountChipActive]}
+                          onPress={() => setFundAmount(String(amt))}
+                          testID={`button-quick-amount-${amt}`}
+                        >
+                          <Text style={[styles.quickAmountText, fundAmount === String(amt) && styles.quickAmountTextActive]}>
+                            ${amt}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+
+                    {insufficientFunds && (
+                      <View style={styles.insufficientFundsRow} testID="text-insufficient-funds">
+                        <Ionicons name="alert-circle" size={16} color={colors.danger} />
+                        <Text style={styles.insufficientFundsText}>
+                          Insufficient wallet balance. You need {formatCurrency(enteredAmount - walletBalance, cardCurrency)} more.
+                        </Text>
+                      </View>
+                    )}
+                  </>
+                );
+              })()}
             </View>
 
             <View style={styles.modalFooter}>
               <TouchableOpacity style={styles.cancelButton} onPress={closeFundModal}>
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.saveButton, fundMutation.isPending && styles.saveButtonDisabled]}
-                onPress={handleFund}
-                disabled={fundMutation.isPending}
-                testID="button-confirm-fund"
-              >
-                {fundMutation.isPending ? (
-                  <ActivityIndicator size="small" color={colors.primaryForeground} />
-                ) : (
-                  <Text style={styles.saveButtonText}>Fund Card</Text>
-                )}
-              </TouchableOpacity>
+              {(() => {
+                const cardCurrency = selectedCard?.currency || 'USD';
+                const wallet = wallets?.find(w => w.currency === cardCurrency);
+                const walletBalance = wallet ? parseFloat(wallet.balance || '0') : 0;
+                const enteredAmount = parseFloat(fundAmount) || 0;
+                const insufficientFunds = enteredAmount > 0 && enteredAmount > walletBalance;
+                const isDisabled = fundMutation.isPending || insufficientFunds || enteredAmount <= 0;
+
+                return (
+                  <TouchableOpacity
+                    style={[styles.saveButton, isDisabled && styles.saveButtonDisabled]}
+                    onPress={handleFund}
+                    disabled={isDisabled}
+                    testID="button-confirm-fund"
+                  >
+                    {fundMutation.isPending ? (
+                      <ActivityIndicator size="small" color={colors.primaryForeground} />
+                    ) : (
+                      <Text style={styles.saveButtonText}>Fund Card</Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              })()}
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -897,6 +954,67 @@ function createStyles(colors: ColorTokens) {
       color: colors.accent,
       fontSize: 14,
       fontWeight: '700',
+    },
+    walletBalanceRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.accentBackground,
+      borderRadius: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      marginTop: 12,
+    },
+    walletBalanceLabel: {
+      fontSize: 13,
+      color: colors.textSecondary,
+    },
+    walletBalanceValue: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.accent,
+      marginLeft: 'auto',
+    },
+    quickAmountsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 12,
+    },
+    quickAmountChip: {
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+    },
+    quickAmountChipActive: {
+      backgroundColor: colors.accent,
+      borderColor: colors.accent,
+    },
+    quickAmountText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+    quickAmountTextActive: {
+      color: colors.primaryForeground,
+    },
+    insufficientFundsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.dangerSubtleBg,
+      borderRadius: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      marginTop: 12,
+    },
+    insufficientFundsText: {
+      flex: 1,
+      fontSize: 12,
+      color: colors.danger,
     },
 
     // Details modal

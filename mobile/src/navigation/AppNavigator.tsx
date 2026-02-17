@@ -26,6 +26,7 @@ import PayrollScreen from '../screens/PayrollScreen';
 import AnalyticsScreen from '../screens/AnalyticsScreen';
 import ReportsScreen from '../screens/ReportsScreen';
 import WalletScreen from '../screens/WalletScreen';
+import VirtualAccountsScreen from '../screens/VirtualAccountsScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -119,6 +120,7 @@ function MoreStack() {
       <Stack.Screen name="Payroll" component={PayrollScreen} />
       <Stack.Screen name="Analytics" component={AnalyticsScreen} />
       <Stack.Screen name="Reports" component={ReportsScreen} />
+      <Stack.Screen name="VirtualAccounts" component={VirtualAccountsScreen} options={{ title: 'Virtual Accounts' }} />
     </Stack.Navigator>
   );
 }

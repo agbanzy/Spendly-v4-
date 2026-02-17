@@ -233,6 +233,11 @@ export default function SettingsScreen() {
             onPress: () => navigation.navigate('Cards'),
           })}
           {renderSettingsItem({
+            icon: 'business',
+            label: 'Virtual Accounts',
+            onPress: () => navigation.navigate('VirtualAccounts'),
+          })}
+          {renderSettingsItem({
             icon: 'document-text',
             label: 'Invoices',
             onPress: () => navigation.navigate('Invoices'),
