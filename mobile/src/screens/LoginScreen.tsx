@@ -22,7 +22,8 @@ interface LoginScreenProps {
   navigation: any;
 }
 
-function getFirebaseErrorMessage(code: string): string {
+function getFirebaseErrorMessage(error: any): string {
+  const code = error?.code || '';
   switch (code) {
     case 'auth/user-not-found':
       return 'No account found with this email address.';
@@ -36,7 +37,12 @@ function getFirebaseErrorMessage(code: string): string {
       return 'Please enter a valid email address.';
     case 'auth/user-disabled':
       return 'This account has been disabled. Contact support.';
+    case 'auth/network-request-failed':
+      return 'Network error. Please check your internet connection.';
     default:
+      if (error?.message?.includes('network') || error?.message?.includes('Network')) {
+        return 'Network error. Please check your internet connection.';
+      }
       return 'Login failed. Please check your credentials and try again.';
   }
 }
@@ -108,8 +114,8 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
         await setBiometricEnabled(true);
       }
     } catch (error: any) {
-      const errorCode = error?.code || '';
-      Alert.alert('Login Failed', getFirebaseErrorMessage(errorCode));
+      console.error('Login error:', error?.code, error?.message);
+      Alert.alert('Login Failed', getFirebaseErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -117,7 +123,8 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior="padding"
+      keyboardVerticalOffset={Platform.OS === 'android' ? -100 : 0}
       style={styles.container}
     >
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">

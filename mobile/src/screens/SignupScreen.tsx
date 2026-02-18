@@ -20,7 +20,8 @@ interface SignupScreenProps {
   navigation: any;
 }
 
-function getFirebaseErrorMessage(code: string): string {
+function getFirebaseErrorMessage(error: any): string {
+  const code = error?.code || '';
   switch (code) {
     case 'auth/email-already-in-use':
       return 'An account with this email already exists.';
@@ -32,7 +33,12 @@ function getFirebaseErrorMessage(code: string): string {
       return 'Too many attempts. Please try again later.';
     case 'auth/operation-not-allowed':
       return 'Email/password accounts are not enabled.';
+    case 'auth/network-request-failed':
+      return 'Network error. Please check your internet connection.';
     default:
+      if (error?.message?.includes('network') || error?.message?.includes('Network')) {
+        return 'Network error. Please check your internet connection.';
+      }
       return 'Registration failed. Please try again.';
   }
 }
@@ -81,8 +87,8 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
     try {
       await register(email.trim(), password, fullName.trim());
     } catch (error: any) {
-      const errorCode = error?.code || '';
-      Alert.alert('Registration Failed', getFirebaseErrorMessage(errorCode));
+      console.error('Signup error:', error?.code, error?.message);
+      Alert.alert('Registration Failed', getFirebaseErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -90,7 +96,8 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior="padding"
+      keyboardVerticalOffset={Platform.OS === 'android' ? -100 : 0}
       style={styles.container}
     >
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">

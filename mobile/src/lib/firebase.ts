@@ -1,12 +1,15 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   initializeAuth,
+  getAuth,
+  // @ts-ignore — exported in RN bundle but not in TS declarations
   getReactNativePersistence,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   updateProfile,
   sendPasswordResetEmail,
+  Auth,
 } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -19,10 +22,19 @@ const firebaseConfig = {
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
 };
 
-const app = initializeApp(firebaseConfig);
-export const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(AsyncStorage),
-});
+// Prevent re-initialization errors on hot reload
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+
+let auth: Auth;
+try {
+  auth = initializeAuth(app, {
+    persistence: getReactNativePersistence(AsyncStorage),
+  });
+} catch {
+  // Already initialized (hot reload / re-import) — use existing instance
+  auth = getAuth(app);
+}
+export { auth };
 
 export const signIn = async (email: string, password: string) => {
   const userCredential = await signInWithEmailAndPassword(auth, email, password);

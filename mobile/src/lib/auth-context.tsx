@@ -4,8 +4,6 @@ import { auth, signIn, signUp, signOut, resetPassword as firebaseResetPassword }
 import { api } from './api';
 import { retrySyncPushTokenIfNeeded } from './notifications';
 
-const MAX_PROFILE_SYNC_RETRIES = 3;
-
 interface AuthContextType {
   user: User | null;
   loading: boolean;
@@ -19,24 +17,19 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-async function syncUserProfile(user: User, retries = MAX_PROFILE_SYNC_RETRIES): Promise<boolean> {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      await api.post('/api/user-profile', {
-        firebaseUid: user.uid,
-        email: user.email,
-        displayName: user.displayName,
-        photoUrl: user.photoURL,
-      });
-      return true;
-    } catch (error) {
-      console.warn(`Profile sync attempt ${attempt}/${retries} failed:`, error);
-      if (attempt < retries) {
-        await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
-      }
-    }
+async function syncUserProfile(user: User): Promise<boolean> {
+  try {
+    await api.post('/api/user-profile', {
+      firebaseUid: user.uid,
+      email: user.email,
+      displayName: user.displayName,
+      photoUrl: user.photoURL,
+    });
+    return true;
+  } catch (error: any) {
+    console.warn('Profile sync failed:', error?.message || error);
+    return false;
   }
-  return false;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {

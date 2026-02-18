@@ -98,7 +98,8 @@ export default function ForgotPasswordScreen({ navigation }: ForgotPasswordScree
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior="padding"
+      keyboardVerticalOffset={Platform.OS === 'android' ? -100 : 0}
       style={styles.container}
     >
       <View style={styles.content}>
