@@ -62,14 +62,67 @@ const emptyUtilityForm = {
   countryCode: 'US',
 };
 
-// Provider options per utility type (African — most common usage)
-const providerOptions: Record<UtilityType, string[]> = {
-  airtime: ['MTN', 'Glo', 'Airtel', '9Mobile', 'Safaricom', 'Vodacom'],
-  data: ['MTN-Data', 'Glo-Data', 'Airtel-Data', '9Mobile-Data', 'Spectranet', 'Smile'],
-  electricity: ['Eko', 'Ikeja', 'Abuja', 'Ibadan', 'KPLC', 'Eskom'],
-  cable: ['DSTV', 'GOtv', 'StarTimes', 'Showmax'],
-  internet: ['Spectranet', 'Smile', 'Swift', 'Ntel'],
+// Country-specific provider options
+const providersByCountry: Record<string, Record<UtilityType, string[]>> = {
+  NG: {
+    airtime: ['MTN', 'Glo', 'Airtel', '9Mobile'],
+    data: ['MTN-Data', 'Glo-Data', 'Airtel-Data', '9Mobile-Data', 'Spectranet', 'Smile'],
+    electricity: ['Eko (EKEDC)', 'Ikeja (IKEDC)', 'Abuja (AEDC)', 'Ibadan (IBEDC)', 'Jos (JED)', 'Kaduna (KAEDCO)'],
+    cable: ['DSTV', 'GOtv', 'StarTimes', 'Showmax'],
+    internet: ['Spectranet', 'Smile', 'Swift', 'Ntel'],
+  },
+  GH: {
+    airtime: ['MTN Ghana', 'Vodafone Ghana', 'AirtelTigo'],
+    data: ['MTN-Data', 'Vodafone-Data', 'AirtelTigo-Data'],
+    electricity: ['ECG', 'NEDCo'],
+    cable: ['DSTV', 'GOtv', 'StarTimes'],
+    internet: ['Vodafone Broadband', 'Surfline', 'Busy'],
+  },
+  KE: {
+    airtime: ['Safaricom', 'Airtel Kenya', 'Telkom Kenya'],
+    data: ['Safaricom-Data', 'Airtel-Data', 'Telkom-Data'],
+    electricity: ['KPLC Prepaid', 'KPLC Postpaid'],
+    cable: ['DSTV', 'GOtv', 'StarTimes', 'Zuku'],
+    internet: ['Safaricom Home', 'Zuku', 'Faiba'],
+  },
+  ZA: {
+    airtime: ['Vodacom', 'MTN SA', 'Cell C', 'Telkom SA'],
+    data: ['Vodacom-Data', 'MTN-Data', 'Cell C-Data', 'Telkom-Data'],
+    electricity: ['Eskom', 'City Power', 'Cape Town Electricity'],
+    cable: ['DSTV', 'GOtv', 'Showmax'],
+    internet: ['Afrihost', 'Rain', 'Webafrica'],
+  },
 };
+
+// Generic providers for non-African countries (utility payments are less common via Paystack/Stripe)
+const genericProviders: Record<UtilityType, string[]> = {
+  airtime: [],
+  data: [],
+  electricity: [],
+  cable: [],
+  internet: [],
+};
+
+// African countries supported for utility payments
+const UTILITY_SUPPORTED_COUNTRIES = ['NG', 'GH', 'KE', 'ZA'];
+
+function getProvidersForCountry(countryCode: string, type: UtilityType): string[] {
+  return providersByCountry[countryCode]?.[type] || genericProviders[type] || [];
+}
+
+// Currency-aware quick amounts
+function getQuickAmounts(currency: string): number[] {
+  switch (currency) {
+    case 'NGN': return [100, 200, 500, 1000, 2000, 5000];
+    case 'GHS': return [5, 10, 20, 50, 100, 200];
+    case 'KES': return [50, 100, 200, 500, 1000, 2000];
+    case 'ZAR': return [10, 20, 50, 100, 200, 500];
+    case 'USD': return [5, 10, 20, 50, 100, 200];
+    case 'GBP': return [5, 10, 20, 50, 100, 200];
+    case 'EUR': return [5, 10, 20, 50, 100, 200];
+    default: return [5, 10, 20, 50, 100, 200];
+  }
+}
 
 export default function BillsScreen() {
   const { colors } = useTheme();
@@ -221,9 +274,25 @@ export default function BillsScreen() {
   };
 
   // Open utility payment modal
+  const userCountry = settings?.countryCode || 'US';
+  const userCurrency = settings?.currency || 'USD';
+  const isUtilitySupported = UTILITY_SUPPORTED_COUNTRIES.includes(userCountry);
+
   const openUtilityModal = (type: UtilityType) => {
+    if (!isUtilitySupported) {
+      Alert.alert(
+        'Not Available',
+        'Utility bill payments are currently available in Nigeria, Ghana, Kenya, and South Africa. We\'re working to add more countries soon!',
+      );
+      return;
+    }
+    const providers = getProvidersForCountry(userCountry, type);
+    if (providers.length === 0) {
+      Alert.alert('Not Available', `${type.charAt(0).toUpperCase() + type.slice(1)} payments are not yet available in your region.`);
+      return;
+    }
     setUtilityType(type);
-    setUtilityForm({ ...emptyUtilityForm, countryCode: settings?.countryCode || 'US', provider: providerOptions[type][0] || '' });
+    setUtilityForm({ ...emptyUtilityForm, countryCode: userCountry, provider: providers[0] || '' });
     setUtilityModalVisible(true);
   };
 
@@ -263,7 +332,7 @@ export default function BillsScreen() {
 
     Alert.alert(
       'Confirm Payment',
-      `Pay ${utilityForm.amount} for ${utilityType} (${utilityForm.provider}) to ${customerRef}?`,
+      `Pay ${formatCurrency(parsedAmount, userCurrency)} for ${utilityType} (${utilityForm.provider}) to ${customerRef}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -289,7 +358,7 @@ export default function BillsScreen() {
   const handlePayBill = (bill: Bill) => {
     Alert.alert(
       'Pay Bill',
-      `Pay ${formatCurrency(bill.amount)} for "${bill.name}" from your wallet?`,
+      `Pay ${formatCurrency(bill.amount, userCurrency)} for "${bill.name}" from your wallet?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -633,7 +702,7 @@ export default function BillsScreen() {
             <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
               <Text style={styles.inputLabel}>Provider</Text>
               <View style={styles.frequencyRow}>
-                {(providerOptions[utilityType] || []).map((p) => (
+                {getProvidersForCountry(userCountry, utilityType).map((p) => (
                   <TouchableOpacity
                     key={p}
                     style={[
@@ -680,7 +749,7 @@ export default function BillsScreen() {
               {/* Quick amount buttons for airtime/data */}
               {(utilityType === 'airtime' || utilityType === 'data') && (
                 <View style={styles.quickAmounts}>
-                  {[100, 200, 500, 1000, 2000, 5000].map((amt) => (
+                  {getQuickAmounts(userCurrency).map((amt) => (
                     <TouchableOpacity
                       key={amt}
                       style={[

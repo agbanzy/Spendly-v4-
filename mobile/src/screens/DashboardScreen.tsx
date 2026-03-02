@@ -8,6 +8,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   Alert,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
@@ -16,6 +17,7 @@ import { api } from '../lib/api';
 import * as Clipboard from 'expo-clipboard';
 import { useTheme } from '../lib/theme-context';
 import { ColorTokens } from '../lib/colors';
+import { shadows, monoFont } from '../lib/shadows';
 
 // Type definitions
 interface Balance {
@@ -108,6 +110,17 @@ export default function DashboardScreen() {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [showBalance, setShowBalance] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Entrance animations
+  const fadeAnim = React.useRef(new Animated.Value(0)).current;
+  const slideAnim = React.useRef(new Animated.Value(20)).current;
+
+  React.useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+      Animated.spring(slideAnim, { toValue: 0, tension: 60, friction: 12, useNativeDriver: true }),
+    ]).start();
+  }, []);
 
   const {
     data: kpis,
@@ -231,6 +244,7 @@ export default function DashboardScreen() {
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
       }
     >
+      <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.greeting}>Welcome back</Text>
@@ -279,10 +293,18 @@ export default function DashboardScreen() {
 
       {/* KYC Status Banner */}
       {settings && settings.kycStatus && settings.kycStatus !== 'approved' && (
-        <View style={[styles.kycBanner,
-          settings.kycStatus === 'pending_review' ? styles.kycPending :
-          settings.kycStatus === 'rejected' ? styles.kycRejected : styles.kycDefault
-        ]}>
+        <TouchableOpacity
+          style={[styles.kycBanner,
+            settings.kycStatus === 'pending_review' ? styles.kycPending :
+            settings.kycStatus === 'rejected' ? styles.kycRejected : styles.kycDefault
+          ]}
+          onPress={() => {
+            if (settings.kycStatus !== 'pending_review') {
+              (navigation as any).navigate('More', { screen: 'KYC' });
+            }
+          }}
+          activeOpacity={settings.kycStatus === 'pending_review' ? 1 : 0.7}
+        >
           <Ionicons
             name={settings.kycStatus === 'pending_review' ? 'time-outline' : settings.kycStatus === 'rejected' ? 'alert-circle-outline' : 'shield-checkmark-outline'}
             size={20}
@@ -296,10 +318,13 @@ export default function DashboardScreen() {
             <Text style={styles.kycSubtext}>
               {settings.kycStatus === 'pending_review' ? 'Your documents are being reviewed. This usually takes 1-2 business days.' :
                settings.kycStatus === 'rejected' ? 'Your verification was not approved. Please resubmit your documents.' :
-               'Complete your KYC verification to unlock all features.'}
+               'Tap to complete your identity verification and unlock all features.'}
             </Text>
           </View>
-        </View>
+          {settings.kycStatus !== 'pending_review' && (
+            <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+          )}
+        </TouchableOpacity>
       )}
 
       {/* Virtual Account Card */}
@@ -464,6 +489,7 @@ export default function DashboardScreen() {
       </View>
 
       <View style={{ height: 24 }} />
+      </Animated.View>
     </ScrollView>
   );
 }
@@ -497,11 +523,10 @@ function createStyles(colors: ColorTokens) {
     balanceCard: {
       backgroundColor: colors.surface,
       marginHorizontal: 20,
-      borderRadius: 16,
-      padding: 20,
+      borderRadius: 24,
+      padding: 24,
       marginBottom: 16,
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...shadows.hero,
     },
     balanceHeader: {
       flexDirection: 'row',
@@ -513,10 +538,12 @@ function createStyles(colors: ColorTokens) {
       color: colors.textSecondary,
     },
     balanceAmount: {
-      fontSize: 36,
+      fontSize: 42,
       fontWeight: 'bold',
       color: colors.textPrimary,
       marginTop: 8,
+      fontFamily: monoFont,
+      letterSpacing: -1,
     },
     currencyCode: {
       fontSize: 12,
@@ -637,16 +664,15 @@ function createStyles(colors: ColorTokens) {
     actionButton: {
       flex: 1,
       backgroundColor: colors.surface,
-      borderRadius: 12,
+      borderRadius: 20,
       padding: 16,
       alignItems: 'center',
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...shadows.card,
     },
     actionIcon: {
       width: 48,
       height: 48,
-      borderRadius: 24,
+      borderRadius: 28,
       backgroundColor: colors.accent,
       alignItems: 'center',
       justifyContent: 'center',
@@ -669,8 +695,8 @@ function createStyles(colors: ColorTokens) {
       marginBottom: 16,
     },
     sectionTitle: {
-      fontSize: 18,
-      fontWeight: '600',
+      fontSize: 20,
+      fontWeight: '700',
       color: colors.textPrimary,
       marginBottom: 12,
     },
@@ -689,10 +715,9 @@ function createStyles(colors: ColorTokens) {
       flex: 1,
       minWidth: '45%',
       backgroundColor: colors.surface,
-      borderRadius: 12,
-      padding: 16,
-      borderWidth: 1,
-      borderColor: colors.border,
+      borderRadius: 16,
+      padding: 20,
+      ...shadows.subtle,
     },
     kpiLabel: {
       fontSize: 12,
@@ -700,9 +725,10 @@ function createStyles(colors: ColorTokens) {
       marginBottom: 8,
     },
     kpiValue: {
-      fontSize: 18,
+      fontSize: 20,
       fontWeight: 'bold',
       color: colors.textPrimary,
+      fontFamily: monoFont,
     },
     positive: { color: colors.success },
     negative: { color: colors.danger },
@@ -745,11 +771,10 @@ function createStyles(colors: ColorTokens) {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: colors.surface,
-      borderRadius: 12,
+      borderRadius: 16,
       padding: 16,
       marginBottom: 8,
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...shadows.subtle,
     },
     txIcon: {
       width: 40,
@@ -779,6 +804,7 @@ function createStyles(colors: ColorTokens) {
     txAmount: {
       fontSize: 14,
       fontWeight: '600',
+      fontFamily: monoFont,
     },
     statusBadge: {
       paddingHorizontal: 8,

@@ -21,6 +21,7 @@ import { api } from '../lib/api';
 import { useTheme } from '../lib/theme-context';
 import { useAuth } from '../lib/auth-context';
 import { ColorTokens } from '../lib/colors';
+import { shadows, monoFont } from '../lib/shadows';
 
 const AFRICAN_COUNTRIES = ['NG', 'GH', 'KE', 'ZA', 'EG', 'RW', 'CI'];
 function isPaystackRegion(countryCode: string): boolean {
@@ -83,6 +84,9 @@ export default function WalletScreen() {
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [withdrawAccountNumber, setWithdrawAccountNumber] = useState('');
   const [withdrawBankName, setWithdrawBankName] = useState('');
+  const [withdrawBankCode, setWithdrawBankCode] = useState('');
+  const [showBankPicker, setShowBankPicker] = useState(false);
+  const [bankSearch, setBankSearch] = useState('');
 
   // Send state
   const [sendAmount, setSendAmount] = useState('');
@@ -113,6 +117,19 @@ export default function WalletScreen() {
   const countryCode = settings?.countryCode || 'US';
   const settingsCurrency = settings?.currency || 'USD';
   const isPaystack = isPaystackRegion(countryCode);
+
+  // Fetch banks list for Paystack countries (for withdraw bank picker)
+  const PAYSTACK_COUNTRY_MAP: Record<string, string> = { NG: 'nigeria', GH: 'ghana', KE: 'kenya', ZA: 'south africa' };
+  const { data: banksList } = useQuery({
+    queryKey: ['paystack-banks', countryCode],
+    queryFn: () => api.get<{ name: string; code: string; slug: string }[]>(`/api/paystack/banks?country=${PAYSTACK_COUNTRY_MAP[countryCode] || 'nigeria'}`),
+    enabled: isPaystack,
+    staleTime: 1000 * 60 * 30, // Cache for 30 minutes
+  });
+
+  const filteredBanks = (banksList || []).filter(b =>
+    b.name.toLowerCase().includes(bankSearch.toLowerCase())
+  );
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -239,13 +256,13 @@ export default function WalletScreen() {
 
   // Withdraw mutation
   const withdrawMutation = useMutation({
-    mutationFn: async (data: { amount: string; accountNumber: string; bankName: string }) => {
+    mutationFn: async (data: { amount: string; accountNumber: string; bankName: string; bankCode: string }) => {
       return api.post('/api/wallet/payout', {
         amount: parseFloat(data.amount),
         countryCode,
         recipientDetails: {
           accountNumber: data.accountNumber,
-          bankCode: '',
+          bankCode: data.bankCode,
           accountName: data.bankName,
         },
         reason: 'Wallet withdrawal',
@@ -259,11 +276,12 @@ export default function WalletScreen() {
       setWithdrawAmount('');
       setWithdrawAccountNumber('');
       setWithdrawBankName('');
+      setWithdrawBankCode('');
     },
     onError: (error: any) => {
       Alert.alert('Withdrawal Failed', error?.message || 'Failed to withdraw', [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Retry', onPress: () => withdrawMutation.mutate({ amount: withdrawAmount, accountNumber: withdrawAccountNumber.trim(), bankName: withdrawBankName.trim() }) },
+        { text: 'Retry', onPress: () => withdrawMutation.mutate({ amount: withdrawAmount, accountNumber: withdrawAccountNumber.trim(), bankName: withdrawBankName.trim(), bankCode: withdrawBankCode }) },
       ]);
     },
   });
@@ -336,15 +354,43 @@ export default function WalletScreen() {
       Alert.alert('Error', 'Please enter a valid amount greater than zero');
       return;
     }
+    if (parsed < 1) {
+      Alert.alert('Error', 'Minimum withdrawal amount is 1.00');
+      return;
+    }
     if (!withdrawAccountNumber.trim()) {
       Alert.alert('Error', 'Please enter your account number');
+      return;
+    }
+    if (isPaystack && !withdrawBankCode) {
+      Alert.alert('Error', 'Please select your bank');
+      return;
+    }
+    if (!isPaystack && !withdrawBankName.trim()) {
+      Alert.alert('Error', 'Please enter your bank name');
       return;
     }
     if (parsed > parseFloat(balance?.local || '0')) {
       Alert.alert('Error', 'Insufficient balance');
       return;
     }
-    withdrawMutation.mutate({ amount: withdrawAmount, accountNumber: withdrawAccountNumber.trim(), bankName: withdrawBankName.trim() });
+    // Confirmation dialog with fee info
+    Alert.alert(
+      'Confirm Withdrawal',
+      `Withdraw ${formatCurrency(parsed, localCurrency)} to ${withdrawBankName || 'your account'}?\n\nAccount: ${withdrawAccountNumber}\nProcessing time: 1-3 business days`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm',
+          onPress: () => withdrawMutation.mutate({
+            amount: withdrawAmount,
+            accountNumber: withdrawAccountNumber.trim(),
+            bankName: withdrawBankName.trim(),
+            bankCode: withdrawBankCode,
+          }),
+        },
+      ]
+    );
   };
 
   const handleSend = () => {
@@ -379,7 +425,16 @@ export default function WalletScreen() {
   const escrowBalance = balance ? parseFloat(balance.escrow) : 0;
   const localCurrency = balance?.localCurrency || 'USD';
 
-  const AMOUNT_PRESETS = [100, 500, 1000, 5000];
+  // Currency-aware amount presets
+  const AMOUNT_PRESETS = (() => {
+    switch (settingsCurrency) {
+      case 'NGN': return [1000, 5000, 10000, 50000];
+      case 'GHS': return [50, 100, 500, 1000];
+      case 'KES': return [500, 1000, 5000, 10000];
+      case 'ZAR': return [100, 500, 1000, 5000];
+      default: return [50, 100, 500, 1000]; // USD, GBP, EUR, etc.
+    }
+  })();
 
   return (
     <>
@@ -642,14 +697,25 @@ export default function WalletScreen() {
                 <Text style={styles.modalBalanceAmount}>{formatCurrency(localBalance, localCurrency)}</Text>
               </View>
 
-              <Text style={styles.modalInputLabel}>Bank Name</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="Enter bank name"
-                placeholderTextColor={colors.placeholderText}
-                value={withdrawBankName}
-                onChangeText={setWithdrawBankName}
-              />
+              <Text style={styles.modalInputLabel}>Bank</Text>
+              {isPaystack ? (
+                <TouchableOpacity
+                  style={styles.modalInput}
+                  onPress={() => setShowBankPicker(true)}
+                >
+                  <Text style={{ fontSize: 15, color: withdrawBankName ? colors.textPrimary : colors.placeholderText }}>
+                    {withdrawBankName || 'Select your bank'}
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Enter bank name"
+                  placeholderTextColor={colors.placeholderText}
+                  value={withdrawBankName}
+                  onChangeText={setWithdrawBankName}
+                />
+              )}
 
               <Text style={styles.modalInputLabel}>Account Number</Text>
               <TextInput
@@ -709,6 +775,57 @@ export default function WalletScreen() {
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Bank Picker Modal (Paystack countries) */}
+      <Modal visible={showBankPicker} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '80%', paddingBottom: 34 }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Bank</Text>
+              <TouchableOpacity onPress={() => { setShowBankPicker(false); setBankSearch(''); }}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: 12, paddingHorizontal: 14, borderWidth: 1, borderColor: colors.border, marginBottom: 12 }}>
+              <Ionicons name="search" size={18} color={colors.textTertiary} />
+              <TextInput
+                style={{ flex: 1, fontSize: 15, color: colors.textPrimary, paddingVertical: 12, marginLeft: 10 }}
+                placeholder="Search bank..."
+                placeholderTextColor={colors.placeholderText}
+                value={bankSearch}
+                onChangeText={setBankSearch}
+                autoFocus
+              />
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled" style={{ flex: 1 }}>
+              {filteredBanks.map((bank) => (
+                <TouchableOpacity
+                  key={bank.code}
+                  style={{ paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+                  onPress={() => {
+                    setWithdrawBankName(bank.name);
+                    setWithdrawBankCode(bank.code);
+                    setShowBankPicker(false);
+                    setBankSearch('');
+                  }}
+                >
+                  <Text style={{ fontSize: 15, color: colors.textPrimary, fontWeight: withdrawBankCode === bank.code ? '600' : '400' }}>
+                    {bank.name}
+                  </Text>
+                  {withdrawBankCode === bank.code && (
+                    <Ionicons name="checkmark-circle" size={22} color={colors.accent} />
+                  )}
+                </TouchableOpacity>
+              ))}
+              {filteredBanks.length === 0 && (
+                <Text style={{ textAlign: 'center', color: colors.textTertiary, padding: 20 }}>
+                  {bankSearch ? 'No banks found' : 'Loading banks...'}
+                </Text>
+              )}
+            </ScrollView>
+          </View>
+        </View>
       </Modal>
 
       {/* Send Money Modal */}
@@ -837,11 +954,10 @@ function createStyles(colors: ColorTokens) {
     mainBalanceCard: {
       backgroundColor: colors.surface,
       marginHorizontal: 20,
-      borderRadius: 16,
+      borderRadius: 20,
       padding: 24,
       marginBottom: 20,
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...shadows.card,
     },
     balanceLabel: {
       fontSize: 14,
@@ -852,6 +968,7 @@ function createStyles(colors: ColorTokens) {
       fontWeight: 'bold',
       color: colors.textPrimary,
       marginTop: 8,
+      fontFamily: monoFont,
     },
     currencyLabel: {
       fontSize: 12,
@@ -866,7 +983,7 @@ function createStyles(colors: ColorTokens) {
     subBalance: {
       flex: 1,
       backgroundColor: colors.background,
-      borderRadius: 12,
+      borderRadius: 16,
       padding: 12,
     },
     subBalanceLabel: {
@@ -878,6 +995,7 @@ function createStyles(colors: ColorTokens) {
       fontWeight: '600',
       color: colors.textSoft,
       marginTop: 4,
+      fontFamily: monoFont,
     },
     quickActions: {
       flexDirection: 'row',
@@ -888,9 +1006,10 @@ function createStyles(colors: ColorTokens) {
     actionButton: {
       flex: 1,
       backgroundColor: colors.surface,
-      borderRadius: 12,
+      borderRadius: 20,
       padding: 16,
       alignItems: 'center',
+      ...shadows.subtle,
     },
     actionIcon: {
       width: 48,
@@ -915,8 +1034,8 @@ function createStyles(colors: ColorTokens) {
       marginBottom: 16,
     },
     sectionTitle: {
-      fontSize: 18,
-      fontWeight: '600',
+      fontSize: 20,
+      fontWeight: '700',
       color: colors.textPrimary,
     },
     viewAll: {
@@ -927,11 +1046,10 @@ function createStyles(colors: ColorTokens) {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: colors.surface,
-      borderRadius: 12,
-      padding: 16,
+      borderRadius: 20,
+      padding: 20,
       marginBottom: 12,
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...shadows.subtle,
     },
     accountIconContainer: {
       width: 48,
@@ -954,7 +1072,7 @@ function createStyles(colors: ColorTokens) {
       fontSize: 12,
       color: colors.textSecondary,
       marginTop: 2,
-      fontFamily: 'monospace',
+      fontFamily: monoFont,
     },
     accountBank: {
       fontSize: 11,
@@ -968,6 +1086,7 @@ function createStyles(colors: ColorTokens) {
       fontSize: 14,
       fontWeight: '600',
       color: colors.textPrimary,
+      fontFamily: monoFont,
     },
     accountStatusBadge: {
       paddingHorizontal: 8,
@@ -990,9 +1109,10 @@ function createStyles(colors: ColorTokens) {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: colors.surface,
-      borderRadius: 12,
+      borderRadius: 20,
       padding: 16,
       marginBottom: 8,
+      ...shadows.subtle,
     },
     txIcon: {
       width: 40,
@@ -1022,6 +1142,7 @@ function createStyles(colors: ColorTokens) {
     txAmount: {
       fontSize: 14,
       fontWeight: '600',
+      fontFamily: monoFont,
     },
     txStatusBadge: {
       paddingHorizontal: 6,
@@ -1083,11 +1204,10 @@ function createStyles(colors: ColorTokens) {
     },
     modalBalanceCard: {
       backgroundColor: colors.background,
-      borderRadius: 12,
-      padding: 16,
+      borderRadius: 20,
+      padding: 20,
       marginBottom: 20,
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...shadows.subtle,
     },
     modalBalanceLabel: {
       fontSize: 12,
@@ -1098,6 +1218,7 @@ function createStyles(colors: ColorTokens) {
       fontSize: 24,
       fontWeight: 'bold',
       color: colors.textPrimary,
+      fontFamily: monoFont,
     },
     modalInputLabel: {
       fontSize: 14,
@@ -1108,12 +1229,11 @@ function createStyles(colors: ColorTokens) {
     },
     modalInput: {
       backgroundColor: colors.inputBackground,
-      borderRadius: 12,
+      borderRadius: 16,
       padding: 16,
       fontSize: 16,
       color: colors.inputText,
-      borderWidth: 1,
-      borderColor: colors.inputBorder,
+      ...shadows.subtle,
     },
     presetRow: {
       flexDirection: 'row',
@@ -1137,6 +1257,7 @@ function createStyles(colors: ColorTokens) {
       fontSize: 13,
       color: colors.textSecondary,
       fontWeight: '600',
+      fontFamily: monoFont,
     },
     presetTextActive: {
       color: colors.accent,
@@ -1149,8 +1270,7 @@ function createStyles(colors: ColorTokens) {
       borderRadius: 10,
       padding: 12,
       marginTop: 16,
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...shadows.subtle,
     },
     infoText: {
       fontSize: 13,
@@ -1170,7 +1290,7 @@ function createStyles(colors: ColorTokens) {
       gap: 8,
       paddingVertical: 12,
       paddingHorizontal: 16,
-      borderRadius: 10,
+      borderRadius: 14,
       borderWidth: 1.5,
       borderColor: colors.border,
       backgroundColor: colors.background,
@@ -1203,11 +1323,10 @@ function createStyles(colors: ColorTokens) {
     },
     summaryCard: {
       backgroundColor: colors.background,
-      borderRadius: 12,
-      padding: 16,
+      borderRadius: 20,
+      padding: 20,
       marginTop: 16,
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...shadows.card,
     },
     summaryRow: {
       flexDirection: 'row',
@@ -1222,6 +1341,7 @@ function createStyles(colors: ColorTokens) {
       fontSize: 14,
       fontWeight: '600',
       color: colors.textPrimary,
+      fontFamily: monoFont,
     },
     summaryTotal: {
       borderTopWidth: 1,
@@ -1238,6 +1358,7 @@ function createStyles(colors: ColorTokens) {
       fontSize: 14,
       fontWeight: 'bold',
       color: colors.accent,
+      fontFamily: monoFont,
     },
     modalActions: {
       flexDirection: 'row',
@@ -1247,7 +1368,7 @@ function createStyles(colors: ColorTokens) {
     modalCancelButton: {
       flex: 1,
       backgroundColor: colors.border,
-      borderRadius: 12,
+      borderRadius: 16,
       padding: 16,
       alignItems: 'center',
     },
@@ -1259,9 +1380,10 @@ function createStyles(colors: ColorTokens) {
     modalSubmitButton: {
       flex: 1,
       backgroundColor: colors.primary,
-      borderRadius: 12,
+      borderRadius: 16,
       padding: 16,
       alignItems: 'center',
+      ...shadows.card,
     },
     modalSubmitText: {
       color: colors.primaryForeground,

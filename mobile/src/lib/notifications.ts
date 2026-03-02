@@ -39,7 +39,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
       name: 'Default',
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#4F46E5',
+      lightColor: '#0EA5E9',
     });
   }
 
@@ -66,7 +66,7 @@ export async function savePushToken(token: string): Promise<void> {
   let retries = 0;
   while (retries < MAX_TOKEN_SYNC_RETRIES) {
     try {
-      await api.post('/api/user-profile/push-token', { token, platform: Platform.OS });
+      await api.post('/api/push-tokens', { token, platform: Platform.OS } as Record<string, unknown>);
       await AsyncStorage.setItem(TOKEN_SYNC_KEY, 'true');
       return;
     } catch (error) {

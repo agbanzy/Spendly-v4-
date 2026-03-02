@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,37 +10,23 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../lib/auth-context';
 import { useTheme } from '../lib/theme-context';
 import { ColorTokens } from '../lib/colors';
+import { shadows, monoFont } from '../lib/shadows';
 
 interface SignupScreenProps {
   navigation: any;
 }
 
-function getFirebaseErrorMessage(error: any): string {
-  const code = error?.code || '';
-  switch (code) {
-    case 'auth/email-already-in-use':
-      return 'An account with this email already exists.';
-    case 'auth/weak-password':
-      return 'Password is too weak. Use at least 6 characters.';
-    case 'auth/invalid-email':
-      return 'Please enter a valid email address.';
-    case 'auth/too-many-requests':
-      return 'Too many attempts. Please try again later.';
-    case 'auth/operation-not-allowed':
-      return 'Email/password accounts are not enabled.';
-    case 'auth/network-request-failed':
-      return 'Network error. Please check your internet connection.';
-    default:
-      if (error?.message?.includes('network') || error?.message?.includes('Network')) {
-        return 'Network error. Please check your internet connection.';
-      }
-      return 'Registration failed. Please try again.';
+function getAuthErrorMessage(error: any): string {
+  if (error?.message?.includes('network') || error?.message?.includes('Network')) {
+    return 'Network error. Please check your internet connection.';
   }
+  return error?.message || 'Registration failed. Please try again.';
 }
 
 export default function SignupScreen({ navigation }: SignupScreenProps) {
@@ -56,6 +42,16 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
   const { register } = useAuth();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+      Animated.spring(slideAnim, { toValue: 0, tension: 50, friction: 12, useNativeDriver: true }),
+    ]).start();
+  }, []);
 
   const handleSignup = async () => {
     if (!fullName.trim() || !email.trim() || !password || !confirmPassword) {
@@ -73,8 +69,20 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
       return;
     }
 
-    if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+    if (password.length < 8) {
+      Alert.alert('Error', 'Password must be at least 8 characters');
+      return;
+    }
+    if (!/[A-Z]/.test(password)) {
+      Alert.alert('Error', 'Password must contain at least one uppercase letter');
+      return;
+    }
+    if (!/[a-z]/.test(password)) {
+      Alert.alert('Error', 'Password must contain at least one lowercase letter');
+      return;
+    }
+    if (!/[0-9]/.test(password)) {
+      Alert.alert('Error', 'Password must contain at least one number');
       return;
     }
 
@@ -88,7 +96,7 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
       await register(email.trim(), password, fullName.trim());
     } catch (error: any) {
       console.error('Signup error:', error?.code, error?.message);
-      Alert.alert('Registration Failed', getFirebaseErrorMessage(error));
+      Alert.alert('Registration Failed', getAuthErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -102,6 +110,7 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
     >
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.content}>
+          <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
           <View style={styles.header}>
             <Text style={styles.logo}>Spendly</Text>
             <Text style={styles.subtitle}>Create your account</Text>
@@ -167,6 +176,9 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
                   />
                 </TouchableOpacity>
               </View>
+              <Text style={{ fontSize: 12, color: colors.textTertiary, marginTop: 6, lineHeight: 17 }}>
+                Min. 8 characters with uppercase, lowercase, and a number
+              </Text>
             </View>
 
             <View>
@@ -232,6 +244,7 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
               </Text>
             </TouchableOpacity>
           </View>
+          </Animated.View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -258,9 +271,10 @@ function createStyles(colors: ColorTokens) {
       marginBottom: 36,
     },
     logo: {
-      fontSize: 42,
-      fontWeight: 'bold',
+      fontSize: 48,
+      fontWeight: '800',
       color: colors.accent,
+      letterSpacing: -1,
     },
     subtitle: {
       fontSize: 16,
@@ -274,6 +288,7 @@ function createStyles(colors: ColorTokens) {
     },
     form: {
       gap: 16,
+      ...shadows.medium,
     },
     label: {
       fontSize: 14,
@@ -288,24 +303,22 @@ function createStyles(colors: ColorTokens) {
     },
     input: {
       backgroundColor: colors.inputBackground,
-      borderRadius: 12,
-      padding: 16,
+      borderRadius: 16,
+      padding: 18,
       fontSize: 16,
       color: colors.inputText,
-      borderWidth: 1,
-      borderColor: colors.inputBorder,
+      ...shadows.subtle,
     },
     passwordContainer: {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: colors.inputBackground,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: colors.inputBorder,
+      borderRadius: 16,
+      ...shadows.subtle,
     },
     passwordInput: {
       flex: 1,
-      padding: 16,
+      padding: 18,
       fontSize: 16,
       color: colors.inputText,
     },
@@ -344,10 +357,11 @@ function createStyles(colors: ColorTokens) {
     },
     button: {
       backgroundColor: colors.primary,
-      borderRadius: 12,
-      padding: 16,
+      borderRadius: 16,
+      padding: 18,
       alignItems: 'center',
       marginTop: 8,
+      ...shadows.card,
     },
     buttonDisabled: {
       opacity: 0.7,
@@ -355,7 +369,7 @@ function createStyles(colors: ColorTokens) {
     buttonText: {
       color: colors.primaryForeground,
       fontSize: 16,
-      fontWeight: '600',
+      fontWeight: '700',
     },
     linkButton: {
       alignItems: 'center',

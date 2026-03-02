@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { auth } from './firebase';
+import { getIdToken } from './cognito';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://spendlymanager.com';
 const ACTIVE_COMPANY_KEY = 'spendly_active_company_id';
@@ -7,7 +7,7 @@ const ACTIVE_COMPANY_KEY = 'spendly_active_company_id';
 let isRefreshing = false;
 let refreshPromise: Promise<string | null> | null = null;
 
-// Refresh the Firebase ID token and store it
+// Refresh the Cognito ID token via getSession() (auto-refreshes if expired)
 async function refreshAuthToken(): Promise<string | null> {
   if (isRefreshing && refreshPromise) {
     return refreshPromise;
@@ -15,10 +15,7 @@ async function refreshAuthToken(): Promise<string | null> {
   isRefreshing = true;
   refreshPromise = (async () => {
     try {
-      const user = auth.currentUser;
-      if (!user) return null;
-      const newToken = await user.getIdToken(true); // Force refresh
-      await AsyncStorage.setItem('authToken', newToken);
+      const newToken = await getIdToken();
       return newToken;
     } catch {
       return null;
@@ -43,10 +40,15 @@ export async function apiRequest<T>(
   endpoint: string,
   body?: Record<string, unknown>
 ): Promise<T> {
-  const [token, activeCompanyId] = await Promise.all([
+  let [token, activeCompanyId] = await Promise.all([
     AsyncStorage.getItem('authToken'),
     AsyncStorage.getItem(ACTIVE_COMPANY_KEY),
   ]);
+
+  // If no token in AsyncStorage, try refreshing from Cognito session
+  if (!token) {
+    token = await refreshAuthToken();
+  }
 
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -68,7 +70,7 @@ export async function apiRequest<T>(
   });
 
   // If 401, try refreshing the token once and retry
-  if (response.status === 401 && token) {
+  if (response.status === 401) {
     const newToken = await refreshAuthToken();
     if (newToken) {
       headers['Authorization'] = `Bearer ${newToken}`;

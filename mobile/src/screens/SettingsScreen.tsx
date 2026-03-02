@@ -22,6 +22,7 @@ import { ColorTokens } from '../lib/colors';
 import { api } from '../lib/api';
 import { isBiometricAvailable, getBiometricType, isBiometricEnabled, setBiometricEnabled, authenticateWithBiometric } from '../lib/biometric';
 import { isNotificationsEnabled, setNotificationsEnabled } from '../lib/notifications';
+import { shadows, monoFont } from '../lib/shadows';
 
 const CURRENCIES = ['USD', 'GBP', 'EUR', 'NGN', 'GHS', 'KES', 'ZAR', 'CAD', 'AUD'];
 const LANGUAGES = [
@@ -73,7 +74,7 @@ export default function SettingsScreen() {
 
   const updateProfileMutation = useMutation({
     mutationFn: (data: Record<string, unknown>) =>
-      api.patch(`/api/user-profile/${user?.uid}`, data),
+      api.patch(`/api/user-profile/${user?.sub}`, data),
     onSuccess: () => {
       Alert.alert('Success', 'Profile updated');
       setProfileModalVisible(false);
@@ -288,6 +289,11 @@ export default function SettingsScreen() {
             },
           })}
           {renderSettingsItem({
+            icon: 'id-card-outline',
+            label: 'Identity Verification',
+            onPress: () => navigation.navigate('KYC'),
+          })}
+          {renderSettingsItem({
             icon: 'shield-checkmark-outline',
             label: 'Security',
             onPress: () => setSecurityModalVisible(true),
@@ -462,7 +468,7 @@ export default function SettingsScreen() {
                       text: 'Send Email',
                       onPress: async () => {
                         try {
-                          const { resetPassword } = require('../lib/firebase');
+                          const { resetPassword } = require('../lib/cognito');
                           await resetPassword(user?.email || '');
                           Alert.alert('Sent', 'Check your email for the password reset link.');
                         } catch {
@@ -589,9 +595,10 @@ function createStyles(colors: ColorTokens) {
       alignItems: 'center',
       backgroundColor: colors.surface,
       marginHorizontal: 20,
-      borderRadius: 16,
+      borderRadius: 20,
       padding: 20,
       marginBottom: 24,
+      ...shadows.card,
     },
     avatar: {
       width: 56,
@@ -626,6 +633,7 @@ function createStyles(colors: ColorTokens) {
     },
     sectionTitle: {
       fontSize: 14,
+      fontWeight: '700',
       color: colors.textTertiary,
       marginBottom: 12,
       textTransform: 'uppercase',
@@ -633,8 +641,9 @@ function createStyles(colors: ColorTokens) {
     },
     sectionContent: {
       backgroundColor: colors.surface,
-      borderRadius: 16,
+      borderRadius: 20,
       overflow: 'hidden',
+      ...shadows.card,
     },
     settingsItem: {
       flexDirection: 'row',
@@ -682,16 +691,16 @@ function createStyles(colors: ColorTokens) {
       flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
       padding: 20, borderBottomWidth: 1, borderBottomColor: colors.border,
     },
-    modalTitle: { fontSize: 18, fontWeight: '600', color: colors.textPrimary },
+    modalTitle: { fontSize: 18, fontWeight: '700', color: colors.textPrimary },
     modalBody: { padding: 20 },
     modalLabel: { fontSize: 14, color: colors.textSecondary, marginBottom: 8, marginTop: 16 },
     modalInput: {
-      backgroundColor: colors.inputBackground, borderRadius: 12, padding: 16,
-      fontSize: 16, color: colors.inputText, borderWidth: 1, borderColor: colors.inputBorder,
+      backgroundColor: colors.inputBackground, borderRadius: 16, padding: 16,
+      fontSize: 16, color: colors.inputText, ...shadows.subtle,
     },
     modalSubmitButton: {
-      backgroundColor: colors.primary, borderRadius: 12, padding: 16,
-      alignItems: 'center', marginTop: 32,
+      backgroundColor: colors.primary, borderRadius: 16, padding: 16,
+      alignItems: 'center', marginTop: 32, ...shadows.card,
     },
     modalSubmitText: { color: colors.primaryForeground, fontSize: 16, fontWeight: '600' },
     // Security modal
@@ -707,7 +716,7 @@ function createStyles(colors: ColorTokens) {
     },
     pickerContent: {
       backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-      padding: 24, paddingBottom: 40, maxHeight: '60%',
+      padding: 24, paddingBottom: 40, maxHeight: '60%', ...shadows.medium,
     },
     pickerHeader: {
       flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
@@ -716,7 +725,7 @@ function createStyles(colors: ColorTokens) {
     pickerTitle: { fontSize: 20, fontWeight: 'bold', color: colors.textPrimary },
     pickerItem: {
       flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-      padding: 16, borderRadius: 12, marginBottom: 4,
+      padding: 16, borderRadius: 16, marginBottom: 4,
     },
     pickerItemActive: { backgroundColor: colors.accentBackground },
     pickerItemText: { fontSize: 16, color: colors.textPrimary },

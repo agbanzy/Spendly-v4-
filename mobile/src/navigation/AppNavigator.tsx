@@ -27,6 +27,10 @@ import AnalyticsScreen from '../screens/AnalyticsScreen';
 import ReportsScreen from '../screens/ReportsScreen';
 import WalletScreen from '../screens/WalletScreen';
 import VirtualAccountsScreen from '../screens/VirtualAccountsScreen';
+import NotificationsScreen from '../screens/NotificationsScreen';
+import OnboardingScreen from '../screens/OnboardingScreen';
+import KYCScreen from '../screens/KYCScreen';
+import InviteAcceptScreen from '../screens/InviteAcceptScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -121,6 +125,9 @@ function MoreStack() {
       <Stack.Screen name="Analytics" component={AnalyticsScreen} />
       <Stack.Screen name="Reports" component={ReportsScreen} />
       <Stack.Screen name="VirtualAccounts" component={VirtualAccountsScreen} options={{ title: 'Virtual Accounts' }} />
+      <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="KYC" component={KYCScreen} options={{ headerShown: false, title: 'Identity Verification' }} />
+      <Stack.Screen name="InviteAccept" component={InviteAcceptScreen} options={{ headerShown: false, title: 'Accept Invitation' }} />
     </Stack.Navigator>
   );
 }
@@ -135,8 +142,13 @@ function AuthStack() {
   );
 }
 
+function OnboardingWrapper() {
+  const { completeOnboarding } = useAuth();
+  return <OnboardingScreen onComplete={completeOnboarding} />;
+}
+
 export default function AppNavigator() {
-  const { user, loading } = useAuth();
+  const { user, loading, onboardingComplete } = useAuth();
   const { colors } = useTheme();
 
   if (loading) {
@@ -147,13 +159,27 @@ export default function AppNavigator() {
     );
   }
 
+  // Determine which screen tree to show
+  let content;
+  if (!user) {
+    content = <AuthStack />;
+  } else if (!onboardingComplete) {
+    content = (
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="Onboarding" component={OnboardingWrapper} />
+      </Stack.Navigator>
+    );
+  } else {
+    content = <MainTabs />;
+  }
+
   return (
     <>
       <SafeAreaView edges={['top']} style={{ backgroundColor: colors.background }}>
         <OfflineBanner />
       </SafeAreaView>
       <NavigationContainer>
-        {user ? <MainTabs /> : <AuthStack />}
+        {content}
       </NavigationContainer>
     </>
   );

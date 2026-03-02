@@ -67,7 +67,7 @@ const ACTIVE_COMPANY_KEY = 'spendly_active_company_id';
 const CompanyContext = createContext<CompanyContextValue | undefined>(undefined);
 
 export function CompanyProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, onboardingComplete } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -85,7 +85,8 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
   const canManageInvoices = isManager;
 
   const fetchCompanies = useCallback(async () => {
-    if (!user) {
+    // Don't fetch companies until user exists AND onboarding is complete
+    if (!user || !onboardingComplete) {
       setCompanies([]);
       setActiveCompanyId(null);
       setIsLoading(false);
@@ -110,7 +111,7 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [user]);
+  }, [user, onboardingComplete]);
 
   useEffect(() => {
     fetchCompanies();
