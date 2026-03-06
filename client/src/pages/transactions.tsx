@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
-import { apiRequest, queryClient, getAuthHeaders } from "@/lib/queryClient";
+import { apiRequest, queryClient, getAuthHeaders, sanitizeErrorMessage } from "@/lib/queryClient";
 import { getCurrencySymbol, formatCurrencyAmount, isPaystackRegion, PAYMENT_LIMITS } from "@/lib/constants";
 import { PinVerificationDialog, usePinVerification } from "@/components/pin-verification-dialog";
 import {
@@ -88,7 +88,7 @@ const QUICK_ACTIONS: QuickAction[] = [
   { id: "record", label: "Record", description: "Log a manual transaction", icon: FileText, gradient: "from-slate-500/15 to-slate-600/5", iconColor: "text-slate-600 dark:text-slate-400" },
 ];
 
-const INFLOW_TYPES = ["Deposit", "Funding", "Refund"];
+const INFLOW_TYPES = ["deposit", "funding", "refund"];
 
 export default function Transactions() {
   const { toast } = useToast();
@@ -195,7 +195,7 @@ export default function Transactions() {
 
   const totalInflow = transactions?.filter(tx => INFLOW_TYPES.includes(tx.type)).reduce((sum, tx) => sum + Number(tx.amount), 0) || 0;
   const totalOutflow = transactions?.filter(tx => !INFLOW_TYPES.includes(tx.type)).reduce((sum, tx) => sum + Number(tx.amount), 0) || 0;
-  const pendingCount = transactions?.filter(tx => tx.status === "Processing" || tx.status === "Pending").length || 0;
+  const pendingCount = transactions?.filter(tx => tx.status === "processing" || tx.status === "pending").length || 0;
 
   const fundWalletMutation = useMutation({
     mutationFn: async (amount: string) => {
@@ -249,7 +249,7 @@ export default function Transactions() {
       }
     },
     onError: (error: any) => {
-      toast({ title: "Failed to fund wallet", description: error.message, variant: "destructive" });
+      toast({ title: "Failed to fund wallet", description: sanitizeErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -281,7 +281,7 @@ export default function Transactions() {
       setTransferValidation(null);
     },
     onError: (error: any) => {
-      toast({ title: "Transfer failed", description: error.message, variant: "destructive" });
+      toast({ title: "Transfer failed", description: sanitizeErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -313,7 +313,7 @@ export default function Transactions() {
       setWithdrawValidation(null);
     },
     onError: (error: any) => {
-      toast({ title: "Withdrawal failed", description: error.message, variant: "destructive" });
+      toast({ title: "Withdrawal failed", description: sanitizeErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -684,6 +684,8 @@ export default function Transactions() {
               <Label>Amount ({currencySymbol})</Label>
               <Input
                 type="number"
+                min="0.01"
+                step="0.01"
                 value={fundingAmount}
                 onChange={(e) => setFundingAmount(e.target.value)}
                 placeholder="0.00"
@@ -779,6 +781,8 @@ export default function Transactions() {
               <Label>Amount ({currencySymbol})</Label>
               <Input
                 type="number"
+                min="0.01"
+                step="0.01"
                 value={transferData.amount}
                 onChange={(e) => setTransferData({ ...transferData, amount: e.target.value })}
                 placeholder="0.00"
@@ -891,6 +895,8 @@ export default function Transactions() {
               <Label>Amount ({currencySymbol})</Label>
               <Input
                 type="number"
+                min="0.01"
+                step="0.01"
                 value={withdrawAmount}
                 onChange={(e) => setWithdrawAmount(e.target.value)}
                 placeholder="0.00"
@@ -956,6 +962,8 @@ export default function Transactions() {
               <Label>Amount ({currencySymbol})</Label>
               <Input
                 type="number"
+                min="0.01"
+                step="0.01"
                 value={recordForm.amount}
                 onChange={(e) => setRecordForm({ ...recordForm, amount: e.target.value })}
                 placeholder="0.00"

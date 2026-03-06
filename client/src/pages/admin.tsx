@@ -63,7 +63,7 @@ export default function Admin() {
 
   const stats = {
     totalUsers: teamMembers?.length || 0,
-    activeUsers: teamMembers?.filter(m => m.status === 'Active').length || 0,
+    activeUsers: teamMembers?.filter(m => m.status === 'active').length || 0,
     pendingExpenses: expenses?.filter(e => e.status === 'PENDING').length || 0,
     totalExpenseAmount: expenses?.reduce((sum, e) => sum + Number(e.amount), 0) || 0,
     recentLogs: auditLogs?.slice(0, 5) || [],

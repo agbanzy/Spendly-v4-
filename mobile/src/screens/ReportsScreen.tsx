@@ -17,6 +17,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useTheme } from '../lib/theme-context';
 import { ColorTokens } from '../lib/colors';
+import { shadows, monoFont } from '../lib/shadows';
 
 interface Report {
   id: number;
@@ -461,8 +462,7 @@ function createStyles(colors: ColorTokens) {
       borderRadius: 20,
       paddingHorizontal: 16,
       paddingVertical: 8,
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...shadows.subtle,
     },
     filterChipActive: {
       backgroundColor: colors.primary,
@@ -487,18 +487,19 @@ function createStyles(colors: ColorTokens) {
       marginBottom: 16,
     },
     sectionTitle: {
-      fontSize: 18,
-      fontWeight: '600',
+      fontSize: 20,
+      fontWeight: '700',
       color: colors.textPrimary,
     },
     generateButton: {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: colors.primary,
-      borderRadius: 8,
+      borderRadius: 12,
       paddingHorizontal: 12,
       paddingVertical: 6,
       gap: 4,
+      ...shadows.card,
     },
     generateButtonText: {
       fontSize: 13,
@@ -509,11 +510,10 @@ function createStyles(colors: ColorTokens) {
       flexDirection: 'row',
       alignItems: 'flex-start',
       backgroundColor: colors.surface,
-      borderRadius: 12,
-      padding: 16,
+      borderRadius: 20,
+      padding: 20,
       marginBottom: 8,
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...shadows.card,
     },
     reportIcon: {
       width: 40,
@@ -587,8 +587,7 @@ function createStyles(colors: ColorTokens) {
       backgroundColor: colors.background,
       alignItems: 'center',
       justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...shadows.subtle,
     },
     deleteBtn: {
       width: 32,
@@ -597,8 +596,7 @@ function createStyles(colors: ColorTokens) {
       backgroundColor: colors.background,
       alignItems: 'center',
       justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...shadows.subtle,
     },
     emptyContainer: {
       alignItems: 'center',
@@ -626,9 +624,7 @@ function createStyles(colors: ColorTokens) {
       borderTopRightRadius: 24,
       padding: 24,
       paddingBottom: 40,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderBottomWidth: 0,
+      ...shadows.medium,
     },
     modalHeader: {
       flexDirection: 'row',
@@ -650,13 +646,12 @@ function createStyles(colors: ColorTokens) {
     },
     textInput: {
       backgroundColor: colors.background,
-      borderRadius: 10,
+      borderRadius: 14,
       padding: 14,
       fontSize: 15,
       color: colors.inputText,
-      borderWidth: 1,
-      borderColor: colors.inputBorder,
       marginBottom: 16,
+      ...shadows.subtle,
     },
     typeSelector: {
       flexDirection: 'row',
@@ -670,10 +665,9 @@ function createStyles(colors: ColorTokens) {
       gap: 6,
       paddingHorizontal: 14,
       paddingVertical: 8,
-      borderRadius: 8,
+      borderRadius: 12,
       backgroundColor: colors.background,
-      borderWidth: 1,
-      borderColor: colors.inputBorder,
+      ...shadows.subtle,
     },
     typeSelectorItemActive: {
       backgroundColor: colors.background,
@@ -695,10 +689,9 @@ function createStyles(colors: ColorTokens) {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: colors.background,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: colors.inputBorder,
+      borderRadius: 14,
       paddingHorizontal: 12,
+      ...shadows.subtle,
     },
     dateIcon: {
       marginRight: 8,
@@ -718,10 +711,11 @@ function createStyles(colors: ColorTokens) {
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: colors.primary,
-      borderRadius: 12,
+      borderRadius: 16,
       paddingVertical: 14,
       gap: 8,
       marginTop: 8,
+      ...shadows.card,
     },
     submitButtonDisabled: {
       opacity: 0.6,

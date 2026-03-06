@@ -15,7 +15,7 @@ import {
   type VirtualAccount, type CompanyBalances, type CompanySettings, type AIInsight,
   type UserProfile, type InsertUserProfile, type KycSubmission, type InsertKycSubmission,
   type Notification, type InsertNotification, type NotificationSettings, type InsertNotificationSettings,
-  type PushToken, type InsertPushToken, type Department,
+  type PushToken, type InsertPushToken, type DepartmentRecord,
   type AuditLog, type OrganizationSettings, type SystemSettings, type RolePermissions,
   type Wallet, type InsertWallet, type WalletTransaction, type InsertWalletTransaction,
   type ExchangeRate, type InsertExchangeRate, type ExchangeRateSettings,
@@ -29,6 +29,9 @@ import {
   type CompanyInvitation, type InsertCompanyInvitation,
   type AnalyticsSnapshot, type InsertAnalyticsSnapshot,
   type BusinessInsight, type InsertBusinessInsight,
+  processedWebhooks,
+  type CreateTransaction, type CreateExpense, type CreateBill,
+  type CreatePayroll, type CreateTeamMember,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -38,20 +41,20 @@ export interface IStorage {
   
   getExpenses(companyId?: string): Promise<Expense[]>;
   getExpense(id: string): Promise<Expense | undefined>;
-  createExpense(expense: Omit<Expense, 'id'>): Promise<Expense>;
+  createExpense(expense: CreateExpense): Promise<Expense>;
   updateExpense(id: string, expense: Partial<Omit<Expense, 'id'>>): Promise<Expense | undefined>;
   deleteExpense(id: string): Promise<boolean>;
   
-  getTransactions(): Promise<Transaction[]>;
+  getTransactions(companyId?: string): Promise<Transaction[]>;
   getTransaction(id: string): Promise<Transaction | undefined>;
   getTransactionByReference(reference: string): Promise<Transaction | undefined>;
-  createTransaction(transaction: Omit<Transaction, 'id'>): Promise<Transaction>;
+  createTransaction(transaction: CreateTransaction): Promise<Transaction>;
   updateTransaction(id: string, transaction: Partial<Omit<Transaction, 'id'>>): Promise<Transaction | undefined>;
   deleteTransaction(id: string): Promise<boolean>;
   
   getBills(companyId?: string): Promise<Bill[]>;
   getBill(id: string): Promise<Bill | undefined>;
-  createBill(bill: Omit<Bill, 'id'>): Promise<Bill>;
+  createBill(bill: CreateBill): Promise<Bill>;
   updateBill(id: string, bill: Partial<Omit<Bill, 'id'>>): Promise<Bill | undefined>;
   deleteBill(id: string): Promise<boolean>;
   
@@ -67,25 +70,26 @@ export interface IStorage {
   updateCard(id: string, card: Partial<Omit<VirtualCard, 'id'>>): Promise<VirtualCard | undefined>;
   deleteCard(id: string): Promise<boolean>;
   
-  getCardTransactions(cardId: string): Promise<CardTransaction[]>;
+  getCardTransactions(cardId: string, companyId?: string): Promise<CardTransaction[]>;
   createCardTransaction(tx: Omit<CardTransaction, 'id'>): Promise<CardTransaction>;
   
   getVirtualAccounts(companyId?: string): Promise<VirtualAccount[]>;
   getVirtualAccount(id: string): Promise<VirtualAccount | undefined>;
   createVirtualAccount(account: Omit<VirtualAccount, 'id'>): Promise<VirtualAccount>;
   updateVirtualAccount(id: string, data: Partial<VirtualAccount>): Promise<VirtualAccount | undefined>;
-  
-  getDepartments(companyId?: string): Promise<Department[]>;
-  getDepartment(id: string): Promise<Department | undefined>;
-  createDepartment(dept: Omit<Department, 'id'>): Promise<Department>;
-  updateDepartment(id: string, dept: Partial<Omit<Department, 'id'>>): Promise<Department | undefined>;
+  deleteVirtualAccount(id: string): Promise<boolean>;
+
+  getDepartments(companyId?: string): Promise<DepartmentRecord[]>;
+  getDepartment(id: string): Promise<DepartmentRecord | undefined>;
+  createDepartment(dept: Omit<DepartmentRecord, 'id'>): Promise<DepartmentRecord>;
+  updateDepartment(id: string, dept: Partial<Omit<DepartmentRecord, 'id'>>): Promise<DepartmentRecord | undefined>;
   deleteDepartment(id: string): Promise<boolean>;
 
   getTeam(companyId?: string): Promise<TeamMember[]>;
   getTeamMember(id: string): Promise<TeamMember | undefined>;
   getTeamMemberByEmail(email: string): Promise<TeamMember | undefined>;
   getTeamMembersByEmail(email: string): Promise<TeamMember[]>;
-  createTeamMember(member: Omit<TeamMember, 'id'>): Promise<TeamMember>;
+  createTeamMember(member: CreateTeamMember): Promise<TeamMember>;
   updateTeamMember(id: string, member: Partial<Omit<TeamMember, 'id'>>): Promise<TeamMember | undefined>;
   deleteTeamMember(id: string): Promise<boolean>;
   
@@ -93,25 +97,27 @@ export interface IStorage {
   getDailyTransferTotal(userId: string): Promise<number>;
   
   // Webhook idempotency
-  isWebhookProcessed(reference: string): Promise<boolean>;
-  markWebhookProcessed(reference: string, provider: string): Promise<void>;
+  isWebhookProcessed(eventId: string): Promise<boolean>;
+  markWebhookProcessed(eventId: string, provider: string, eventType?: string, metadata?: any): Promise<void>;
   
   // Transaction status updates
   updateTransactionByReference(reference: string, data: Partial<Transaction>): Promise<Transaction | undefined>;
   
-  getBalances(): Promise<CompanyBalances>;
-  updateBalances(balances: Partial<CompanyBalances>): Promise<CompanyBalances>;
+  getBalances(companyId?: string): Promise<CompanyBalances>;
+  updateBalances(balances: Partial<CompanyBalances>, companyId?: string): Promise<CompanyBalances>;
   
   getInsights(): Promise<AIInsight[]>;
   
   getPayroll(companyId?: string): Promise<PayrollEntry[]>;
   getPayrollEntry(id: string): Promise<PayrollEntry | undefined>;
-  createPayrollEntry(entry: Omit<PayrollEntry, 'id'>): Promise<PayrollEntry>;
+  createPayrollEntry(entry: CreatePayroll): Promise<PayrollEntry>;
   updatePayrollEntry(id: string, entry: Partial<Omit<PayrollEntry, 'id'>>): Promise<PayrollEntry | undefined>;
   deletePayrollEntry(id: string): Promise<boolean>;
   
   getInvoices(companyId?: string): Promise<Invoice[]>;
   getInvoice(id: string): Promise<Invoice | undefined>;
+  getInvoicePublic(id: string): Promise<Partial<Invoice> | undefined>;
+  getNextInvoiceNumber(year: number): Promise<string>;
   createInvoice(invoice: Omit<Invoice, 'id'>): Promise<Invoice>;
   updateInvoice(id: string, invoice: Partial<Omit<Invoice, 'id'>>): Promise<Invoice | undefined>;
   deleteInvoice(id: string): Promise<boolean>;
@@ -121,6 +127,7 @@ export interface IStorage {
   createVendor(vendor: Omit<Vendor, 'id'>): Promise<Vendor>;
   updateVendor(id: string, vendor: Partial<Omit<Vendor, 'id'>>): Promise<Vendor | undefined>;
   deleteVendor(id: string): Promise<boolean>;
+  getVendorStats(vendorId: string): Promise<{ totalPaid: number; pendingPayments: number }>;
   
   getReports(companyId?: string): Promise<Report[]>;
   getReport(id: string): Promise<Report | undefined>;
@@ -130,12 +137,14 @@ export interface IStorage {
   
   getSettings(): Promise<CompanySettings>;
   updateSettings(settings: Partial<CompanySettings>): Promise<CompanySettings>;
+  getCompanyAsSettings(companyId: string): Promise<CompanySettings | null>;
+  updateCompanyAsSettings(companyId: string, settings: Partial<CompanySettings>): Promise<CompanySettings | null>;
   
   // KYC & User Profiles
-  getUserProfile(firebaseUid: string): Promise<UserProfile | undefined>;
+  getUserProfileByCognitoSub(cognitoSub: string): Promise<UserProfile | undefined>;
   getUserProfileByEmail(email: string): Promise<UserProfile | undefined>;
   createUserProfile(profile: InsertUserProfile): Promise<UserProfile>;
-  updateUserProfile(firebaseUid: string, profile: Partial<UserProfile>): Promise<UserProfile | undefined>;
+  updateUserProfile(cognitoSub: string, profile: Partial<UserProfile>): Promise<UserProfile | undefined>;
   
   getKycSubmission(userProfileId: string): Promise<KycSubmission | undefined>;
   createKycSubmission(submission: InsertKycSubmission): Promise<KycSubmission>;
@@ -207,7 +216,7 @@ export interface IStorage {
   deletePayoutDestination(id: string): Promise<boolean>;
   
   // Payouts
-  getPayouts(filters?: { recipientType?: string; recipientId?: string; status?: string; providerReference?: string }): Promise<Payout[]>;
+  getPayouts(filters?: { recipientType?: string; recipientId?: string; status?: string; providerReference?: string; companyId?: string }): Promise<Payout[]>;
   getPayout(id: string): Promise<Payout | undefined>;
   createPayout(payout: InsertPayout): Promise<Payout>;
   updatePayout(id: string, data: Partial<Payout>): Promise<Payout | undefined>;
@@ -250,6 +259,7 @@ export interface IStorage {
   getCompanyMembers(companyId: string): Promise<CompanyMember[]>;
   getCompanyMember(companyId: string, userId: string): Promise<CompanyMember | undefined>;
   getCompanyMemberByEmail(companyId: string, email: string): Promise<CompanyMember | undefined>;
+  getCompanyMembersByEmail(email: string): Promise<CompanyMember[]>;
   createCompanyMember(member: InsertCompanyMember): Promise<CompanyMember>;
   updateCompanyMember(id: string, data: Partial<CompanyMember>): Promise<CompanyMember | undefined>;
   removeCompanyMember(id: string): Promise<boolean>;
@@ -322,7 +332,7 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async createExpense(expense: Omit<Expense, 'id'>): Promise<Expense> {
+  async createExpense(expense: CreateExpense): Promise<Expense> {
     const result = await db.insert(expenses).values(expense as any).returning();
     return result[0];
   }
@@ -338,7 +348,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== TRANSACTIONS ====================
-  async getTransactions(): Promise<Transaction[]> {
+  async getTransactions(companyId?: string): Promise<Transaction[]> {
+    if (companyId) {
+      const result = await db.select().from(transactions)
+        .where(eq(transactions.companyId, companyId))
+        .orderBy(desc(transactions.date));
+      return result;
+    }
     const result = await db.select().from(transactions).orderBy(desc(transactions.date));
     return result;
   }
@@ -350,12 +366,12 @@ export class DatabaseStorage implements IStorage {
 
   async getTransactionByReference(reference: string): Promise<Transaction | undefined> {
     const result = await db.select().from(transactions).where(
-      sql`${transactions.description} LIKE ${'%' + reference + '%'}`
+      eq(transactions.reference, reference)
     ).limit(1);
     return result[0];
   }
 
-  async createTransaction(transaction: Omit<Transaction, 'id'>): Promise<Transaction> {
+  async createTransaction(transaction: CreateTransaction): Promise<Transaction> {
     const result = await db.insert(transactions).values(transaction as any).returning();
     return result[0];
   }
@@ -387,7 +403,7 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async createBill(bill: Omit<Bill, 'id'>): Promise<Bill> {
+  async createBill(bill: CreateBill): Promise<Bill> {
     const result = await db.insert(bills).values(bill as any).returning();
     return result[0];
   }
@@ -465,7 +481,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== CARD TRANSACTIONS ====================
-  async getCardTransactions(cardId: string): Promise<CardTransaction[]> {
+  async getCardTransactions(cardId: string, companyId?: string): Promise<CardTransaction[]> {
+    if (companyId) {
+      const result = await db.select().from(cardTransactions)
+        .where(and(
+          eq(cardTransactions.cardId, cardId),
+          eq(cardTransactions.companyId, companyId)
+        ))
+        .orderBy(desc(cardTransactions.date));
+      return result;
+    }
     const result = await db.select().from(cardTransactions)
       .where(eq(cardTransactions.cardId, cardId))
       .orderBy(desc(cardTransactions.date));
@@ -503,8 +528,13 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  async deleteVirtualAccount(id: string): Promise<boolean> {
+    const result = await db.delete(virtualAccounts).where(eq(virtualAccounts.id, id)).returning();
+    return result.length > 0;
+  }
+
   // ==================== DEPARTMENTS ====================
-  async getDepartments(companyId?: string): Promise<Department[]> {
+  async getDepartments(companyId?: string): Promise<DepartmentRecord[]> {
     if (companyId) {
       const result = await db.select().from(departments)
         .where(eq(departments.companyId, companyId));
@@ -514,17 +544,17 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async getDepartment(id: string): Promise<Department | undefined> {
+  async getDepartment(id: string): Promise<DepartmentRecord | undefined> {
     const result = await db.select().from(departments).where(eq(departments.id, id)).limit(1);
     return result[0];
   }
 
-  async createDepartment(dept: Omit<Department, 'id'>): Promise<Department> {
+  async createDepartment(dept: Omit<DepartmentRecord, 'id'>): Promise<DepartmentRecord> {
     const result = await db.insert(departments).values(dept as any).returning();
     return result[0];
   }
 
-  async updateDepartment(id: string, dept: Partial<Omit<Department, 'id'>>): Promise<Department | undefined> {
+  async updateDepartment(id: string, dept: Partial<Omit<DepartmentRecord, 'id'>>): Promise<DepartmentRecord | undefined> {
     const result = await db.update(departments).set(dept as any).where(eq(departments.id, id)).returning();
     return result[0];
   }
@@ -550,7 +580,7 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async createTeamMember(member: Omit<TeamMember, 'id'>): Promise<TeamMember> {
+  async createTeamMember(member: CreateTeamMember): Promise<TeamMember> {
     const result = await db.insert(teamMembers).values(member as any).returning();
     return result[0];
   }
@@ -604,17 +634,28 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== WEBHOOK IDEMPOTENCY ====================
-  async isWebhookProcessed(reference: string): Promise<boolean> {
-    // Check in transactions table for existing reference
-    const result = await db.select().from(transactions)
-      .where(eq(transactions.description, reference))
+  async isWebhookProcessed(eventId: string): Promise<boolean> {
+    const result = await db.select({ id: processedWebhooks.id })
+      .from(processedWebhooks)
+      .where(eq(processedWebhooks.eventId, eventId))
       .limit(1);
     return result.length > 0;
   }
 
-  async markWebhookProcessed(reference: string, provider: string): Promise<void> {
-    // This is handled by creating the transaction - using description as reference marker
-    console.log(`Webhook ${reference} from ${provider} marked as processed`);
+  async markWebhookProcessed(eventId: string, provider: string, eventType: string = 'unknown', metadata?: any): Promise<void> {
+    try {
+      await db.insert(processedWebhooks).values({
+        eventId,
+        provider,
+        eventType,
+        metadata: metadata || null,
+      }).onConflictDoNothing();
+    } catch (error: any) {
+      // If unique constraint violation, it's already processed — that's fine
+      if (error.code !== '23505') {
+        throw error;
+      }
+    }
   }
 
   async updateTransactionByReference(reference: string, data: Partial<Transaction>): Promise<Transaction | undefined> {
@@ -626,27 +667,100 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== BALANCES ====================
-  async getBalances(): Promise<CompanyBalances> {
-    const result = await db.select().from(companyBalances).where(eq(companyBalances.id, 1)).limit(1);
+  async getBalances(companyId?: string): Promise<CompanyBalances> {
+    // Multi-tenant: query by companyId if provided, else fallback to first row
+    if (companyId) {
+      const result = await db.select().from(companyBalances).where(eq(companyBalances.companyId, companyId)).limit(1);
+      if (result.length === 0) {
+        const newBalances = await db.insert(companyBalances).values({
+          companyId,
+          local: '0',
+          usd: '0',
+          escrow: '0',
+          localCurrency: 'USD'
+        } as any).returning();
+        return newBalances[0];
+      }
+      return result[0];
+    }
+    // Legacy fallback: return first row
+    const result = await db.select().from(companyBalances).limit(1);
     if (result.length === 0) {
       const newBalances = await db.insert(companyBalances).values({
-        id: 1,
+        companyId: 'default',
         local: '0',
         usd: '0',
         escrow: '0',
         localCurrency: 'USD'
-      }).returning();
+      } as any).returning();
       return newBalances[0];
     }
     return result[0];
   }
 
-  async updateBalances(balancesData: Partial<CompanyBalances>): Promise<CompanyBalances> {
-    const result = await db.update(companyBalances).set(balancesData as any).where(eq(companyBalances.id, 1)).returning();
-    if (result.length === 0) {
-      return this.getBalances();
+  async updateBalances(balancesData: Partial<CompanyBalances>, companyId?: string): Promise<CompanyBalances> {
+    if (companyId) {
+      const result = await db.update(companyBalances).set(balancesData as any).where(eq(companyBalances.companyId, companyId)).returning();
+      if (result.length === 0) {
+        return this.getBalances(companyId);
+      }
+      return result[0];
     }
-    return result[0];
+    // Legacy fallback
+    const all = await db.select().from(companyBalances).limit(1);
+    if (all.length > 0) {
+      const result = await db.update(companyBalances).set(balancesData as any).where(eq(companyBalances.id, all[0].id)).returning();
+      return result[0] || all[0];
+    }
+    return this.getBalances();
+  }
+
+  async atomicCreditBalance(field: 'local' | 'usd' | 'escrow', amount: number, companyId?: string): Promise<CompanyBalances> {
+    if (companyId) {
+      const result = await db.execute(
+        sql`UPDATE company_balances SET ${sql.raw(field)} = CAST(${sql.raw(field)} AS DECIMAL(20,2)) + ${amount} WHERE company_id = ${companyId} RETURNING *`
+      );
+      if (!result.rows || result.rows.length === 0) {
+        // Auto-create balance row for this company, then retry
+        await this.getBalances(companyId);
+        const retry = await db.execute(
+          sql`UPDATE company_balances SET ${sql.raw(field)} = CAST(${sql.raw(field)} AS DECIMAL(20,2)) + ${amount} WHERE company_id = ${companyId} RETURNING *`
+        );
+        if (!retry.rows || retry.rows.length === 0) {
+          throw new Error('Balance update failed');
+        }
+        return retry.rows[0] as CompanyBalances;
+      }
+      return result.rows[0] as CompanyBalances;
+    }
+    // Legacy fallback
+    const result = await db.execute(
+      sql`UPDATE company_balances SET ${sql.raw(field)} = CAST(${sql.raw(field)} AS DECIMAL(20,2)) + ${amount} WHERE id = (SELECT id FROM company_balances LIMIT 1) RETURNING *`
+    );
+    if (!result.rows || result.rows.length === 0) {
+      throw new Error('Balance update failed');
+    }
+    return result.rows[0] as CompanyBalances;
+  }
+
+  async atomicDebitBalance(field: 'local' | 'usd' | 'escrow', amount: number, companyId?: string): Promise<CompanyBalances> {
+    if (companyId) {
+      const result = await db.execute(
+        sql`UPDATE company_balances SET ${sql.raw(field)} = CAST(${sql.raw(field)} AS DECIMAL(20,2)) - ${amount} WHERE company_id = ${companyId} AND CAST(${sql.raw(field)} AS DECIMAL(20,2)) >= ${amount} RETURNING *`
+      );
+      if (!result.rows || result.rows.length === 0) {
+        throw new Error('Insufficient balance or balance update failed');
+      }
+      return result.rows[0] as CompanyBalances;
+    }
+    // Legacy fallback
+    const result = await db.execute(
+      sql`UPDATE company_balances SET ${sql.raw(field)} = CAST(${sql.raw(field)} AS DECIMAL(20,2)) - ${amount} WHERE id = (SELECT id FROM company_balances LIMIT 1) AND CAST(${sql.raw(field)} AS DECIMAL(20,2)) >= ${amount} RETURNING *`
+    );
+    if (!result.rows || result.rows.length === 0) {
+      throw new Error('Insufficient balance or balance update failed');
+    }
+    return result.rows[0] as CompanyBalances;
   }
 
   // ==================== INSIGHTS ====================
@@ -728,7 +842,7 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async createPayrollEntry(entry: Omit<PayrollEntry, 'id'>): Promise<PayrollEntry> {
+  async createPayrollEntry(entry: CreatePayroll): Promise<PayrollEntry> {
     const result = await db.insert(payrollEntries).values(entry as any).returning();
     return result[0];
   }
@@ -758,6 +872,39 @@ export class DatabaseStorage implements IStorage {
   async getInvoice(id: string): Promise<Invoice | undefined> {
     const result = await db.select().from(invoices).where(eq(invoices.id, id)).limit(1);
     return result[0];
+  }
+
+  async getInvoicePublic(id: string): Promise<Partial<Invoice> | undefined> {
+    const result = await db.select({
+      id: invoices.id,
+      invoiceNumber: invoices.invoiceNumber,
+      client: invoices.client,
+      amount: invoices.amount,
+      subtotal: invoices.subtotal,
+      taxRate: invoices.taxRate,
+      taxAmount: invoices.taxAmount,
+      currency: invoices.currency,
+      dueDate: invoices.dueDate,
+      issuedDate: invoices.issuedDate,
+      status: invoices.status,
+      items: invoices.items,
+      notes: invoices.notes,
+    }).from(invoices).where(eq(invoices.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getNextInvoiceNumber(year: number): Promise<string> {
+    const prefix = `INV-${year}-`;
+    const result = await db.select({ invoiceNumber: invoices.invoiceNumber })
+      .from(invoices)
+      .where(sql`${invoices.invoiceNumber} LIKE ${prefix + '%'}`)
+      .orderBy(desc(invoices.invoiceNumber))
+      .limit(1);
+    if (result.length === 0) {
+      return `${prefix}001`;
+    }
+    const seq = parseInt(result[0].invoiceNumber.replace(prefix, ''), 10);
+    return `${prefix}${String(seq + 1).padStart(3, '0')}`;
   }
 
   async createInvoice(invoice: Omit<Invoice, 'id'>): Promise<Invoice> {
@@ -804,6 +951,20 @@ export class DatabaseStorage implements IStorage {
   async deleteVendor(id: string): Promise<boolean> {
     const result = await db.delete(vendors).where(eq(vendors.id, id)).returning();
     return result.length > 0;
+  }
+
+  // Compute vendor payment aggregates from payouts table (replaces stale totalPaid/pendingPayments)
+  async getVendorStats(vendorId: string): Promise<{ totalPaid: number; pendingPayments: number }> {
+    const paidResult = await db.execute(
+      sql`SELECT COALESCE(SUM(CAST(amount AS DECIMAL(12,2))), 0) as total FROM payouts WHERE recipient_id = ${vendorId} AND status = 'completed'`
+    );
+    const pendingResult = await db.execute(
+      sql`SELECT COALESCE(SUM(CAST(amount AS DECIMAL(12,2))), 0) as total FROM payouts WHERE recipient_id = ${vendorId} AND status IN ('pending', 'processing')`
+    );
+    return {
+      totalPaid: parseFloat(String(paidResult.rows?.[0]?.total || '0')),
+      pendingPayments: parseFloat(String(pendingResult.rows?.[0]?.total || '0')),
+    };
   }
 
   // ==================== REPORTS ====================
@@ -858,9 +1019,104 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  // Map a Company row into the CompanySettings shape the client expects
+  private companyToSettings(company: any): CompanySettings {
+    return {
+      id: 1, // Client expects numeric id
+      companyName: company.name || '',
+      companyEmail: company.email || '',
+      companyPhone: company.phone || '',
+      companyAddress: company.address || '',
+      currency: company.currency || 'USD',
+      timezone: company.timezone || 'America/Los_Angeles',
+      fiscalYearStart: company.fiscalYearStart || 'January',
+      dateFormat: company.dateFormat || 'MM/DD/YYYY',
+      language: company.language || 'en',
+      notificationsEnabled: company.notificationsEnabled ?? true,
+      twoFactorEnabled: company.twoFactorEnabled ?? false,
+      autoApproveBelow: company.autoApproveBelow || '100',
+      requireReceipts: company.requireReceipts ?? true,
+      expenseCategories: company.expenseCategories || ['Software', 'Travel', 'Office', 'Marketing', 'Food', 'Equipment', 'Utilities', 'Legal', 'Other'],
+      countryCode: company.countryCode || company.country || 'US',
+      region: company.region || 'North America',
+      paymentProvider: company.paymentProvider || 'stripe',
+      paystackEnabled: company.paystackEnabled ?? true,
+      stripeEnabled: company.stripeEnabled ?? true,
+      companyLogo: company.logo || null,
+      companyTagline: company.tagline || null,
+      primaryColor: company.primaryColor || '#4f46e5',
+      secondaryColor: company.secondaryColor || '#10b981',
+      industry: company.industry || null,
+      companySize: company.size || null,
+      taxId: company.taxId || null,
+      registrationNumber: company.registrationNumber || null,
+      website: company.website || null,
+      invoicePrefix: company.invoicePrefix || 'INV',
+      invoiceFooter: company.invoiceFooter || null,
+      invoiceTerms: company.invoiceTerms || 'Payment due within 30 days',
+      showLogoOnInvoice: company.showLogoOnInvoice ?? true,
+      showLogoOnReceipts: company.showLogoOnReceipts ?? true,
+    } as CompanySettings;
+  }
+
+  // Map CompanySettings fields back to Company columns
+  private settingsToCompany(settings: Partial<CompanySettings>): Record<string, any> {
+    const map: Record<string, any> = {};
+    if (settings.companyName !== undefined) map.name = settings.companyName;
+    if (settings.companyEmail !== undefined) map.email = settings.companyEmail;
+    if (settings.companyPhone !== undefined) map.phone = settings.companyPhone;
+    if (settings.companyAddress !== undefined) map.address = settings.companyAddress;
+    if (settings.currency !== undefined) map.currency = settings.currency;
+    if (settings.timezone !== undefined) map.timezone = settings.timezone;
+    if (settings.fiscalYearStart !== undefined) map.fiscalYearStart = settings.fiscalYearStart;
+    if (settings.dateFormat !== undefined) map.dateFormat = settings.dateFormat;
+    if (settings.language !== undefined) map.language = settings.language;
+    if (settings.notificationsEnabled !== undefined) map.notificationsEnabled = settings.notificationsEnabled;
+    if (settings.twoFactorEnabled !== undefined) map.twoFactorEnabled = settings.twoFactorEnabled;
+    if (settings.autoApproveBelow !== undefined) map.autoApproveBelow = String(settings.autoApproveBelow);
+    if (settings.requireReceipts !== undefined) map.requireReceipts = settings.requireReceipts;
+    if (settings.expenseCategories !== undefined) map.expenseCategories = settings.expenseCategories;
+    if (settings.countryCode !== undefined) { map.countryCode = settings.countryCode; map.country = settings.countryCode; }
+    if (settings.region !== undefined) map.region = settings.region;
+    if (settings.paymentProvider !== undefined) map.paymentProvider = settings.paymentProvider;
+    if (settings.paystackEnabled !== undefined) map.paystackEnabled = settings.paystackEnabled;
+    if (settings.stripeEnabled !== undefined) map.stripeEnabled = settings.stripeEnabled;
+    if (settings.companyLogo !== undefined) map.logo = settings.companyLogo;
+    if (settings.companyTagline !== undefined) map.tagline = settings.companyTagline;
+    if (settings.primaryColor !== undefined) map.primaryColor = settings.primaryColor;
+    if (settings.secondaryColor !== undefined) map.secondaryColor = settings.secondaryColor;
+    if (settings.industry !== undefined) map.industry = settings.industry;
+    if (settings.companySize !== undefined) map.size = settings.companySize;
+    if (settings.taxId !== undefined) map.taxId = settings.taxId;
+    if (settings.registrationNumber !== undefined) map.registrationNumber = settings.registrationNumber;
+    if (settings.website !== undefined) map.website = settings.website;
+    if (settings.invoicePrefix !== undefined) map.invoicePrefix = settings.invoicePrefix;
+    if (settings.invoiceFooter !== undefined) map.invoiceFooter = settings.invoiceFooter;
+    if (settings.invoiceTerms !== undefined) map.invoiceTerms = settings.invoiceTerms;
+    if (settings.showLogoOnInvoice !== undefined) map.showLogoOnInvoice = settings.showLogoOnInvoice;
+    if (settings.showLogoOnReceipts !== undefined) map.showLogoOnReceipts = settings.showLogoOnReceipts;
+    return map;
+  }
+
+  async getCompanyAsSettings(companyId: string): Promise<CompanySettings | null> {
+    const company = await this.getCompany(companyId);
+    if (!company) return null;
+    return this.companyToSettings(company);
+  }
+
+  async updateCompanyAsSettings(companyId: string, settingsData: Partial<CompanySettings>): Promise<CompanySettings | null> {
+    const companyUpdate = this.settingsToCompany(settingsData);
+    if (Object.keys(companyUpdate).length === 0) {
+      return this.getCompanyAsSettings(companyId);
+    }
+    const updated = await this.updateCompany(companyId, companyUpdate);
+    if (!updated) return null;
+    return this.companyToSettings(updated);
+  }
+
   // ==================== USER PROFILES (KYC) ====================
-  async getUserProfile(firebaseUid: string): Promise<UserProfile | undefined> {
-    const result = await db.select().from(userProfiles).where(eq(userProfiles.firebaseUid, firebaseUid)).limit(1);
+  async getUserProfileByCognitoSub(cognitoSub: string): Promise<UserProfile | undefined> {
+    const result = await db.select().from(userProfiles).where(eq(userProfiles.cognitoSub, cognitoSub)).limit(1);
     return result[0];
   }
 
@@ -874,12 +1130,12 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async updateUserProfile(firebaseUid: string, profileData: Partial<UserProfile>): Promise<UserProfile | undefined> {
+  async updateUserProfile(cognitoSub: string, profileData: Partial<UserProfile>): Promise<UserProfile | undefined> {
     const now = new Date().toISOString();
     const result = await db.update(userProfiles).set({
       ...profileData,
       updatedAt: now,
-    } as any).where(eq(userProfiles.firebaseUid, firebaseUid)).returning();
+    } as any).where(eq(userProfiles.cognitoSub, cognitoSub)).returning();
     return result[0];
   }
 
@@ -1252,6 +1508,10 @@ export class DatabaseStorage implements IStorage {
           status: 'paid',
           paidAmount: params.amount.toFixed(2),
           paidDate: now,
+          paidBy: params.paidBy || 'wallet',
+          paymentMethod: 'wallet',
+          paymentReference: params.reference,
+          walletTransactionId: walletTxResult[0].id,
           updatedAt: now,
         } as any)
         .where(eq(bills.id, params.billId))
@@ -1308,9 +1568,16 @@ export class DatabaseStorage implements IStorage {
         createdAt: now,
       } as any).returning();
 
+      // Lock the card row to prevent race conditions on balance read
+      const cardRows = await tx.execute(
+        sql`SELECT * FROM virtual_cards WHERE id = ${params.cardId} FOR UPDATE`
+      );
+      const cardRow = cardRows.rows[0] as any;
+      if (!cardRow) throw new Error('Card not found');
+
       const cardResult = await tx.update(virtualCards)
         .set({
-          balance: (parseFloat((await tx.select().from(virtualCards).where(eq(virtualCards.id, params.cardId)).limit(1))[0].balance || '0') + params.amount).toFixed(2),
+          balance: (parseFloat(cardRow.balance || '0') + params.amount).toFixed(2),
           updatedAt: now,
         } as any)
         .where(eq(virtualCards.id, params.cardId))
@@ -1429,6 +1696,11 @@ export class DatabaseStorage implements IStorage {
         .limit(1);
       if (originalTx.length === 0) throw new Error('Original transaction not found');
 
+      // Idempotency guard: check if already reversed
+      if ((originalTx[0] as any).reversedAt) {
+        throw new Error('Transaction has already been reversed');
+      }
+
       const now = new Date().toISOString();
       const balanceBefore = parseFloat(wallet.balance || '0');
       let balanceAfter: number;
@@ -1467,6 +1739,11 @@ export class DatabaseStorage implements IStorage {
         status: 'completed',
         createdAt: now,
       } as any).returning();
+
+      // Mark the original transaction as reversed
+      await tx.update(walletTransactions)
+        .set({ reversedAt: now, reversedByTxId: reversalTxResult[0].id } as any)
+        .where(eq(walletTransactions.id, params.originalTxId));
 
       return reversalTxResult[0];
     });
@@ -1595,28 +1872,35 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== PAYOUTS ====================
-  async getPayouts(filters?: { recipientType?: string; recipientId?: string; status?: string; providerReference?: string }): Promise<Payout[]> {
+  async getPayouts(filters?: { recipientType?: string; recipientId?: string; status?: string; providerReference?: string; companyId?: string }): Promise<Payout[]> {
     // Filter by provider reference (for webhook lookups)
     if (filters?.providerReference) {
       return await db.select().from(payouts)
         .where(eq(payouts.providerReference, filters.providerReference))
         .orderBy(desc(payouts.createdAt));
     }
-    
-    if (filters?.recipientType && filters?.recipientId) {
-      return await db.select().from(payouts)
-        .where(and(
-          eq(payouts.recipientType, filters.recipientType),
-          eq(payouts.recipientId, filters.recipientId)
-        ))
-        .orderBy(desc(payouts.createdAt));
+
+    // Build conditions array for flexible filtering
+    const conditions: any[] = [];
+    if (filters?.companyId) {
+      conditions.push(eq(payouts.companyId, filters.companyId));
+    }
+    if (filters?.recipientType) {
+      conditions.push(eq(payouts.recipientType, filters.recipientType));
+    }
+    if (filters?.recipientId) {
+      conditions.push(eq(payouts.recipientId, filters.recipientId));
     }
     if (filters?.status) {
+      conditions.push(eq(payouts.status, filters.status));
+    }
+
+    if (conditions.length > 0) {
       return await db.select().from(payouts)
-        .where(eq(payouts.status, filters.status))
+        .where(and(...conditions))
         .orderBy(desc(payouts.createdAt));
     }
-    
+
     return await db.select().from(payouts).orderBy(desc(payouts.createdAt));
   }
 
@@ -1864,6 +2148,12 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  // Find all company memberships for a given email (across all companies)
+  async getCompanyMembersByEmail(email: string): Promise<CompanyMember[]> {
+    return await db.select().from(companyMembers)
+      .where(and(eq(companyMembers.email, email), eq(companyMembers.status, 'active')));
+  }
+
   async createCompanyMember(member: InsertCompanyMember): Promise<CompanyMember> {
     const result = await db.insert(companyMembers).values(member as any).returning();
     return result[0];
@@ -1883,8 +2173,38 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserCompanies(userId: string): Promise<CompanyMember[]> {
-    return await db.select().from(companyMembers)
+    // Search by userId (cognitoSub) first
+    const byUserId = await db.select().from(companyMembers)
       .where(and(eq(companyMembers.userId, userId), eq(companyMembers.status, 'active')));
+    if (byUserId.length > 0) return byUserId;
+
+    // Fallback: check if any company has this user as owner (for cases where companyMember wasn't created)
+    const ownedCompanies = await db.select().from(companies).where(eq(companies.ownerId, userId));
+    if (ownedCompanies.length > 0) {
+      // Auto-create missing companyMember records for owned companies
+      const results: CompanyMember[] = [];
+      for (const company of ownedCompanies) {
+        const existing = await db.select().from(companyMembers)
+          .where(and(eq(companyMembers.companyId, company.id), eq(companyMembers.userId, userId)));
+        if (existing.length === 0) {
+          const [member] = await db.insert(companyMembers).values({
+            companyId: company.id,
+            userId,
+            email: '',
+            role: 'OWNER',
+            status: 'active',
+            invitedAt: new Date().toISOString(),
+            joinedAt: new Date().toISOString(),
+          } as any).returning();
+          results.push(member);
+        } else {
+          results.push(existing[0]);
+        }
+      }
+      return results;
+    }
+
+    return [];
   }
 
   // ==================== COMPANY INVITATIONS ====================

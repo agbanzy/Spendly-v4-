@@ -16,29 +16,226 @@ export function getPaystackPublicKey(): string {
   return key;
 }
 
+const PAYSTACK_TIMEOUT_MS = 30000; // 30 second request timeout
+
+/**
+ * Map country code to Paystack transfer recipient type.
+ * Each country has a specific banking/payment rail.
+ */
+function getRecipientTypeForCountry(countryCode: string): string {
+  const recipientTypes: Record<string, string> = {
+    NG: 'nuban',         // Nigerian Uniform Bank Account Number
+    GH: 'ghipss',        // Ghana Interbank Payment and Settlement System
+    ZA: 'basa',          // Banking Association South Africa
+    KE: 'mobile_money',  // Kenya (M-Pesa dominant)
+    RW: 'mobile_money',  // Rwanda (MTN MoMo dominant)
+    CI: 'mobile_money',  // Côte d'Ivoire (Orange Money, MTN MoMo)
+    EG: 'nuban',         // Egypt (bank transfers via Paystack)
+  };
+  return recipientTypes[countryCode.toUpperCase()] || 'nuban';
+}
+
+/**
+ * Validate bank/mobile details format for a specific country.
+ * Returns { valid, message } indicating if the details are acceptable.
+ */
+export function validateTransferDetails(
+  countryCode: string,
+  accountNumber: string,
+  bankCode: string,
+  type?: string
+): { valid: boolean; message?: string } {
+  const country = countryCode.toUpperCase();
+  const recipientType = type || getRecipientTypeForCountry(country);
+
+  if (!accountNumber || accountNumber.trim().length === 0) {
+    return { valid: false, message: 'Account number is required' };
+  }
+  if (!bankCode || bankCode.trim().length === 0) {
+    return { valid: false, message: 'Bank code is required' };
+  }
+
+  // Country-specific account number validation
+  switch (country) {
+    case 'NG':
+      // NUBAN: exactly 10 digits
+      if (!/^\d{10}$/.test(accountNumber)) {
+        return { valid: false, message: 'Nigerian account number must be exactly 10 digits' };
+      }
+      // Bank code: 3 digits
+      if (!/^\d{3}$/.test(bankCode)) {
+        return { valid: false, message: 'Nigerian bank code must be 3 digits (e.g., 058 for GTBank)' };
+      }
+      break;
+
+    case 'GH':
+      // Ghana: variable length, typically 13-16 digits
+      if (!/^\d{10,16}$/.test(accountNumber)) {
+        return { valid: false, message: 'Ghanaian account number must be 10-16 digits' };
+      }
+      break;
+
+    case 'ZA':
+      // South Africa: typically 10-12 digits
+      if (!/^\d{8,12}$/.test(accountNumber)) {
+        return { valid: false, message: 'South African account number must be 8-12 digits' };
+      }
+      // Branch code: 6 digits
+      if (!/^\d{6}$/.test(bankCode)) {
+        return { valid: false, message: 'South African branch code must be 6 digits' };
+      }
+      break;
+
+    case 'KE':
+      if (recipientType === 'mobile_money') {
+        // M-Pesa: starts with 254 or 07/01, 10-12 digits
+        if (!/^(254|0)[17]\d{8,9}$/.test(accountNumber)) {
+          return { valid: false, message: 'Kenyan mobile number must start with 254, 07, or 01 (e.g., 254712345678)' };
+        }
+      } else {
+        if (!/^\d{8,14}$/.test(accountNumber)) {
+          return { valid: false, message: 'Kenyan account number must be 8-14 digits' };
+        }
+      }
+      break;
+
+    case 'RW':
+      if (recipientType === 'mobile_money') {
+        // Rwanda mobile: starts with 250 or 07, 10-12 digits
+        if (!/^(250|07)\d{7,9}$/.test(accountNumber)) {
+          return { valid: false, message: 'Rwandan mobile number must start with 250 or 07 (e.g., 250781234567)' };
+        }
+      }
+      break;
+
+    case 'CI':
+      if (recipientType === 'mobile_money') {
+        // Côte d'Ivoire mobile: starts with 225 or 0, 10-12 digits
+        if (!/^(225|0)\d{8,10}$/.test(accountNumber)) {
+          return { valid: false, message: 'Ivorian mobile number must start with 225 or 0 (e.g., 2250701234567)' };
+        }
+      }
+      break;
+
+    case 'EG':
+      // Egypt: typically 13-29 digit IBAN or account number
+      if (!/^\d{10,29}$/.test(accountNumber.replace(/\s/g, ''))) {
+        return { valid: false, message: 'Egyptian account number must be 10-29 digits' };
+      }
+      break;
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Validate bank details for Stripe countries.
+ */
+export function validateStripeBankDetails(
+  countryCode: string,
+  details: {
+    accountNumber?: string;
+    routingNumber?: string;
+    sortCode?: string;
+    bsbNumber?: string;
+    iban?: string;
+  }
+): { valid: boolean; message?: string } {
+  const country = countryCode.toUpperCase();
+
+  switch (country) {
+    case 'US':
+    case 'CA':
+      // ACH: routing number (9 digits) + account number (4-17 digits)
+      if (!details.routingNumber || !/^\d{9}$/.test(details.routingNumber)) {
+        return { valid: false, message: 'US/CA routing number must be exactly 9 digits' };
+      }
+      if (!details.accountNumber || !/^\d{4,17}$/.test(details.accountNumber)) {
+        return { valid: false, message: 'US/CA account number must be 4-17 digits' };
+      }
+      break;
+
+    case 'GB':
+      // BACS: sort code (6 digits, may have hyphens) + account number (8 digits)
+      const sortCode = (details.sortCode || '').replace(/-/g, '');
+      if (!/^\d{6}$/.test(sortCode)) {
+        return { valid: false, message: 'UK sort code must be 6 digits (e.g., 20-00-00)' };
+      }
+      if (!details.accountNumber || !/^\d{8}$/.test(details.accountNumber)) {
+        return { valid: false, message: 'UK account number must be exactly 8 digits' };
+      }
+      break;
+
+    case 'AU':
+      // BECS: BSB (6 digits) + account number (5-9 digits)
+      const bsb = (details.bsbNumber || '').replace(/-/g, '');
+      if (!/^\d{6}$/.test(bsb)) {
+        return { valid: false, message: 'Australian BSB must be 6 digits (e.g., 062-000)' };
+      }
+      if (!details.accountNumber || !/^\d{5,9}$/.test(details.accountNumber)) {
+        return { valid: false, message: 'Australian account number must be 5-9 digits' };
+      }
+      break;
+
+    default:
+      // EU / SEPA: IBAN validation
+      if (details.iban) {
+        const iban = details.iban.replace(/\s/g, '').toUpperCase();
+        // Basic IBAN: 2 letter country + 2 check digits + up to 30 alphanumeric
+        if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(iban)) {
+          return { valid: false, message: 'Invalid IBAN format. Must start with 2-letter country code followed by check digits' };
+        }
+      } else if (details.accountNumber) {
+        // Fallback: at least some account number provided
+        if (details.accountNumber.length < 5) {
+          return { valid: false, message: 'Account number must be at least 5 characters' };
+        }
+      } else {
+        return { valid: false, message: 'IBAN or account number is required for EU transfers' };
+      }
+      break;
+  }
+
+  return { valid: true };
+}
+
 async function paystackRequest(endpoint: string, method: string = 'GET', body?: any) {
   const secretKey = getPaystackSecretKey();
-  
-  const options: RequestInit = {
-    method,
-    headers: {
-      'Authorization': `Bearer ${secretKey}`,
-      'Content-Type': 'application/json',
-    },
-  };
 
-  if (body) {
-    options.body = JSON.stringify(body);
-  }
+  // AbortController for request timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PAYSTACK_TIMEOUT_MS);
 
-  const response = await fetch(`${PAYSTACK_BASE_URL}${endpoint}`, options);
-  const data = await response.json();
-  
-  if (!response.ok) {
-    throw new Error(data.message || 'Paystack API error');
+  try {
+    const options: RequestInit = {
+      method,
+      headers: {
+        'Authorization': `Bearer ${secretKey}`,
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+    };
+
+    if (body) {
+      options.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(`${PAYSTACK_BASE_URL}${endpoint}`, options);
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || `Paystack API error (${response.status})`);
+    }
+
+    return data;
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      throw new Error(`Paystack API request to ${endpoint} timed out after ${PAYSTACK_TIMEOUT_MS / 1000}s`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  
-  return data;
 }
 
 export const paystackClient = {
@@ -56,18 +253,47 @@ export const paystackClient = {
     return paystackRequest('/transaction/initialize', 'POST', payload);
   },
 
-  async verifyTransaction(reference: string) {
-    return paystackRequest(`/transaction/verify/${reference}`);
-  },
+  /**
+   * Create a transfer recipient with country-appropriate account type.
+   * - NG: nuban (Nigerian Uniform Bank Account Number)
+   * - GH: ghipss (Ghana Interbank Payment and Settlement System)
+   * - ZA: basa (Banking Association South Africa)
+   * - KE/RW/CI: mobile_money or authorization
+   * @param name Recipient name
+   * @param accountNumber Bank account or mobile number
+   * @param bankCode Bank code (or mobile money provider code)
+   * @param currency ISO 4217 currency code
+   * @param countryCode ISO 3166-1 alpha-2 country code (default: NG)
+   * @param type Override recipient type (e.g., 'mobile_money' for M-Pesa)
+   */
+  async createTransferRecipient(
+    name: string,
+    accountNumber: string,
+    bankCode: string,
+    currency: string = 'NGN',
+    countryCode: string = 'NG',
+    type?: string
+  ) {
+    // Determine the correct recipient type based on country
+    const recipientType = type || getRecipientTypeForCountry(countryCode);
 
-  async createTransferRecipient(name: string, accountNumber: string, bankCode: string, currency: string = 'NGN') {
-    return paystackRequest('/transferrecipient', 'POST', {
-      type: 'nuban',
+    const payload: Record<string, any> = {
+      type: recipientType,
       name,
       account_number: accountNumber,
       bank_code: bankCode,
       currency,
-    });
+    };
+
+    // Mobile money recipients need additional metadata
+    if (recipientType === 'mobile_money') {
+      payload.metadata = {
+        country_code: countryCode,
+        mobile_provider: bankCode,
+      };
+    }
+
+    return paystackRequest('/transferrecipient', 'POST', payload);
   },
 
   async initiateTransfer(amount: number, recipientCode: string, reason: string) {
@@ -142,7 +368,7 @@ export const paystackClient = {
     lastName: string;
     middleName?: string;
   }) {
-    return paystackRequest(`/customer/${customerCode}/identification`, 'POST', {
+    return paystackRequest(`/customer/${encodeURIComponent(customerCode)}/identification`, 'POST', {
       type: params.type || 'bank_account',
       value: params.value || params.bvn,
       country: params.country || 'NG',
@@ -155,16 +381,14 @@ export const paystackClient = {
     });
   },
 
+  // Alias for fetchBalance (backward compatibility)
   async getBalance() {
-    return paystackRequest('/balance');
+    return this.fetchBalance();
   },
 
-  async listTransactions(perPage: number = 50, page: number = 1) {
-    return paystackRequest(`/transaction?perPage=${perPage}&page=${page}`);
-  },
-
+  // Alias for resolveAccountNumber (backward compatibility)
   async resolveAccount(accountNumber: string, bankCode: string) {
-    return paystackRequest(`/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`);
+    return this.resolveAccountNumber(accountNumber, bankCode);
   },
 
   async createSubscriptionPlan(name: string, amount: number, interval: 'hourly' | 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'biannually' | 'annually', description?: string) {
@@ -277,11 +501,11 @@ export const paystackClient = {
   },
 
   async fetchTransfer(transferCode: string) {
-    return paystackRequest(`/transfer/${transferCode}`, 'GET');
+    return paystackRequest(`/transfer/${encodeURIComponent(transferCode)}`, 'GET');
   },
 
   async verifyTransfer(reference: string) {
-    return paystackRequest(`/transfer/verify/${reference}`, 'GET');
+    return paystackRequest(`/transfer/verify/${encodeURIComponent(reference)}`, 'GET');
   },
 
   async finalizeTransfer(transferCode: string, otp: string) {
@@ -328,6 +552,15 @@ export const paystackClient = {
 
   async resolveAccountNumber(accountNumber: string, bankCode: string) {
     return paystackRequest(`/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`, 'GET');
+  },
+
+  /**
+   * Resolve BVN (Bank Verification Number) via Paystack API.
+   * NOTE: This endpoint requires special Paystack approval.
+   * If unavailable, the call will fail and KYC goes to pending_review (safe default).
+   */
+  async resolveBVN(bvn: string) {
+    return paystackRequest(`/bank/resolve_bvn/${encodeURIComponent(bvn)}`, 'GET');
   },
 
   // ==================== BILL PAYMENTS / UTILITIES ====================
@@ -410,5 +643,46 @@ export const paystackClient = {
     if (params?.to) query.append('to', params.to);
     if (params?.status) query.append('status', params.status);
     return paystackRequest(`/transaction?${query.toString()}`, 'GET');
+  },
+
+  // ==================== REFUNDS ====================
+
+  /**
+   * Create a refund for a Paystack transaction.
+   * @param transactionReference The transaction reference or ID to refund
+   * @param amount Optional partial refund amount in major units (naira). Omit for full refund.
+   * @param merchantNote Optional internal note about the refund reason.
+   * @param customerNote Optional message shown to the customer.
+   */
+  async createRefund(transactionReference: string, amount?: number, merchantNote?: string, customerNote?: string) {
+    const payload: Record<string, any> = {
+      transaction: transactionReference,
+    };
+    if (amount !== undefined && amount > 0) {
+      payload.amount = Math.round(amount * 100); // Convert to kobo
+    }
+    if (merchantNote) payload.merchant_note = merchantNote;
+    if (customerNote) payload.customer_note = customerNote;
+    return paystackRequest('/refund', 'POST', payload);
+  },
+
+  /**
+   * Fetch details of a specific refund.
+   * @param refundId The Paystack refund ID
+   */
+  async fetchRefund(refundId: string) {
+    return paystackRequest(`/refund/${encodeURIComponent(refundId)}`, 'GET');
+  },
+
+  /**
+   * List refunds with optional pagination.
+   */
+  async listRefunds(params?: { perPage?: number; page?: number; from?: string; to?: string }) {
+    const query = new URLSearchParams();
+    if (params?.perPage) query.append('perPage', String(params.perPage));
+    if (params?.page) query.append('page', String(params.page));
+    if (params?.from) query.append('from', params.from);
+    if (params?.to) query.append('to', params.to);
+    return paystackRequest(`/refund?${query.toString()}`, 'GET');
   },
 };

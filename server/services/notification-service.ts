@@ -24,8 +24,8 @@ interface SmsConfig {
   body: string;
 }
 
-type EmailProvider = 'aws' | 'sendgrid' | 'none';
-type SmsProvider = 'aws' | 'twilio' | 'none';
+type EmailProvider = 'aws' | 'none';
+type SmsProvider = 'aws' | 'none';
 
 // Security: URL validation to prevent XSS in actionUrl
 function sanitizeUrl(url: string | undefined): string | undefined {
@@ -51,8 +51,6 @@ function sanitizeSmsText(text: string): string {
 }
 
 class NotificationService {
-  private twilioClient: any = null;
-  private sendgridClient: any = null;
   private sesClient: SESClient | null = null;
   private snsClient: SNSClient | null = null;
   private emailProvider: EmailProvider = 'none';
@@ -63,61 +61,36 @@ class NotificationService {
   }
 
   private initializeClients() {
-    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_REGION) {
+    const region = process.env.AWS_REGION;
+    // Support both explicit credentials (local dev) and IAM role auto-discovery (ECS/Lambda)
+    const hasExplicitCreds = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY;
+    const isOnAWS = process.env.ECS_CONTAINER_METADATA_URI_V4 || process.env.AWS_EXECUTION_ENV;
+    const canUseAWS = region && (hasExplicitCreds || isOnAWS);
+
+    if (canUseAWS) {
+      const clientConfig: Record<string, any> = { region };
+      if (hasExplicitCreds) {
+        clientConfig.credentials = {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+        };
+      }
+      // When on ECS, omit credentials — SDK auto-discovers from task role
+
       try {
-        this.sesClient = new SESClient({
-          region: process.env.AWS_REGION,
-          credentials: {
-            accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-          },
-        });
+        this.sesClient = new SESClient(clientConfig);
         this.emailProvider = 'aws';
-        console.log('AWS SES client initialized');
+        console.log('AWS SES client initialized' + (hasExplicitCreds ? ' (explicit credentials)' : ' (IAM role)'));
       } catch (error) {
         console.log('AWS SES client initialization failed:', error);
       }
-    }
 
-    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_REGION) {
       try {
-        this.snsClient = new SNSClient({
-          region: process.env.AWS_REGION,
-          credentials: {
-            accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-          },
-        });
+        this.snsClient = new SNSClient(clientConfig);
         this.smsProvider = 'aws';
-        console.log('AWS SNS client initialized');
+        console.log('AWS SNS client initialized' + (hasExplicitCreds ? ' (explicit credentials)' : ' (IAM role)'));
       } catch (error) {
         console.log('AWS SNS client initialization failed:', error);
-      }
-    }
-
-    if (this.emailProvider === 'none' && process.env.SENDGRID_API_KEY) {
-      try {
-        const sgMail = require('@sendgrid/mail');
-        sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-        this.sendgridClient = sgMail;
-        this.emailProvider = 'sendgrid';
-        console.log('SendGrid client initialized (fallback)');
-      } catch (error) {
-        console.log('SendGrid client not available');
-      }
-    }
-
-    if (this.smsProvider === 'none' && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-      try {
-        const twilio = require('twilio');
-        this.twilioClient = twilio(
-          process.env.TWILIO_ACCOUNT_SID,
-          process.env.TWILIO_AUTH_TOKEN
-        );
-        this.smsProvider = 'twilio';
-        console.log('Twilio client initialized (fallback)');
-      } catch (error) {
-        console.log('Twilio client not available');
       }
     }
 
@@ -132,7 +105,7 @@ class NotificationService {
     // If no notification settings, try to auto-create from user profile
     if (!settings) {
       try {
-        const profile = await storage.getUserProfile(userId);
+        const profile = await storage.getUserProfileByCognitoSub(userId);
         if (profile) {
           const now = new Date().toISOString();
           settings = await storage.createNotificationSettings({
@@ -164,7 +137,7 @@ class NotificationService {
     let recipientPhone = settings?.phone;
     if (!recipientEmail || !recipientPhone) {
       try {
-        const profile = await storage.getUserProfile(userId);
+        const profile = await storage.getUserProfileByCognitoSub(userId);
         if (profile) {
           if (!recipientEmail) recipientEmail = profile.email;
           if (!recipientPhone) recipientPhone = profile.phoneNumber || undefined;
@@ -270,13 +243,11 @@ class NotificationService {
   }
 
   private getAppUrl(): string {
-    return process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : 'https://spendlymanager.com';
+    return process.env.APP_URL || 'https://spendlymanager.com';
   }
 
   async sendEmail(config: EmailConfig): Promise<void> {
-    const fromEmail = process.env.AWS_SES_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || 'noreply@spendlymanager.com';
+    const fromEmail = process.env.AWS_SES_FROM_EMAIL || 'noreply@spendlymanager.com';
     const fromName = process.env.AWS_SES_FROM_NAME || 'Spendly';
     const formattedFrom = `${fromName} <${fromEmail}>`;
     const appUrl = this.getAppUrl();
@@ -327,28 +298,6 @@ class NotificationService {
       }
     }
 
-    if (this.emailProvider === 'sendgrid' && this.sendgridClient) {
-      try {
-        await this.sendgridClient.send({
-          to: config.to,
-          from: fromEmail,
-          subject: config.subject,
-          text: plainText,
-          html: config.html,
-          headers: {
-            'List-Unsubscribe': `<mailto:unsubscribe@spendlymanager.com>, <${appUrl}/settings>`,
-            'Reply-To': 'support@spendlymanager.com',
-            'X-Mailer': 'Spendly/1.0',
-          },
-        });
-        console.log('Email sent via SendGrid to:', config.to);
-        return;
-      } catch (error) {
-        console.error('Failed to send email via SendGrid:', error);
-        throw error;
-      }
-    }
-
     console.log('No email provider configured, skipping email:', config.subject);
   }
 
@@ -375,21 +324,6 @@ class NotificationService {
         return;
       } catch (error) {
         console.error('Failed to send SMS via AWS SNS:', error);
-        throw error;
-      }
-    }
-
-    if (this.smsProvider === 'twilio' && this.twilioClient) {
-      try {
-        await this.twilioClient.messages.create({
-          body: config.body,
-          from: process.env.TWILIO_PHONE_NUMBER,
-          to: config.to,
-        });
-        console.log('SMS sent via Twilio to:', config.to);
-        return;
-      } catch (error) {
-        console.error('Failed to send SMS via Twilio:', error);
         throw error;
       }
     }
@@ -515,8 +449,8 @@ class NotificationService {
       bodyHtml: `
         <h2 style="color: #1f2937; margin: 0 0 16px 0; font-size: 20px;">${this.escapeHtml(title)}</h2>
         <p style="color: #4b5563; line-height: 1.6; margin: 0 0 24px 0;">${this.escapeHtml(message)}</p>
-        ${sanitizeUrl(data?.actionUrl) ? `
-          <a href="${sanitizeUrl(data?.actionUrl)}" style="display: inline-block; background-color: #4F46E5; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600;">View Details</a>
+        ${sanitizeUrl(data?.actionUrl as string | undefined) ? `
+          <a href="${sanitizeUrl(data?.actionUrl as string | undefined)}" style="display: inline-block; background-color: #4F46E5; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600;">View Details</a>
         ` : ''}
       `,
       plainText: message,
@@ -1561,6 +1495,402 @@ Date: ${config.date}`;
       title: 'Bill Payment Successful',
       message: `Your ${bill.name} bill of ${sym}${bill.amount.toLocaleString()} to ${bill.provider} has been paid successfully.`,
       data: { actionUrl: '/bills' },
+      channels: ['in_app', 'email', 'push'],
+    });
+  }
+  // ==================== EXPENSE LIFECYCLE EMAILS ====================
+
+  async sendExpenseApprovedEmail(config: {
+    email: string;
+    name: string;
+    expenseDescription: string;
+    amount: number;
+    currency: string;
+    approverName: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    const appUrl = this.getAppUrl();
+    const safeName = this.escapeHtml(config.name);
+    const safeDesc = this.escapeHtml(config.expenseDescription);
+    const safeApprover = this.escapeHtml(config.approverName);
+
+    const bodyHtml = `
+      <p style="font-size: 16px; color: #1f2937;">Hi <strong>${safeName}</strong>,</p>
+      <p style="color: #4b5563; line-height: 1.6;">Your expense has been approved!</p>
+      <div style="background-color: #f0fdf4; border-radius: 8px; padding: 20px; margin: 24px 0; border-left: 4px solid #22c55e;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Description</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">${safeDesc}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Amount</td>
+            <td style="padding: 8px 0; color: #1f2937; font-weight: 600; text-align: right; font-size: 18px;">${config.currency} ${config.amount.toLocaleString()}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Approved By</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">${safeApprover}</td>
+          </tr>
+        </table>
+      </div>
+      <div style="text-align: center; margin: 32px 0;">
+        <a href="${appUrl}/expenses" style="display: inline-block; background-color: #22c55e; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">View Expenses</a>
+      </div>
+    `;
+
+    const plainText = `Hi ${config.name}, your expense "${config.expenseDescription}" for ${config.currency} ${config.amount.toLocaleString()} has been approved by ${config.approverName}.`;
+
+    const { html, text } = this.buildEmailTemplate({
+      preheader: `Expense approved: ${config.currency} ${config.amount.toLocaleString()}`,
+      headerTitle: 'Expense Approved',
+      bodyHtml,
+      plainText,
+      headerColor: '#22c55e',
+    });
+
+    try {
+      await this.sendEmail({ to: config.email, subject: `Expense Approved - ${config.currency} ${config.amount.toLocaleString()}`, html, text });
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send expense approved email:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  async sendExpenseRejectedEmail(config: {
+    email: string;
+    name: string;
+    expenseDescription: string;
+    amount: number;
+    currency: string;
+    rejectedBy: string;
+    reason?: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    const appUrl = this.getAppUrl();
+    const safeName = this.escapeHtml(config.name);
+    const safeDesc = this.escapeHtml(config.expenseDescription);
+    const safeRejector = this.escapeHtml(config.rejectedBy);
+    const safeReason = config.reason ? this.escapeHtml(config.reason) : 'No reason provided';
+
+    const bodyHtml = `
+      <p style="font-size: 16px; color: #1f2937;">Hi <strong>${safeName}</strong>,</p>
+      <p style="color: #4b5563; line-height: 1.6;">Unfortunately, your expense has been rejected.</p>
+      <div style="background-color: #fef2f2; border-radius: 8px; padding: 20px; margin: 24px 0; border-left: 4px solid #ef4444;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Description</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">${safeDesc}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Amount</td>
+            <td style="padding: 8px 0; color: #1f2937; font-weight: 600; text-align: right; font-size: 18px;">${config.currency} ${config.amount.toLocaleString()}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Rejected By</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">${safeRejector}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Reason</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">${safeReason}</td>
+          </tr>
+        </table>
+      </div>
+      <div style="text-align: center; margin: 32px 0;">
+        <a href="${appUrl}/expenses" style="display: inline-block; background-color: #4F46E5; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">Edit &amp; Resubmit</a>
+      </div>
+    `;
+
+    const plainText = `Hi ${config.name}, your expense "${config.expenseDescription}" for ${config.currency} ${config.amount.toLocaleString()} was rejected by ${config.rejectedBy}. Reason: ${config.reason || 'No reason provided'}.`;
+
+    const { html, text } = this.buildEmailTemplate({
+      preheader: `Expense rejected: ${config.currency} ${config.amount.toLocaleString()}`,
+      headerTitle: 'Expense Rejected',
+      bodyHtml,
+      plainText,
+      headerColor: '#ef4444',
+    });
+
+    try {
+      await this.sendEmail({ to: config.email, subject: `Expense Rejected - ${config.currency} ${config.amount.toLocaleString()}`, html, text });
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send expense rejected email:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  // ==================== PAYOUT LIFECYCLE EMAILS ====================
+
+  async sendPayoutCompletedEmail(config: {
+    email: string;
+    name: string;
+    amount: number;
+    currency: string;
+    recipientName: string;
+    reference: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    const safeName = this.escapeHtml(config.name);
+    const safeRecipient = this.escapeHtml(config.recipientName);
+    const safeRef = this.escapeHtml(config.reference);
+
+    const bodyHtml = `
+      <p style="font-size: 16px; color: #1f2937;">Hi <strong>${safeName}</strong>,</p>
+      <p style="color: #4b5563; line-height: 1.6;">Your payout has been completed and the funds have been settled.</p>
+      <div style="background-color: #f0fdf4; border-radius: 8px; padding: 20px; margin: 24px 0; border-left: 4px solid #22c55e;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Amount</td>
+            <td style="padding: 8px 0; color: #1f2937; font-weight: 600; text-align: right; font-size: 18px;">${config.currency} ${config.amount.toLocaleString()}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Recipient</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">${safeRecipient}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Reference</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right; font-family: monospace;">${safeRef}</td>
+          </tr>
+        </table>
+      </div>
+    `;
+
+    const plainText = `Hi ${config.name}, your payout of ${config.currency} ${config.amount.toLocaleString()} to ${config.recipientName} has been completed. Ref: ${config.reference}`;
+
+    const { html, text } = this.buildEmailTemplate({
+      preheader: `Payout completed: ${config.currency} ${config.amount.toLocaleString()}`,
+      headerTitle: 'Payout Completed',
+      bodyHtml,
+      plainText,
+      headerColor: '#22c55e',
+    });
+
+    try {
+      await this.sendEmail({ to: config.email, subject: `Payout Completed - ${config.currency} ${config.amount.toLocaleString()}`, html, text });
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send payout completed email:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  async sendPayoutFailedEmail(config: {
+    email: string;
+    name: string;
+    amount: number;
+    currency: string;
+    recipientName: string;
+    reason?: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    const appUrl = this.getAppUrl();
+    const safeName = this.escapeHtml(config.name);
+    const safeRecipient = this.escapeHtml(config.recipientName);
+    const safeReason = config.reason ? this.escapeHtml(config.reason) : 'Please contact support for details';
+
+    const bodyHtml = `
+      <p style="font-size: 16px; color: #1f2937;">Hi <strong>${safeName}</strong>,</p>
+      <p style="color: #4b5563; line-height: 1.6;">Your payout could not be completed.</p>
+      <div style="background-color: #fef2f2; border-radius: 8px; padding: 20px; margin: 24px 0; border-left: 4px solid #ef4444;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Amount</td>
+            <td style="padding: 8px 0; color: #1f2937; font-weight: 600; text-align: right; font-size: 18px;">${config.currency} ${config.amount.toLocaleString()}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Recipient</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">${safeRecipient}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Reason</td>
+            <td style="padding: 8px 0; color: #ef4444; text-align: right;">${safeReason}</td>
+          </tr>
+        </table>
+      </div>
+      <div style="text-align: center; margin: 32px 0;">
+        <a href="${appUrl}/transactions" style="display: inline-block; background-color: #4F46E5; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">View Transactions</a>
+      </div>
+    `;
+
+    const plainText = `Hi ${config.name}, your payout of ${config.currency} ${config.amount.toLocaleString()} to ${config.recipientName} failed. Reason: ${config.reason || 'Contact support'}`;
+
+    const { html, text } = this.buildEmailTemplate({
+      preheader: `Payout failed: ${config.currency} ${config.amount.toLocaleString()}`,
+      headerTitle: 'Payout Failed',
+      bodyHtml,
+      plainText,
+      headerColor: '#ef4444',
+    });
+
+    try {
+      await this.sendEmail({ to: config.email, subject: `Payout Failed - ${config.currency} ${config.amount.toLocaleString()}`, html, text });
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send payout failed email:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  // ==================== TEAM LIFECYCLE EMAILS ====================
+
+  async sendInviteAcceptedEmail(config: {
+    email: string;
+    adminName: string;
+    memberName: string;
+    memberEmail: string;
+    role: string;
+    companyName: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    const appUrl = this.getAppUrl();
+    const safeAdmin = this.escapeHtml(config.adminName);
+    const safeMember = this.escapeHtml(config.memberName);
+    const safeMemberEmail = this.escapeHtml(config.memberEmail);
+    const safeRole = this.escapeHtml(config.role);
+    const safeCompany = this.escapeHtml(config.companyName);
+
+    const bodyHtml = `
+      <p style="font-size: 16px; color: #1f2937;">Hi <strong>${safeAdmin}</strong>,</p>
+      <p style="color: #4b5563; line-height: 1.6;"><strong>${safeMember}</strong> (${safeMemberEmail}) has accepted their invitation and joined <strong>${safeCompany}</strong> as a <strong>${safeRole}</strong>.</p>
+      <div style="text-align: center; margin: 32px 0;">
+        <a href="${appUrl}/team" style="display: inline-block; background-color: #4F46E5; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">View Team</a>
+      </div>
+    `;
+
+    const plainText = `Hi ${config.adminName}, ${config.memberName} (${config.memberEmail}) has joined ${config.companyName} as ${config.role}.`;
+
+    const { html, text } = this.buildEmailTemplate({
+      preheader: `${config.memberName} joined ${config.companyName}`,
+      headerTitle: 'New Team Member',
+      bodyHtml,
+      plainText,
+    });
+
+    try {
+      await this.sendEmail({ to: config.email, subject: `${config.memberName} joined ${config.companyName}`, html, text });
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send invite accepted email:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  async sendRoleChangedEmail(config: {
+    email: string;
+    name: string;
+    oldRole: string;
+    newRole: string;
+    companyName: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    const safeName = this.escapeHtml(config.name);
+    const safeOld = this.escapeHtml(config.oldRole);
+    const safeNew = this.escapeHtml(config.newRole);
+    const safeCompany = this.escapeHtml(config.companyName);
+
+    const bodyHtml = `
+      <p style="font-size: 16px; color: #1f2937;">Hi <strong>${safeName}</strong>,</p>
+      <p style="color: #4b5563; line-height: 1.6;">Your role in <strong>${safeCompany}</strong> has been updated.</p>
+      <div style="background-color: #f9fafb; border-radius: 8px; padding: 20px; margin: 24px 0;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Previous Role</td>
+            <td style="padding: 8px 0; color: #9ca3af; text-align: right;">${safeOld}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">New Role</td>
+            <td style="padding: 8px 0; color: #4F46E5; font-weight: 600; text-align: right;">${safeNew}</td>
+          </tr>
+        </table>
+      </div>
+    `;
+
+    const plainText = `Hi ${config.name}, your role in ${config.companyName} has changed from ${config.oldRole} to ${config.newRole}.`;
+
+    const { html, text } = this.buildEmailTemplate({
+      preheader: `Role updated: ${config.oldRole} → ${config.newRole}`,
+      headerTitle: 'Role Updated',
+      bodyHtml,
+      plainText,
+    });
+
+    try {
+      await this.sendEmail({ to: config.email, subject: `Your role in ${config.companyName} has been updated`, html, text });
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to send role changed email:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  // ==================== PAYOUT LIFECYCLE NOTIFICATIONS ====================
+
+  async notifyPayoutApproved(userId: string, payout: {
+    amount: number;
+    currency: string;
+    recipientName: string;
+    approverName?: string;
+  }): Promise<void> {
+    const sym = this.getCurrencySymbol(payout.currency);
+    await this.send({
+      userId,
+      type: 'payment_sent',
+      title: 'Payout Approved',
+      message: `Your payout of ${sym}${payout.amount.toLocaleString()} to ${payout.recipientName} has been approved${payout.approverName ? ` by ${payout.approverName}` : ''} and is now being processed.`,
+      data: { actionUrl: '/transactions' },
+      channels: ['in_app', 'email', 'push'],
+    });
+  }
+
+  async notifyPayoutCompleted(userId: string, payout: {
+    amount: number;
+    currency: string;
+    recipientName: string;
+    reference?: string;
+  }): Promise<void> {
+    const sym = this.getCurrencySymbol(payout.currency);
+    await this.send({
+      userId,
+      type: 'payment_sent',
+      title: 'Payout Completed',
+      message: `${sym}${payout.amount.toLocaleString()} has been successfully settled to ${payout.recipientName}.${payout.reference ? ` Ref: ${payout.reference}` : ''}`,
+      data: { actionUrl: '/transactions' },
+      channels: ['in_app', 'email', 'push'],
+    });
+  }
+
+  async notifyPayoutFailed(userId: string, payout: {
+    amount: number;
+    currency: string;
+    recipientName: string;
+    reason?: string;
+  }): Promise<void> {
+    const sym = this.getCurrencySymbol(payout.currency);
+    await this.send({
+      userId,
+      type: 'payment_sent',
+      title: 'Payout Failed',
+      message: `Your payout of ${sym}${payout.amount.toLocaleString()} to ${payout.recipientName} has failed.${payout.reason ? ` Reason: ${payout.reason}` : ' Please contact support.'}`,
+      data: { actionUrl: '/transactions' },
+      channels: ['in_app', 'email', 'push'],
+    });
+  }
+
+  // ==================== TEAM LIFECYCLE NOTIFICATIONS ====================
+
+  async notifyInviteAccepted(adminUserId: string, memberName: string, companyName: string): Promise<void> {
+    await this.send({
+      userId: adminUserId,
+      type: 'team_invite',
+      title: 'Invitation Accepted',
+      message: `${memberName} has accepted the invitation and joined ${companyName}.`,
+      data: { actionUrl: '/team' },
+      channels: ['in_app', 'email', 'push'],
+    });
+  }
+
+  async notifyRoleChanged(userId: string, oldRole: string, newRole: string, companyName: string): Promise<void> {
+    await this.send({
+      userId,
+      type: 'system_alert',
+      title: 'Role Updated',
+      message: `Your role in ${companyName} has been changed from ${oldRole} to ${newRole}.`,
+      data: { actionUrl: '/settings' },
       channels: ['in_app', 'email', 'push'],
     });
   }

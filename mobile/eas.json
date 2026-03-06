@@ -5,17 +5,32 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_COGNITO_USER_POOL_ID": "us-east-1_KNoYn4rzc",
+        "EXPO_PUBLIC_COGNITO_CLIENT_ID": "738dvokhefcf2p79kvur02ll7s",
+        "EXPO_PUBLIC_API_URL": "http://Spendl-Spend-wM2lvkuLuhtZ-1357750731.us-east-1.elb.amazonaws.com"
+      }
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_COGNITO_USER_POOL_ID": "us-east-1_KNoYn4rzc",
+        "EXPO_PUBLIC_COGNITO_CLIENT_ID": "738dvokhefcf2p79kvur02ll7s",
+        "EXPO_PUBLIC_API_URL": "http://Spendl-Spend-wM2lvkuLuhtZ-1357750731.us-east-1.elb.amazonaws.com"
       }
     },
     "production": {
       "android": {
         "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_COGNITO_USER_POOL_ID": "us-east-1_KNoYn4rzc",
+        "EXPO_PUBLIC_COGNITO_CLIENT_ID": "738dvokhefcf2p79kvur02ll7s",
+        "EXPO_PUBLIC_API_URL": "http://Spendl-Spend-wM2lvkuLuhtZ-1357750731.us-east-1.elb.amazonaws.com"
       }
     }
   },

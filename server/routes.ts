@@ -16,10 +16,36 @@ import {
   financialLimiter,
   emailLimiter
 } from "./middleware/rateLimiter";
-import { requireAuth, requireAdmin } from "./middleware/auth";
+import { requireAuth, requireAdmin, requireOwnership } from "./middleware/auth";
 import { verifyPaystackSignature, PaystackWebhookHandler } from './paystackWebhook';
+import { registerStripeWebhooks } from './webhookHandlers';
 import { mapPaymentError, Money, paymentLogger } from './utils/paymentUtils';
+import { IdempotencyCache } from './utils/idempotencyCache';
 import { computeNextDate, runRecurringScheduler } from './recurringScheduler';
+
+// Helper to safely extract route params (Express 5 types params as string | string[])
+function param(val: string | string[]): string {
+  return Array.isArray(val) ? val[0] : val;
+}
+
+// Helper to safely extract header values
+function header(val: string | string[] | undefined): string {
+  if (!val) return '';
+  return Array.isArray(val) ? val[0] : val;
+}
+
+// Reusable server-side amount validation for payment endpoints
+function validateAmount(amount: number | string, currency: string = 'USD'): { valid: boolean; error?: string; parsed: number } {
+  const parsed = typeof amount === 'string' ? parseFloat(amount) : amount;
+  if (isNaN(parsed) || !isFinite(parsed)) return { valid: false, error: 'Invalid amount', parsed: 0 };
+  if (parsed <= 0) return { valid: false, error: 'Amount must be greater than zero', parsed };
+  if (parsed > 1_000_000_000) return { valid: false, error: 'Amount exceeds maximum limit', parsed };
+  // Check for excessive decimal places (more than 2)
+  const decimalStr = String(parsed);
+  const decimalPart = decimalStr.split('.')[1];
+  if (decimalPart && decimalPart.length > 2) return { valid: false, error: 'Amount cannot have more than 2 decimal places', parsed };
+  return { valid: true, parsed };
+}
 
 const uploadDir = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -105,7 +131,7 @@ async function getAuditUserName(req: any): Promise<string> {
   try {
     const uid = req.user?.uid;
     if (uid) {
-      const profile = await storage.getUserProfile(uid);
+      const profile = await storage.getUserProfileByCognitoSub(uid);
       if (profile?.displayName) return profile.displayName;
       if (profile?.email) return profile.email;
     }
@@ -148,7 +174,7 @@ async function logAudit(
   }
 }
 
-// Resolve the user's active company from their Firebase UID
+// Resolve the user's active company from their Cognito sub
 async function resolveUserCompany(req: any): Promise<{ companyId: string; role: string } | null> {
   try {
     const uid = req.user?.uid;
@@ -157,7 +183,25 @@ async function resolveUserCompany(req: any): Promise<{ companyId: string; role: 
     // Check X-Company-Id header for multi-company users
     const headerCompanyId = req.headers['x-company-id'] as string;
 
-    const userCompanies = await storage.getUserCompanies(uid);
+    let userCompanies = await storage.getUserCompanies(uid);
+
+    // If no companies found by userId, also try by email
+    if (userCompanies.length === 0 && req.user?.email) {
+      const profile = await storage.getUserProfileByCognitoSub(uid);
+      if (profile?.email) {
+        const memberByEmail = await storage.getCompanyMembersByEmail(profile.email);
+        if (memberByEmail.length > 0) {
+          // Link the userId to these memberships for future lookups
+          for (const member of memberByEmail) {
+            if (!member.userId) {
+              await storage.updateCompanyMember(member.id, { userId: uid });
+            }
+          }
+          userCompanies = memberByEmail;
+        }
+      }
+    }
+
     if (userCompanies.length === 0) return null;
 
     // If header specifies company, validate user is a member
@@ -168,9 +212,20 @@ async function resolveUserCompany(req: any): Promise<{ companyId: string; role: 
 
     // Default to first (or only) company
     return { companyId: userCompanies[0].companyId, role: userCompanies[0].role };
-  } catch {
+  } catch (err) {
+    console.error('resolveUserCompany error:', err);
     return null;
   }
+}
+
+// Get settings using company context (falls back to singleton)
+async function getSettingsForRequest(req: any): Promise<any> {
+  const company = await resolveUserCompany(req);
+  if (company?.companyId) {
+    const companySettings = await storage.getCompanyAsSettings(company.companyId);
+    if (companySettings) return companySettings;
+  }
+  return storage.getSettings();
 }
 
 // Middleware to verify entity belongs to user's company
@@ -265,9 +320,17 @@ const payrollSchema = z.object({
   employeeId: z.string().optional(),
   employeeName: z.string().min(1),
   department: z.string().optional().default('General'),
+  country: z.string().optional(),
+  currency: z.string().optional(),
   salary: z.union([z.string(), z.number()]).transform(val => String(val)),
   bonus: z.union([z.string(), z.number()]).optional().transform(val => String(val || '0')),
   deductions: z.union([z.string(), z.number()]).optional().transform(val => String(val || '0')),
+  deductionBreakdown: z.object({
+    tax: z.number().default(0),
+    pension: z.number().default(0),
+    insurance: z.number().default(0),
+    other: z.number().default(0),
+  }).optional(),
   payDate: z.string().optional(),
   recurring: z.boolean().optional().default(false),
   frequency: z.enum(['once', 'weekly', 'monthly', 'quarterly', 'yearly']).optional().default('monthly'),
@@ -278,6 +341,11 @@ const invoiceSchema = z.object({
   client: z.string().min(1),
   clientEmail: z.string().email("Invalid email address").optional().or(z.literal('')),
   amount: z.union([z.string(), z.number()]).transform(val => String(val)),
+  subtotal: z.union([z.string(), z.number()]).optional().transform(val => val ? String(val) : undefined),
+  taxRate: z.union([z.string(), z.number()]).optional().transform(val => val ? String(val) : '0'),
+  taxAmount: z.union([z.string(), z.number()]).optional().transform(val => val ? String(val) : '0'),
+  currency: z.string().optional().default('USD'),
+  notes: z.string().optional(),
   dueDate: z.string().optional(),
   items: z.array(z.object({
     description: z.string().optional(),
@@ -330,6 +398,12 @@ const payrollUpdateSchema = payrollSchema.partial().extend({
   bankName: z.string().optional().nullable(),
   accountNumber: z.string().optional().nullable(),
   accountName: z.string().optional().nullable(),
+  deductionBreakdown: z.object({
+    tax: z.number().default(0),
+    pension: z.number().default(0),
+    insurance: z.number().default(0),
+    other: z.number().default(0),
+  }).optional(),
 });
 const invoiceUpdateSchema = invoiceSchema.partial().extend({
   status: z.string().optional(),
@@ -344,6 +418,33 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  // ==================== HEALTH CHECK ====================
+  app.get("/api/health", async (_req, res) => {
+    let dbStatus = "ok";
+    try {
+      // Quick DB connectivity check with timeout for ALB health checks
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('DB timeout')), 3000)
+      );
+      await Promise.race([
+        storage.getNotifications('__health_check__'),
+        timeoutPromise,
+      ]);
+    } catch {
+      dbStatus = "unreachable";
+    }
+
+    const status = dbStatus === "ok" ? "ok" : "degraded";
+    const statusCode = dbStatus === "ok" ? 200 : 503;
+    res.status(statusCode).json({
+      status,
+      timestamp: new Date().toISOString(),
+      version: "4.0.0",
+      environment: process.env.NODE_ENV || "development",
+      database: dbStatus,
+    });
+  });
 
   // ==================== PAYSTACK WEBHOOK ====================
   app.post("/api/paystack/webhook", express.raw({ type: 'application/json' }), async (req, res) => {
@@ -376,8 +477,11 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== STRIPE WEBHOOK ====================
+  registerStripeWebhooks(app);
+
   // ==================== BALANCES ====================
-  app.get("/api/balances", async (req, res) => {
+  app.get("/api/balances", requireAuth, async (req, res) => {
     try {
       const balances = await storage.getBalances();
       res.json(balances);
@@ -395,34 +499,36 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/balances/fund", requireAuth, async (req, res) => {
+  app.post("/api/balances/fund", financialLimiter, requireAuth, async (req, res) => {
     try {
       const { amount } = req.body;
-      const parsedAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
-      
-      if (isNaN(parsedAmount) || parsedAmount <= 0) {
-        return res.status(400).json({ error: "Invalid amount" });
+      const amountCheck = validateAmount(amount);
+      if (!amountCheck.valid) {
+        return res.status(400).json({ error: amountCheck.error });
       }
+      const parsedAmount = amountCheck.parsed;
 
-      const MAX_DEPOSIT_AMOUNT = 1000000;
-      if (parsedAmount > MAX_DEPOSIT_AMOUNT) {
-        return res.status(400).json({ error: `Deposit amount cannot exceed ${MAX_DEPOSIT_AMOUNT}` });
-      }
-
+      const fundCompany = await resolveUserCompany(req);
       const currentBalances = await storage.getBalances();
       const currentLocal = parseFloat(String(currentBalances?.local || 0));
       const newLocal = currentLocal + parsedAmount;
-      
+
+      const settings = await getSettingsForRequest(req);
+      const currency = settings.currency || 'USD';
+
       await storage.createTransaction({
-        type: "Funding",
+        type: "funding",
         amount: String(parsedAmount),
         fee: "0",
-        status: 'Completed',
+        status: 'completed',
         date: new Date().toISOString().split('T')[0],
         description: "Wallet Funding",
-        currency: 'USD',
+        currency,
+        reference: null,
+        userId: null,
+        companyId: fundCompany?.companyId ?? null,
       });
-      
+
       const updatedBalances = await storage.updateBalances({ local: String(newLocal) });
 
       try {
@@ -433,7 +539,7 @@ export async function registerRoutes(
           userName: auditName,
           entityType: 'wallet',
           entityId: 'company-balance',
-          details: { amount: parsedAmount, currency: 'USD', newBalance: newLocal },
+          details: { amount: parsedAmount, currency, newBalance: newLocal },
           ipAddress: req.ip || '',
           userAgent: req.headers['user-agent'] || '',
           createdAt: new Date().toISOString(),
@@ -446,34 +552,41 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/balances/withdraw", requireAuth, async (req, res) => {
+  app.post("/api/balances/withdraw", financialLimiter, requireAuth, async (req, res) => {
     try {
       const { amount } = req.body;
-      const parsedAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
-      
-      if (isNaN(parsedAmount) || parsedAmount <= 0) {
-        return res.status(400).json({ error: "Invalid amount" });
+      const amountCheck = validateAmount(amount);
+      if (!amountCheck.valid) {
+        return res.status(400).json({ error: amountCheck.error });
       }
+      const parsedAmount = amountCheck.parsed;
 
+      const withdrawCompany = await resolveUserCompany(req);
       const currentBalances = await storage.getBalances();
       const currentLocal = parseFloat(String(currentBalances?.local || 0));
-      
+
       if (parsedAmount > currentLocal) {
         return res.status(400).json({ error: "Insufficient funds" });
       }
 
       const newLocal = currentLocal - parsedAmount;
-      
+
+      const settings = await getSettingsForRequest(req);
+      const currency = settings.currency || 'USD';
+
       await storage.createTransaction({
-        type: "Payout",
+        type: "payout",
         amount: String(parsedAmount),
         fee: "0",
-        status: 'Completed',
+        status: 'completed',
         date: new Date().toISOString().split('T')[0],
         description: "Wallet Withdrawal",
-        currency: 'USD',
+        currency,
+        reference: null,
+        userId: null,
+        companyId: withdrawCompany?.companyId ?? null,
       });
-      
+
       const updatedBalances = await storage.updateBalances({ local: String(newLocal) });
 
       try {
@@ -484,7 +597,7 @@ export async function registerRoutes(
           userName: auditName,
           entityType: 'wallet',
           entityId: 'company-balance',
-          details: { amount: parsedAmount, currency: 'USD', newBalance: newLocal },
+          details: { amount: parsedAmount, currency, newBalance: newLocal },
           ipAddress: req.ip || '',
           userAgent: req.headers['user-agent'] || '',
           createdAt: new Date().toISOString(),
@@ -497,38 +610,45 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/balances/send", async (req, res) => {
+  app.post("/api/balances/send", financialLimiter, requireAuth, async (req, res) => {
     try {
       const { amount, recipient, note } = req.body;
-      const parsedAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
-      
-      if (isNaN(parsedAmount) || parsedAmount <= 0) {
-        return res.status(400).json({ error: "Invalid amount" });
+      const amountCheck = validateAmount(amount);
+      if (!amountCheck.valid) {
+        return res.status(400).json({ error: amountCheck.error });
       }
-      
+      const parsedAmount = amountCheck.parsed;
+
       if (!recipient) {
         return res.status(400).json({ error: "Recipient required" });
       }
 
+      const sendCompany = await resolveUserCompany(req);
       const currentBalances = await storage.getBalances();
       const currentLocal = parseFloat(String(currentBalances?.local || 0));
-      
+
       if (parsedAmount > currentLocal) {
         return res.status(400).json({ error: "Insufficient funds" });
       }
 
       const newLocal = currentLocal - parsedAmount;
-      
+
+      const settings = await getSettingsForRequest(req);
+      const currency = settings.currency || 'USD';
+
       await storage.createTransaction({
-        type: "Payout",
+        type: "payout",
         amount: String(parsedAmount),
         fee: "0",
-        status: 'Completed',
+        status: 'completed',
         date: new Date().toISOString().split('T')[0],
         description: `Payment to ${recipient}${note ? ` - ${note}` : ''}`,
-        currency: 'USD',
+        currency,
+        reference: null,
+        userId: null,
+        companyId: sendCompany?.companyId ?? null,
       });
-      
+
       const updatedBalances = await storage.updateBalances({ local: String(newLocal) });
       res.json(updatedBalances);
     } catch (error) {
@@ -550,7 +670,7 @@ export async function registerRoutes(
   app.get("/api/expenses/:id", requireAuth, async (req, res) => {
     try {
       const company = await resolveUserCompany(req);
-      const expense = await storage.getExpense(req.params.id);
+      const expense = await storage.getExpense(param(req.params.id));
       if (!expense) {
         return res.status(404).json({ error: "Expense not found" });
       }
@@ -563,7 +683,7 @@ export async function registerRoutes(
     }
   });
 
-  app.use('/uploads', (await import('express')).default.static(uploadDir));
+  app.use('/uploads', requireAuth, (await import('express')).default.static(uploadDir));
 
   app.post("/api/upload/receipt", requireAuth, upload.single('receipt'), async (req, res) => {
     try {
@@ -586,8 +706,13 @@ export async function registerRoutes(
       }
       const { merchant, amount, category, note, receiptUrl, expenseType, attachments, taggedReviewers, userId, user } = result.data;
 
+      const amountCheck = validateAmount(amount);
+      if (!amountCheck.valid) {
+        return res.status(400).json({ error: amountCheck.error });
+      }
+
       // Get company settings for auto-approval and currency
-      const settings = await storage.getSettings();
+      const settings = await getSettingsForRequest(req);
       const currency = settings.currency || 'USD';
       const autoApproveThreshold = parseFloat(settings.autoApproveBelow?.toString() || '100');
       const expenseAmount = parseFloat(amount);
@@ -621,7 +746,10 @@ export async function registerRoutes(
         expenseType: expenseType || 'request',
         attachments: attachments || [],
         taggedReviewers: taggedReviewers || [],
-        companyId: company?.companyId,
+        companyId: company?.companyId ?? null,
+        vendorId: null,
+        payoutStatus: null,
+        payoutId: null,
       });
 
       // Notify the submitter
@@ -637,7 +765,7 @@ export async function registerRoutes(
 
       // Notify tagged reviewers for review
       if (taggedReviewers && taggedReviewers.length > 0) {
-        const submitterProfile = await storage.getUserProfile(submitterUid);
+        const submitterProfile = await storage.getUserProfileByCognitoSub(submitterUid);
         const submitterName = submitterProfile?.displayName || user || 'A team member';
         for (const reviewerId of taggedReviewers) {
           notificationService.notifyExpenseReviewRequested(reviewerId, {
@@ -653,13 +781,28 @@ export async function registerRoutes(
 
       // If pending, also notify managers/admins for approval
       if (status === 'PENDING') {
-        const teamMembers = await storage.getTeamMembers();
+        const teamMembers = await storage.getTeam();
         const approvers = teamMembers.filter((m: any) => 
           ['Owner', 'Admin', 'Manager'].includes(m.role) && m.userId
         );
         if (approvers.length > 0) {
-          const submitterProfile = await storage.getUserProfile(submitterUid);
+          const submitterProfile = await storage.getUserProfileByCognitoSub(submitterUid);
           const submitterName = submitterProfile?.displayName || user || 'A team member';
+          // Send rich approval request emails to approvers
+          for (const approver of approvers) {
+            if (approver.email) {
+              notificationService.sendExpenseApprovalRequestEmail({
+                email: approver.email,
+                approverName: approver.name || 'Manager',
+                submitterName,
+                expenseDescription: merchant,
+                amount: expenseAmount,
+                currency,
+                expenseDate: new Date().toISOString().split('T')[0],
+              }).catch(console.error);
+            }
+          }
+
           notificationService.notifyExpenseSubmittedForApproval(
             approvers.map((a: any) => a.userId).filter(Boolean),
             {
@@ -686,9 +829,27 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid expense data", details: result.error.issues });
       }
-      
-      const originalExpense = await storage.getExpense(req.params.id);
-      const expense = await storage.updateExpense(req.params.id, result.data);
+
+      // SECURITY: Role check for expense approval/rejection
+      if (result.data.status === 'APPROVED' || result.data.status === 'REJECTED') {
+        const userCompany = await resolveUserCompany(req);
+        if (!userCompany || !['OWNER', 'ADMIN', 'MANAGER'].includes(userCompany.role)) {
+          return res.status(403).json({ error: 'Only owners, admins, and managers can approve or reject expenses' });
+        }
+      }
+
+      // Set approval/rejection metadata
+      if (result.data.status === 'APPROVED') {
+        (result.data as any).approvedBy = (req as any).user?.uid || 'unknown';
+        (result.data as any).approvedAt = new Date().toISOString();
+      }
+      if (result.data.status === 'REJECTED') {
+        (result.data as any).rejectedBy = (req as any).user?.uid || 'unknown';
+        (result.data as any).rejectedAt = new Date().toISOString();
+      }
+
+      const originalExpense = await storage.getExpense(param(req.params.id));
+      const expense = await storage.updateExpense(param(req.params.id), result.data);
       if (!expense) {
         return res.status(404).json({ error: "Expense not found" });
       }
@@ -703,6 +864,20 @@ export async function registerRoutes(
             merchant: expense.merchant,
             amount: parseFloat(expense.amount),
           }).catch(console.error);
+
+          // Send rich approval email
+          const approverProfile = await storage.getUserProfileByCognitoSub((req as any).user?.uid);
+          const submitterProfile = await storage.getUserProfileByCognitoSub(userId);
+          if (submitterProfile?.email) {
+            notificationService.sendExpenseApprovedEmail({
+              email: submitterProfile.email,
+              name: submitterProfile.displayName || 'Team Member',
+              expenseDescription: expense.merchant,
+              amount: parseFloat(expense.amount),
+              currency: expense.currency || 'USD',
+              approverName: approverProfile?.displayName || 'Admin',
+            }).catch(console.error);
+          }
 
           if (expense.payoutStatus === 'not_started' || !expense.payoutStatus) {
             try {
@@ -749,6 +924,21 @@ export async function registerRoutes(
             amount: parseFloat(expense.amount),
             reason: result.data.rejectionReason,
           }).catch(console.error);
+
+          // Send rich rejection email
+          const rejectorProfile = await storage.getUserProfileByCognitoSub((req as any).user?.uid);
+          const rejectedUserProfile = await storage.getUserProfileByCognitoSub(userId);
+          if (rejectedUserProfile?.email) {
+            notificationService.sendExpenseRejectedEmail({
+              email: rejectedUserProfile.email,
+              name: rejectedUserProfile.displayName || 'Team Member',
+              expenseDescription: expense.merchant,
+              amount: parseFloat(expense.amount),
+              currency: expense.currency || 'USD',
+              rejectedBy: rejectorProfile?.displayName || 'Admin',
+              reason: result.data.rejectionReason,
+            }).catch(console.error);
+          }
         }
       }
       
@@ -760,7 +950,7 @@ export async function registerRoutes(
 
   app.delete("/api/expenses/:id", requireAuth, async (req, res) => {
     try {
-      const deleted = await storage.deleteExpense(req.params.id);
+      const deleted = await storage.deleteExpense(param(req.params.id));
       if (!deleted) {
         return res.status(404).json({ error: "Expense not found" });
       }
@@ -770,19 +960,86 @@ export async function registerRoutes(
     }
   });
 
-  // ==================== TRANSACTIONS ====================
-  app.get("/api/transactions", async (req, res) => {
+  // Batch expense approval
+  app.post("/api/expenses/batch-approve", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const transactions = await storage.getTransactions();
+      const { expenseIds } = req.body;
+      if (!Array.isArray(expenseIds) || expenseIds.length === 0) {
+        return res.status(400).json({ error: "expenseIds must be a non-empty array" });
+      }
+      if (expenseIds.length > 50) {
+        return res.status(400).json({ error: "Cannot batch approve more than 50 expenses at once" });
+      }
+
+      const approverId = (req as any).user?.uid;
+      const approverProfile = await storage.getUserProfileByCognitoSub(approverId);
+      const approverName = approverProfile?.displayName || 'Admin';
+      const results: { id: string; status: string; error?: string }[] = [];
+
+      for (const id of expenseIds) {
+        try {
+          const expense = await storage.getExpense(id);
+          if (!expense) {
+            results.push({ id, status: 'skipped', error: 'Not found' });
+            continue;
+          }
+          if (expense.status !== 'PENDING') {
+            results.push({ id, status: 'skipped', error: `Already ${expense.status}` });
+            continue;
+          }
+
+          await storage.updateExpense(id, { status: 'APPROVED' });
+
+          // Send notifications
+          const submitterId = (expense as any).submittedBy || expense.userId || 'system';
+          notificationService.notifyExpenseApproved(submitterId, {
+            id: expense.id,
+            merchant: expense.merchant,
+            amount: parseFloat(expense.amount),
+          }).catch(console.error);
+
+          const submitterProfile = await storage.getUserProfileByCognitoSub(submitterId);
+          if (submitterProfile?.email) {
+            notificationService.sendExpenseApprovedEmail({
+              email: submitterProfile.email,
+              name: submitterProfile.displayName || 'Team Member',
+              expenseDescription: expense.merchant,
+              amount: parseFloat(expense.amount),
+              currency: expense.currency || 'USD',
+              approverName,
+            }).catch(console.error);
+          }
+
+          results.push({ id, status: 'approved' });
+        } catch (err: any) {
+          results.push({ id, status: 'failed', error: err.message });
+        }
+      }
+
+      const approved = results.filter(r => r.status === 'approved').length;
+      const skipped = results.filter(r => r.status === 'skipped').length;
+      const failed = results.filter(r => r.status === 'failed').length;
+
+      res.json({ total: expenseIds.length, approved, skipped, failed, results });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to batch approve expenses" });
+    }
+  });
+
+  // ==================== TRANSACTIONS ====================
+  app.get("/api/transactions", requireAuth, async (req, res) => {
+    try {
+      const userCompany = await resolveUserCompany(req);
+      const transactions = await storage.getTransactions(userCompany?.companyId);
       res.json(transactions);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch transactions" });
     }
   });
 
-  app.get("/api/transactions/:id", async (req, res) => {
+  app.get("/api/transactions/:id", requireAuth, async (req, res) => {
     try {
-      const transaction = await storage.getTransaction(req.params.id);
+      const transaction = await storage.getTransaction(param(req.params.id));
       if (!transaction) {
         return res.status(404).json({ error: "Transaction not found" });
       }
@@ -792,7 +1049,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/transactions", async (req, res) => {
+  app.post("/api/transactions", requireAuth, async (req, res) => {
     try {
       const result = transactionSchema.safeParse(req.body);
       if (!result.success) {
@@ -800,14 +1057,21 @@ export async function registerRoutes(
       }
       const { type, amount, description, fee } = result.data;
 
+      const txnCompany = await resolveUserCompany(req);
+      const settings = await getSettingsForRequest(req);
+      const currency = settings.currency || 'USD';
+
       const transaction = await storage.createTransaction({
         type: type,
         amount: String(amount),
         fee: String(fee || 0),
-        status: 'Completed',
+        status: 'completed',
         date: new Date().toISOString().split('T')[0],
         description: description || '',
-        currency: 'USD',
+        currency,
+        reference: null,
+        userId: null,
+        companyId: txnCompany?.companyId ?? null,
       });
       
       res.status(201).json(transaction);
@@ -816,13 +1080,13 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/transactions/:id", async (req, res) => {
+  app.patch("/api/transactions/:id", requireAuth, async (req, res) => {
     try {
       const result = transactionUpdateSchema.safeParse(req.body);
       if (!result.success) {
         return res.status(400).json({ error: "Invalid transaction data", details: result.error.issues });
       }
-      const transaction = await storage.updateTransaction(req.params.id, result.data as any);
+      const transaction = await storage.updateTransaction(param(req.params.id), result.data as any);
       if (!transaction) {
         return res.status(404).json({ error: "Transaction not found" });
       }
@@ -832,9 +1096,9 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/transactions/:id", async (req, res) => {
+  app.delete("/api/transactions/:id", requireAuth, async (req, res) => {
     try {
-      const deleted = await storage.deleteTransaction(req.params.id);
+      const deleted = await storage.deleteTransaction(param(req.params.id));
       if (!deleted) {
         return res.status(404).json({ error: "Transaction not found" });
       }
@@ -858,7 +1122,7 @@ export async function registerRoutes(
   app.get("/api/bills/:id", requireAuth, async (req, res) => {
     try {
       const company = await resolveUserCompany(req);
-      const bill = await storage.getBill(req.params.id);
+      const bill = await storage.getBill(param(req.params.id));
       if (!bill) {
         return res.status(404).json({ error: "Bill not found" });
       }
@@ -880,7 +1144,7 @@ export async function registerRoutes(
       }
       const { name, provider, amount, dueDate, category, recurring, frequency, userId } = result.data;
 
-      const settings = await storage.getSettings();
+      const settings = await getSettingsForRequest(req);
       const billCurrency = settings?.currency || 'USD';
 
       const bill = await storage.createBill({
@@ -889,17 +1153,17 @@ export async function registerRoutes(
         amount,
         dueDate,
         category: category || 'Other',
-        status: 'Unpaid',
+        status: 'unpaid',
         currency: billCurrency,
         logo: null,
         userId: userId || null,
         recurring: recurring || false,
         frequency: frequency || 'monthly',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        companyId: company?.companyId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        companyId: company?.companyId ?? null,
       });
-      
+
       res.status(201).json(bill);
     } catch (error) {
       res.status(500).json({ error: "Failed to create bill" });
@@ -912,7 +1176,13 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid bill data", details: result.error.issues });
       }
-      const bill = await storage.updateBill(req.params.id, result.data as any);
+
+      // SECURITY: Prevent setting status to paid via PATCH — use POST /api/bills/:id/pay instead
+      if (result.data.status === 'paid' || result.data.status === 'Paid') {
+        return res.status(400).json({ error: 'Use POST /api/bills/:id/pay to pay a bill through the wallet' });
+      }
+
+      const bill = await storage.updateBill(param(req.params.id), result.data as any);
       if (!bill) {
         return res.status(404).json({ error: "Bill not found" });
       }
@@ -925,7 +1195,7 @@ export async function registerRoutes(
             userId: (req as any).user?.uid || 'system',
             userName: auditName,
             entityType: 'bill',
-            entityId: req.params.id,
+            entityId: param(req.params.id),
             details: { billName: bill.name, amount: bill.amount, provider: bill.provider, category: bill.category },
             ipAddress: req.ip || '',
             userAgent: req.headers['user-agent'] || '',
@@ -942,7 +1212,7 @@ export async function registerRoutes(
 
   app.delete("/api/bills/:id", requireAuth, async (req, res) => {
     try {
-      const deleted = await storage.deleteBill(req.params.id);
+      const deleted = await storage.deleteBill(param(req.params.id));
       if (!deleted) {
         return res.status(404).json({ error: "Bill not found" });
       }
@@ -962,7 +1232,7 @@ export async function registerRoutes(
   app.post("/api/bills/:id/approve", requireAuth, requireAdmin, async (req, res) => {
     try {
       const company = await resolveUserCompany(req);
-      const bill = await storage.getBill(req.params.id);
+      const bill = await storage.getBill(param(req.params.id));
       if (!bill) {
         return res.status(404).json({ error: "Bill not found" });
       }
@@ -998,7 +1268,7 @@ export async function registerRoutes(
       const company = await resolveUserCompany(req);
       const { reason } = req.body;
 
-      const bill = await storage.getBill(req.params.id);
+      const bill = await storage.getBill(param(req.params.id));
       if (!bill) {
         return res.status(404).json({ error: "Bill not found" });
       }
@@ -1043,7 +1313,7 @@ export async function registerRoutes(
   app.get("/api/budgets/:id", requireAuth, async (req, res) => {
     try {
       const company = await resolveUserCompany(req);
-      const budget = await storage.getBudget(req.params.id);
+      const budget = await storage.getBudget(param(req.params.id));
       if (!budget) {
         return res.status(404).json({ error: "Budget not found" });
       }
@@ -1065,16 +1335,19 @@ export async function registerRoutes(
       }
       const { name, category, limit, period } = result.data;
 
+      const settings = await getSettingsForRequest(req);
+      const currency = settings.currency || 'USD';
+
       const budget = await storage.createBudget({
         name,
         category,
         limit,
         spent: '0',
-        currency: 'USD',
+        currency,
         period: (period || 'monthly') as any,
-        companyId: company?.companyId,
+        companyId: company?.companyId ?? null,
       });
-      
+
       res.status(201).json(budget);
     } catch (error) {
       res.status(500).json({ error: "Failed to create budget" });
@@ -1087,7 +1360,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid budget data", details: result.error.issues });
       }
-      const budget = await storage.updateBudget(req.params.id, result.data as any);
+      const budget = await storage.updateBudget(param(req.params.id), result.data as any);
       if (!budget) {
         return res.status(404).json({ error: "Budget not found" });
       }
@@ -1099,7 +1372,7 @@ export async function registerRoutes(
 
   app.delete("/api/budgets/:id", requireAuth, async (req, res) => {
     try {
-      const deleted = await storage.deleteBudget(req.params.id);
+      const deleted = await storage.deleteBudget(param(req.params.id));
       if (!deleted) {
         return res.status(404).json({ error: "Budget not found" });
       }
@@ -1123,7 +1396,7 @@ export async function registerRoutes(
   app.get("/api/cards/:id", requireAuth, async (req, res) => {
     try {
       const company = await resolveUserCompany(req);
-      const card = await storage.getCard(req.params.id);
+      const card = await storage.getCard(param(req.params.id));
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -1147,25 +1420,32 @@ export async function registerRoutes(
 
       const selectedCurrency = cardCurrency || 'USD';
 
-      // Determine provider based on currency
-      const isLocalCurrency = ['NGN', 'GHS', 'KES', 'ZAR', 'EGP', 'RWF', 'XOF'].includes(selectedCurrency);
-      const provider = isLocalCurrency ? 'paystack' : 'stripe';
+      // Virtual card issuance is only available via Stripe (USD, EUR, GBP, AUD, etc.)
+      // Paystack does not have a card issuance API — reject local currency cards
+      const LOCAL_CURRENCIES = ['NGN', 'GHS', 'KES', 'ZAR', 'EGP', 'RWF', 'XOF'];
+      if (LOCAL_CURRENCIES.includes(selectedCurrency)) {
+        return res.status(400).json({
+          error: 'Virtual card issuance is not yet available for this currency.',
+          detail: `Card issuance for ${selectedCurrency} is coming soon. Virtual cards are currently available for USD, EUR, GBP, and AUD.`,
+          comingSoon: true,
+        });
+      }
 
-      // For Stripe currencies, cards are Visa; for Paystack, use Mastercard
-      const cardType = isLocalCurrency ? 'Mastercard' : (type || 'Visa');
+      const provider = 'stripe';
+      const cardType = type || 'Visa';
 
-      let last4 = String(Math.floor(1000 + Math.random() * 9000));
+      let last4: string | undefined;
       let stripeCardId: string | undefined;
       let stripeCardholderId: string | undefined;
 
-      // For Stripe provider, create real Stripe Issuing card
-      if (provider === 'stripe') {
+      // Create real Stripe Issuing card
+      {
         try {
           const user = req.user as any;
           const userId = user?.uid || user?.id;
 
-          // Get full user profile for billing address (Firebase token doesn't have address)
-          const userProfile = userId ? await storage.getUserProfile(userId) : null;
+          // Get full user profile for billing address (Cognito token doesn't have address)
+          const userProfile = userId ? await storage.getUserProfileByCognitoSub(userId) : null;
           const kycData = userId ? await storage.getKycSubmission(userId) : null;
 
           if (!userProfile?.email) {
@@ -1224,7 +1504,7 @@ export async function registerRoutes(
         type: cardType as any,
         color: color || 'indigo',
         currency: selectedCurrency,
-        status: 'Active',
+        status: 'active',
         stripeCardId,
         stripeCardholderId,
         companyId: company?.companyId,
@@ -1246,7 +1526,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid card data", details: result.error.issues });
       }
-      const existingCard = await storage.getCard(req.params.id);
+      const existingCard = await storage.getCard(param(req.params.id));
       if (!existingCard) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -1254,7 +1534,7 @@ export async function registerRoutes(
       if (company && existingCard.companyId && existingCard.companyId !== company.companyId) {
         return res.status(403).json({ error: "Access denied" });
       }
-      const card = await storage.updateCard(req.params.id, result.data as any);
+      const card = await storage.updateCard(param(req.params.id), result.data as any);
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -1266,7 +1546,7 @@ export async function registerRoutes(
 
   app.delete("/api/cards/:id", requireAuth, async (req, res) => {
     try {
-      const card = await storage.getCard(req.params.id);
+      const card = await storage.getCard(param(req.params.id));
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -1274,7 +1554,7 @@ export async function registerRoutes(
       if (company && card.companyId && card.companyId !== company.companyId) {
         return res.status(403).json({ error: "Access denied" });
       }
-      const deleted = await storage.deleteCard(req.params.id);
+      const deleted = await storage.deleteCard(param(req.params.id));
       if (!deleted) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -1285,7 +1565,7 @@ export async function registerRoutes(
   });
 
   // Fund a virtual card from wallet
-  app.post("/api/cards/:id/fund", requireAuth, async (req, res) => {
+  app.post("/api/cards/:id/fund", financialLimiter, requireAuth, async (req, res) => {
     try {
       const { amount, sourceCurrency } = req.body;
       const userId = (req as any).user?.uid;
@@ -1294,11 +1574,12 @@ export async function registerRoutes(
         return res.status(401).json({ error: "Authentication required" });
       }
 
-      if (!amount || amount <= 0) {
-        return res.status(400).json({ error: "Valid amount is required" });
+      const amountCheck = validateAmount(amount);
+      if (!amountCheck.valid) {
+        return res.status(400).json({ error: amountCheck.error });
       }
       
-      const card = await storage.getCard(req.params.id);
+      const card = await storage.getCard(param(req.params.id));
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -1362,17 +1643,20 @@ export async function registerRoutes(
       // Update card balance
       const currentBalance = parseFloat(String(card.balance || 0));
       const newBalance = currentBalance + amountToCredit;
-      const updated = await storage.updateCard(req.params.id, { balance: newBalance });
+      const updated = await storage.updateCard(param(req.params.id), { balance: newBalance });
       
       // Create funding transaction
       await storage.createTransaction({
         description: `Card funding - ${card.name} (****${card.last4})`,
         amount: String(amountToCredit),
         fee: "0",
-        type: 'Funding',
-        status: 'Completed',
+        type: 'funding',
+        status: 'completed',
         date: new Date().toISOString().split('T')[0],
         currency: cardCurrency,
+        reference: null,
+        userId: null,
+        companyId: company?.companyId ?? null,
       });
 
       const currencySymbols: Record<string, string> = {
@@ -1408,7 +1692,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Merchant is required" });
       }
       
-      const card = await storage.getCard(req.params.id);
+      const card = await storage.getCard(param(req.params.id));
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -1417,7 +1701,7 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Access denied" });
       }
       
-      if (card.status !== 'Active') {
+      if (card.status !== 'active') {
         return res.status(400).json({ error: "Card is not active" });
       }
       
@@ -1428,12 +1712,14 @@ export async function registerRoutes(
       
       // Deduct from card balance
       const newBalance = cardBalance - amount;
-      await storage.updateCard(req.params.id, { balance: String(newBalance) });
+      await storage.updateCard(param(req.params.id), { balance: String(newBalance) });
       
       // Create card transaction record
       const cardTx = await storage.createCardTransaction({
-        cardId: req.params.id,
+        cardId: param(req.params.id),
+        companyId: card.companyId || null,
         amount: String(amount),
+        currency: card.currency || 'USD',
         merchant,
         category: category || 'General',
         description: description || '',
@@ -1451,6 +1737,7 @@ export async function registerRoutes(
         status: 'PAID',
         user: 'Card Payment',
         userId: '1',
+        companyId: null,
         department: 'General',
         note: `Paid with virtual card ****${card.last4}`,
         receiptUrl: null,
@@ -1476,7 +1763,7 @@ export async function registerRoutes(
   // Get card transactions
   app.get("/api/cards/:id/transactions", requireAuth, async (req, res) => {
     try {
-      const card = await storage.getCard(req.params.id);
+      const card = await storage.getCard(param(req.params.id));
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -1485,7 +1772,7 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Access denied" });
       }
       
-      const transactions = await storage.getCardTransactions(req.params.id);
+      const transactions = await storage.getCardTransactions(param(req.params.id), company?.companyId);
       res.json(transactions);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch card transactions" });
@@ -1512,8 +1799,10 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Account name is required" });
       }
 
-      const effectiveCurrency = currency || 'USD';
-      const effectiveCountry = countryCode || (effectiveCurrency === 'NGN' ? 'NG' : 'US');
+      const effectiveCountry = countryCode || (currency === 'NGN' ? 'NG' : currency === 'GHS' ? 'GH' : 'US');
+      // DVA countries must use local currency regardless of what client sends
+      const DVA_CURRENCY_MAP: Record<string, string> = { 'NG': 'NGN', 'GH': 'GHS' };
+      const effectiveCurrency = DVA_CURRENCY_MAP[effectiveCountry.toUpperCase()] || currency || 'USD';
       const provider = paymentService.getProvider ? paymentService.getProvider(effectiveCountry) : (
         ['NG', 'GH', 'ZA', 'KE', 'EG', 'RW', 'CI'].includes(effectiveCountry.toUpperCase()) ? 'paystack' : 'stripe'
       );
@@ -1539,7 +1828,7 @@ export async function registerRoutes(
             supportedCountries: DVA_SUPPORTED_COUNTRIES,
           });
         }
-        const userProfile = userId ? await storage.getUserProfile(userId) : null;
+        const userProfile = userId ? await storage.getUserProfileByCognitoSub(userId) : null;
         const userEmail = email || (userProfile as any)?.email;
         const userFirstName = firstName || (userProfile as any)?.firstName || name;
         const userLastName = lastName || (userProfile as any)?.lastName || 'User';
@@ -1611,6 +1900,17 @@ export async function registerRoutes(
         }
       }
 
+      // Only persist if we got a real account number from the provider
+      if (!accountNumber || accountNumber.startsWith('pending_') || accountNumber.startsWith('PENDING')) {
+        return res.status(202).json({
+          message: "Virtual account is being provisioned. Bank details will be available shortly.",
+          status: 'provisioning',
+          bankName: bankName || undefined,
+          providerCustomerCode: providerCustomerCode || undefined,
+          providerAccountId: providerAccountId || undefined,
+        });
+      }
+
       // Persist in DB with real provider details
       const account = await storage.createVirtualAccount({
         userId: userId || null,
@@ -1620,6 +1920,9 @@ export async function registerRoutes(
         accountName,
         bankName,
         bankCode,
+        routingNumber: null,
+        swiftCode: null,
+        country: countryCode || 'US',
         currency: effectiveCurrency,
         balance: '0',
         type: type || 'collection',
@@ -1639,7 +1942,7 @@ export async function registerRoutes(
 
   app.get("/api/virtual-accounts/:id", requireAuth, async (req, res) => {
     try {
-      const account = await storage.getVirtualAccount(req.params.id);
+      const account = await storage.getVirtualAccount(param(req.params.id));
       if (!account) {
         return res.status(404).json({ error: "Virtual account not found" });
       }
@@ -1664,7 +1967,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Valid amount is required" });
       }
 
-      const account = await storage.getVirtualAccount(req.params.id);
+      const account = await storage.getVirtualAccount(param(req.params.id));
       if (!account) {
         return res.status(404).json({ error: "Virtual account not found" });
       }
@@ -1723,11 +2026,12 @@ export async function registerRoutes(
             description: `Deposit to ${account.name} (${account.accountNumber})`,
             amount: String(amount),
             fee: "0",
-            type: 'Deposit',
-            status: 'Pending',
+            type: 'deposit',
+            status: 'pending',
             date: new Date().toISOString().split('T')[0],
             currency: account.currency,
             reference: transfer.id,
+            userId: null,
           });
 
           res.json({
@@ -1756,7 +2060,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Valid amount is required" });
       }
 
-      const account = await storage.getVirtualAccount(req.params.id);
+      const account = await storage.getVirtualAccount(param(req.params.id));
       if (!account) {
         return res.status(404).json({ error: "Virtual account not found" });
       }
@@ -1807,23 +2111,24 @@ export async function registerRoutes(
 
           // Debit the virtual account balance optimistically
           const newBalance = accountBalance - amount;
-          await storage.updateVirtualAccount(req.params.id, { balance: String(newBalance) } as any);
+          await storage.updateVirtualAccount(param(req.params.id), { balance: String(newBalance) } as any);
 
           // Create pending transaction (webhook will update to Completed/Failed)
           await storage.createTransaction({
             description: `Withdrawal from ${account.name} to ${destination.accountNumber}`,
             amount: String(amount),
             fee: "0",
-            type: 'Payout',
-            status: 'Pending',
+            type: 'payout',
+            status: 'pending',
             date: new Date().toISOString().split('T')[0],
             currency: account.currency,
-            reference: transfer.data?.transfer_code || transfer.data?.reference,
+            reference: transfer.data?.transfer_code || transfer.data?.reference || null,
+            userId: null,
           });
 
           // Send SMS notification
           if (account.userId) {
-            const profile = await storage.getUserProfile(account.userId);
+            const profile = await storage.getUserProfileByCognitoSub(account.userId);
             const settings = await storage.getNotificationSettings(account.userId);
             if (profile?.phoneNumber && settings?.paymentNotifications) {
               notificationService.sendTransactionAlertSms({
@@ -1888,18 +2193,19 @@ export async function registerRoutes(
 
           // Debit balance optimistically (webhook confirms)
           const newBalance = accountBalance - amount;
-          await storage.updateVirtualAccount(req.params.id, { balance: String(newBalance) } as any);
+          await storage.updateVirtualAccount(param(req.params.id), { balance: String(newBalance) } as any);
 
           // Create pending transaction
           await storage.createTransaction({
             description: `Withdrawal from ${account.name}`,
             amount: String(amount),
             fee: "0",
-            type: 'Payout',
-            status: 'Pending',
+            type: 'payout',
+            status: 'pending',
             date: new Date().toISOString().split('T')[0],
             currency: account.currency,
             reference: outboundPayment.id,
+            userId: null,
           });
 
           res.json({
@@ -1920,8 +2226,20 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/virtual-accounts/:id", requireAuth, async (req, res) => {
+    try {
+      const deleted = await storage.deleteVirtualAccount(param(req.params.id));
+      if (!deleted) {
+        return res.status(404).json({ error: "Virtual account not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete virtual account" });
+    }
+  });
+
   // ==================== DEPARTMENTS ====================
-  app.get("/api/departments", async (req, res) => {
+  app.get("/api/departments", requireAuth, async (req, res) => {
     try {
       const depts = await storage.getDepartments();
       res.json(depts);
@@ -1930,9 +2248,9 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/departments/:id", async (req, res) => {
+  app.get("/api/departments/:id", requireAuth, async (req, res) => {
     try {
-      const dept = await storage.getDepartment(req.params.id);
+      const dept = await storage.getDepartment(param(req.params.id));
       if (!dept) {
         return res.status(404).json({ error: "Department not found" });
       }
@@ -1942,7 +2260,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/departments", async (req, res) => {
+  app.post("/api/departments", requireAuth, async (req, res) => {
     try {
       const result = departmentSchema.safeParse(req.body);
       if (!result.success) {
@@ -1956,8 +2274,9 @@ export async function registerRoutes(
         budget: budget ? String(budget) : null,
         color: color || '#6366f1',
         memberCount: 0,
-        status: 'Active',
+        status: 'active',
         createdAt: new Date().toISOString(),
+        companyId: null,
       });
       res.status(201).json(dept);
     } catch (error) {
@@ -1966,7 +2285,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/departments/:id", async (req, res) => {
+  app.patch("/api/departments/:id", requireAuth, async (req, res) => {
     try {
       const result = departmentUpdateSchema.safeParse(req.body);
       if (!result.success) {
@@ -1982,7 +2301,7 @@ export async function registerRoutes(
       if (status !== undefined) updateData.status = status;
       if (memberCount !== undefined) updateData.memberCount = memberCount;
 
-      const dept = await storage.updateDepartment(req.params.id, updateData);
+      const dept = await storage.updateDepartment(param(req.params.id), updateData);
       if (!dept) {
         return res.status(404).json({ error: "Department not found" });
       }
@@ -1992,9 +2311,9 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/departments/:id", async (req, res) => {
+  app.delete("/api/departments/:id", requireAuth, async (req, res) => {
     try {
-      const success = await storage.deleteDepartment(req.params.id);
+      const success = await storage.deleteDepartment(param(req.params.id));
       if (!success) {
         return res.status(404).json({ error: "Department not found" });
       }
@@ -2071,7 +2390,7 @@ export async function registerRoutes(
     try {
       const userId = (req as any).user?.uid || (req as any).user?.id;
       const memberships = await storage.getUserCompanies(userId);
-      const companiesResult = [];
+      const companiesResult: any[] = [];
       for (const membership of memberships) {
         const company = await storage.getCompany(membership.companyId);
         if (company) {
@@ -2086,7 +2405,7 @@ export async function registerRoutes(
 
   app.get("/api/companies/:id", requireAuth, async (req, res) => {
     try {
-      const company = await storage.getCompany(req.params.id);
+      const company = await storage.getCompany(param(req.params.id));
       if (!company) {
         return res.status(404).json({ error: "Company not found" });
       }
@@ -2098,7 +2417,7 @@ export async function registerRoutes(
 
   app.get("/api/companies/:id/members", requireAuth, async (req, res) => {
     try {
-      const members = await storage.getCompanyMembers(req.params.id);
+      const members = await storage.getCompanyMembers(param(req.params.id));
       res.json(members);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch company members" });
@@ -2116,7 +2435,7 @@ export async function registerRoutes(
 
   app.post("/api/companies/:id/invitations", requireAuth, async (req, res) => {
     try {
-      const companyId = req.params.id;
+      const companyId = param(req.params.id);
       const company = await storage.getCompany(companyId);
       if (!company) {
         return res.status(404).json({ error: "Company not found" });
@@ -2134,6 +2453,16 @@ export async function registerRoutes(
       }
 
       const { email, name, role, department } = result.data;
+
+      // Enforce role hierarchy: inviter must have equal or higher role
+      const ROLE_HIERARCHY: Record<string, number> = {
+        OWNER: 6, ADMIN: 5, MANAGER: 4, EDITOR: 3, EMPLOYEE: 2, VIEWER: 1,
+      };
+      const inviterLevel = ROLE_HIERARCHY[membership.role] || 0;
+      const assignedLevel = ROLE_HIERARCHY[role || 'EMPLOYEE'] || 0;
+      if (assignedLevel > inviterLevel) {
+        return res.status(403).json({ error: `A ${membership.role} cannot invite someone with a ${role} role` });
+      }
 
       const existingMember = await storage.getCompanyMemberByEmail(companyId, email);
       if (existingMember) {
@@ -2153,7 +2482,7 @@ export async function registerRoutes(
       const token = crypto.randomBytes(32).toString('hex');
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-      const userProfile = await storage.getUserProfile(userId);
+      const userProfile = await storage.getUserProfileByCognitoSub(userId);
       const inviterName = userProfile?.displayName || 'A team member';
 
       const invitation = await storage.createCompanyInvitation({
@@ -2205,7 +2534,7 @@ export async function registerRoutes(
 
   app.get("/api/companies/:id/invitations", requireAuth, async (req, res) => {
     try {
-      const invitations = await storage.getCompanyInvitations(req.params.id);
+      const invitations = await storage.getCompanyInvitations(param(req.params.id));
       res.json(invitations);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch invitations" });
@@ -2214,7 +2543,7 @@ export async function registerRoutes(
 
   app.get("/api/invitations/:token", async (req, res) => {
     try {
-      const invitation = await storage.getCompanyInvitationByToken(req.params.token);
+      const invitation = await storage.getCompanyInvitationByToken(param(req.params.token));
       if (!invitation) {
         return res.status(404).json({ error: "Invitation not found" });
       }
@@ -2246,7 +2575,7 @@ export async function registerRoutes(
 
   app.post("/api/invitations/:token/accept", requireAuth, async (req, res) => {
     try {
-      const invitation = await storage.getCompanyInvitationByToken(req.params.token);
+      const invitation = await storage.getCompanyInvitationByToken(param(req.params.token));
       if (!invitation) {
         return res.status(404).json({ error: "Invitation not found" });
       }
@@ -2276,6 +2605,32 @@ export async function registerRoutes(
         createdAt: invitation.createdAt,
       });
 
+      // Notify the admin who sent the invite
+      try {
+        if (invitation.invitedBy) {
+          const userProfile = await storage.getUserProfileByCognitoSub(userId);
+          const memberName = userProfile?.displayName || invitation.email;
+          await notificationService.notifyInviteAccepted(
+            invitation.invitedBy, memberName, result.companyName || 'the company'
+          );
+
+          // Also send email to the inviter
+          const inviterProfile = await storage.getUserProfileByCognitoSub(invitation.invitedBy);
+          if (inviterProfile?.email) {
+            notificationService.sendInviteAcceptedEmail({
+              email: inviterProfile.email,
+              adminName: inviterProfile.displayName || 'Admin',
+              memberName,
+              memberEmail: invitation.email,
+              role: invitation.role,
+              companyName: result.companyName || 'your company',
+            }).catch(console.error);
+          }
+        }
+      } catch (notifErr) {
+        console.warn('Invite acceptance notification failed:', notifErr);
+      }
+
       res.json({
         message: "Invitation accepted successfully",
         companyId: invitation.companyId,
@@ -2292,12 +2647,12 @@ export async function registerRoutes(
   app.delete("/api/companies/:companyId/invitations/:invitationId", requireAuth, async (req, res) => {
     try {
       const userId = (req as any).user?.uid || (req as any).user?.id;
-      const membership = await storage.getCompanyMember(req.params.companyId, userId);
+      const membership = await storage.getCompanyMember(param(req.params.companyId), userId);
       if (!membership || !['OWNER', 'ADMIN'].includes(membership.role)) {
         return res.status(403).json({ error: "Only admins can revoke invitations" });
       }
 
-      const success = await storage.revokeCompanyInvitation(req.params.invitationId);
+      const success = await storage.revokeCompanyInvitation(param(req.params.invitationId));
       if (!success) {
         return res.status(404).json({ error: "Invitation not found" });
       }
@@ -2321,7 +2676,7 @@ export async function registerRoutes(
   app.get("/api/team/:id", requireAuth, async (req, res) => {
     try {
       const company = await resolveUserCompany(req);
-      const member = await storage.getTeamMember(req.params.id);
+      const member = await storage.getTeamMember(param(req.params.id));
       if (!member) {
         return res.status(404).json({ error: "Team member not found" });
       }
@@ -2355,9 +2710,11 @@ export async function registerRoutes(
         department: (department || 'General') as any,
         departmentId: null,
         avatar: null,
-        status: 'Active',
+        status: 'active',
         joinedAt: new Date().toISOString().split('T')[0],
         permissions: ['CREATE_EXPENSE'],
+        userId: null,
+        companyId: null,
       });
       
       // Send team invite email
@@ -2388,10 +2745,31 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid team member data", details: result.error.issues });
       }
-      const member = await storage.updateTeamMember(req.params.id, result.data as any);
+      const originalMember = await storage.getTeamMember(param(req.params.id));
+      const member = await storage.updateTeamMember(param(req.params.id), result.data as any);
       if (!member) {
         return res.status(404).json({ error: "Team member not found" });
       }
+
+      // Notify if role changed
+      if (originalMember && result.data.role && result.data.role !== originalMember.role && member.userId) {
+        const company = await resolveUserCompany(req);
+        const companyData = company?.companyId ? await storage.getCompany(company.companyId) : null;
+        notificationService.notifyRoleChanged(
+          member.userId, originalMember.role, result.data.role, companyData?.name || 'your company'
+        ).catch(console.error);
+
+        if (member.email) {
+          notificationService.sendRoleChangedEmail({
+            email: member.email,
+            name: member.name,
+            oldRole: originalMember.role,
+            newRole: result.data.role,
+            companyName: companyData?.name || 'your company',
+          }).catch(console.error);
+        }
+      }
+
       res.json(member);
     } catch (error) {
       res.status(500).json({ error: "Failed to update team member" });
@@ -2400,7 +2778,7 @@ export async function registerRoutes(
 
   app.delete("/api/team/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const deleted = await storage.deleteTeamMember(req.params.id);
+      const deleted = await storage.deleteTeamMember(param(req.params.id));
       if (!deleted) {
         return res.status(404).json({ error: "Team member not found" });
       }
@@ -2411,7 +2789,7 @@ export async function registerRoutes(
   });
 
   // ==================== AI INSIGHTS ====================
-  app.get("/api/insights", async (req, res) => {
+  app.get("/api/insights", requireAuth, async (req, res) => {
     try {
       const insights = await storage.getInsights();
       res.json(insights);
@@ -2448,13 +2826,14 @@ export async function registerRoutes(
         dateRange,
         createdAt: now.toISOString().split('T')[0],
         status: "processing",
-        fileSize: "--"
+        fileSize: "--",
+        companyId: companyId || null,
       });
 
       // Actually generate the report data and calculate real file size
       try {
         const expenses = await storage.getExpenses(companyId);
-        const transactions = await storage.getTransactions();
+        const transactions = await storage.getTransactions(companyId);
         const budgets = await storage.getBudgets(companyId);
         const bills = await storage.getBills(companyId);
         const payroll = await storage.getPayroll(companyId);
@@ -2568,7 +2947,7 @@ export async function registerRoutes(
 
   app.delete("/api/reports/:id", requireAuth, async (req, res) => {
     try {
-      await storage.deleteReport(req.params.id);
+      await storage.deleteReport(param(req.params.id));
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete report" });
@@ -2578,7 +2957,7 @@ export async function registerRoutes(
   app.get("/api/reports/:id/download", requireAuth, async (req, res) => {
     try {
       const reports = await storage.getReports();
-      const report = reports.find(r => r.id === req.params.id);
+      const report = reports.find(r => r.id === param(req.params.id));
       
       if (!report) {
         return res.status(404).json({ error: "Report not found" });
@@ -2593,7 +2972,7 @@ export async function registerRoutes(
       const companyId = company?.companyId;
       
       const expenses = await storage.getExpenses(companyId);
-      const transactions = await storage.getTransactions();
+      const transactions = await storage.getTransactions(companyId);
       const budgets = await storage.getBudgets(companyId);
       const payroll = await storage.getPayroll(companyId);
 
@@ -2775,7 +3154,7 @@ export async function registerRoutes(
   app.get("/api/payroll/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
       const company = await resolveUserCompany(req);
-      const entry = await storage.getPayrollEntry(req.params.id);
+      const entry = await storage.getPayrollEntry(param(req.params.id));
       if (!entry) {
         return res.status(404).json({ error: "Payroll entry not found" });
       }
@@ -2794,7 +3173,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid payroll data", details: result.error.issues });
       }
-      const { employeeId, employeeName, department, salary, bonus, deductions, payDate, recurring, frequency, email } = result.data;
+      const { employeeId, employeeName, department, country, currency, salary, bonus, deductions, deductionBreakdown, payDate, recurring, frequency, email } = result.data;
       const company = await resolveUserCompany(req);
 
       const salaryNum = parseFloat(salary);
@@ -2802,14 +3181,17 @@ export async function registerRoutes(
       const deductionsNum = parseFloat(deductions || '0');
       const netPayNum = salaryNum + bonusNum - deductionsNum;
       const actualPayDate = payDate || new Date().toISOString().split('T')[0];
-      
+
       const entry = await storage.createPayrollEntry({
         employeeId: employeeId || String(Date.now()),
         employeeName,
         department: department || 'General',
+        country: country || null,
+        currency: currency || null,
         salary,
         bonus: bonus || '0',
         deductions: deductions || '0',
+        deductionBreakdown: deductionBreakdown || null,
         netPay: String(netPayNum),
         status: 'pending',
         payDate: actualPayDate,
@@ -2832,7 +3214,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid payroll data", details: result.error.issues });
       }
-      const entry = await storage.updatePayrollEntry(req.params.id, result.data);
+      const entry = await storage.updatePayrollEntry(param(req.params.id), result.data);
       if (!entry) {
         return res.status(404).json({ error: "Payroll entry not found" });
       }
@@ -2844,7 +3226,7 @@ export async function registerRoutes(
 
   app.delete("/api/payroll/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const deleted = await storage.deletePayrollEntry(req.params.id);
+      const deleted = await storage.deletePayrollEntry(param(req.params.id));
       if (!deleted) {
         return res.status(404).json({ error: "Payroll entry not found" });
       }
@@ -2854,7 +3236,142 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/payroll/process", requireAuth, requireAdmin, async (req, res) => {
+  // Tax estimation helper
+  app.get("/api/payroll/tax-estimate", requireAuth, async (req, res) => {
+    try {
+      const { country, annualSalary } = req.query;
+      const salary = parseFloat(annualSalary as string) || 0;
+      const countryCode = (country as string || 'US').toUpperCase();
+
+      let tax = 0;
+      const brackets: { rate: number; amount: number }[] = [];
+
+      switch (countryCode) {
+        case 'NG': {
+          const tiers = [
+            { limit: 300000, rate: 0.07 }, { limit: 300000, rate: 0.11 },
+            { limit: 500000, rate: 0.15 }, { limit: 500000, rate: 0.19 },
+            { limit: 1600000, rate: 0.21 }, { limit: Infinity, rate: 0.24 },
+          ];
+          let remaining = salary;
+          for (const tier of tiers) {
+            const taxable = Math.min(remaining, tier.limit);
+            if (taxable <= 0) break;
+            const amt = taxable * tier.rate;
+            tax += amt;
+            brackets.push({ rate: tier.rate * 100, amount: amt });
+            remaining -= taxable;
+          }
+          break;
+        }
+        case 'GH': {
+          const tiers = [
+            { limit: 4380, rate: 0 }, { limit: 1320, rate: 0.05 },
+            { limit: 1560, rate: 0.10 }, { limit: 36000, rate: 0.175 },
+            { limit: 196740, rate: 0.25 }, { limit: Infinity, rate: 0.30 },
+          ];
+          let remaining = salary;
+          for (const tier of tiers) {
+            const taxable = Math.min(remaining, tier.limit);
+            if (taxable <= 0) break;
+            const amt = taxable * tier.rate;
+            tax += amt;
+            if (tier.rate > 0) brackets.push({ rate: tier.rate * 100, amount: amt });
+            remaining -= taxable;
+          }
+          break;
+        }
+        case 'KE': {
+          const monthlyGross = salary / 12;
+          const tiers = [
+            { limit: 24000, rate: 0.10 }, { limit: 8333, rate: 0.25 },
+            { limit: 467667, rate: 0.30 }, { limit: 300000, rate: 0.325 },
+            { limit: Infinity, rate: 0.35 },
+          ];
+          let remaining = monthlyGross;
+          let monthlyTax = 0;
+          for (const tier of tiers) {
+            const taxable = Math.min(remaining, tier.limit);
+            if (taxable <= 0) break;
+            monthlyTax += taxable * tier.rate;
+            remaining -= taxable;
+          }
+          monthlyTax = Math.max(0, monthlyTax - 2400);
+          tax = monthlyTax * 12;
+          brackets.push({ rate: salary > 0 ? (tax / salary) * 100 : 0, amount: tax });
+          break;
+        }
+        case 'ZA': {
+          const tiers = [
+            { limit: 237100, rate: 0.18 }, { limit: 133400, rate: 0.26 },
+            { limit: 156600, rate: 0.31 }, { limit: 220200, rate: 0.36 },
+            { limit: 356600, rate: 0.39 }, { limit: 499700, rate: 0.41 },
+            { limit: Infinity, rate: 0.45 },
+          ];
+          let remaining = salary;
+          for (const tier of tiers) {
+            const taxable = Math.min(remaining, tier.limit);
+            if (taxable <= 0) break;
+            const amt = taxable * tier.rate;
+            tax += amt;
+            brackets.push({ rate: tier.rate * 100, amount: amt });
+            remaining -= taxable;
+          }
+          tax = Math.max(0, tax - 17235);
+          break;
+        }
+        case 'US': {
+          const tiers = [
+            { limit: 11600, rate: 0.10 }, { limit: 35550, rate: 0.12 },
+            { limit: 53375, rate: 0.22 }, { limit: 90750, rate: 0.24 },
+            { limit: 40525, rate: 0.32 }, { limit: 161950, rate: 0.35 },
+            { limit: Infinity, rate: 0.37 },
+          ];
+          let remaining = salary;
+          for (const tier of tiers) {
+            const taxable = Math.min(remaining, tier.limit);
+            if (taxable <= 0) break;
+            const amt = taxable * tier.rate;
+            tax += amt;
+            brackets.push({ rate: tier.rate * 100, amount: amt });
+            remaining -= taxable;
+          }
+          break;
+        }
+        case 'GB': {
+          const tiers = [
+            { limit: 12570, rate: 0 }, { limit: 37700, rate: 0.20 },
+            { limit: 99730, rate: 0.40 }, { limit: Infinity, rate: 0.45 },
+          ];
+          let remaining = salary;
+          for (const tier of tiers) {
+            const taxable = Math.min(remaining, tier.limit);
+            if (taxable <= 0) break;
+            const amt = taxable * tier.rate;
+            tax += amt;
+            if (tier.rate > 0) brackets.push({ rate: tier.rate * 100, amount: amt });
+            remaining -= taxable;
+          }
+          break;
+        }
+        default: {
+          tax = salary * 0.20;
+          brackets.push({ rate: 20, amount: tax });
+        }
+      }
+
+      res.json({
+        annualTax: Math.round(tax * 100) / 100,
+        monthlyTax: Math.round((tax / 12) * 100) / 100,
+        effectiveRate: salary > 0 ? Math.round((tax / salary) * 10000) / 100 : 0,
+        brackets,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to estimate tax" });
+    }
+  });
+
+  app.post("/api/payroll/process", financialLimiter, requireAuth, requireAdmin, async (req, res) => {
     try {
       const entries = await storage.getPayroll();
       const pendingEntries = entries.filter((e: any) => e.status === "pending");
@@ -2864,7 +3381,7 @@ export async function registerRoutes(
       }
 
       const settings = await storage.getOrganizationSettings();
-      const companyName = settings?.companyName || 'Spendly';
+      const companyName = (settings as any)?.companyName || settings?.name || 'Spendly';
       const currency = settings?.currency || 'USD';
       const payPeriod = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
@@ -2874,11 +3391,12 @@ export async function registerRoutes(
       let totalNoBanking = 0;
 
       for (const entry of pendingEntries) {
-        const netPayAmount = parseFloat(String(entry.netPay || 0));
-        if (netPayAmount <= 0) {
-          results.push({ id: entry.id, name: entry.employeeName, status: 'skipped', error: 'Invalid net pay' });
+        const salaryCheck = validateAmount(String(entry.netPay || 0));
+        if (!salaryCheck.valid) {
+          results.push({ id: entry.id, name: entry.employeeName, status: 'skipped', error: salaryCheck.error || 'Invalid net pay' });
           continue;
         }
+        const netPayAmount = salaryCheck.parsed;
 
         // Get employee's payout destination
         const destinations = await storage.getPayoutDestinations(entry.employeeId);
@@ -2943,14 +3461,15 @@ export async function registerRoutes(
 
           // Create transaction
           await storage.createTransaction({
-            type: "Payout",
+            type: "payout",
             amount: String(netPayAmount),
             fee: "0",
-            status: 'Processing',
+            status: 'processing',
             date: new Date().toISOString().split('T')[0],
             description: `Salary payment - ${entry.employeeName}`,
             currency,
             reference,
+            userId: null,
           });
 
           // Send payslip email
@@ -2959,7 +3478,7 @@ export async function registerRoutes(
               email: entry.email,
               employeeName: entry.employeeName,
               payPeriod,
-              grossSalary: parseFloat(String(entry.salary || entry.grossSalary || 0)),
+              grossSalary: parseFloat(String(entry.salary || (entry as any).grossSalary || 0)),
               deductions: parseFloat(String(entry.deductions || 0)),
               netPay: netPayAmount,
               currency,
@@ -3005,7 +3524,7 @@ export async function registerRoutes(
   // Pay individual employee — initiates REAL bank transfer via Stripe/Paystack
   app.post("/api/payroll/:id/pay", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const entry = await storage.getPayrollEntry(req.params.id);
+      const entry = await storage.getPayrollEntry(param(req.params.id));
       if (!entry) {
         return res.status(404).json({ error: "Payroll entry not found" });
       }
@@ -3021,7 +3540,7 @@ export async function registerRoutes(
 
       const settings = await storage.getOrganizationSettings();
       const currency = settings?.currency || 'USD';
-      const companyName = settings?.companyName || 'Spendly';
+      const companyName = (settings as any)?.companyName || settings?.name || 'Spendly';
 
       // --- DETERMINE PAYOUT DESTINATION ---
       // Check if employee has payout destinations configured
@@ -3108,14 +3627,14 @@ export async function registerRoutes(
       // Update payroll entry status
       const finalStatus = payoutStatus === 'failed' ? 'failed' :
         payoutStatus === 'needs_banking_details' ? 'pending' : 'processing';
-      const updated = await storage.updatePayrollEntry(req.params.id, {
+      const updated = await storage.updatePayrollEntry(param(req.params.id), {
         status: finalStatus,
         ...(providerResult ? { payoutId: providerResult.transferCode || providerResult.payoutId } : {}),
       } as any);
 
       // Create transaction record with appropriate status
       await storage.createTransaction({
-        type: "Payout",
+        type: "payout",
         amount: String(netPayAmount),
         fee: "0",
         status: payoutStatus === 'processing' ? 'Processing' : (payoutStatus === 'failed' ? 'Failed' : 'Pending'),
@@ -3123,6 +3642,7 @@ export async function registerRoutes(
         description: `Salary payment - ${entry.employeeName}`,
         currency,
         reference: providerResult?.transferCode || providerResult?.payoutId || `PAY-${entry.id}-${Date.now()}`,
+        userId: null,
       });
 
       // Only send payslip email when payout was actually initiated
@@ -3170,6 +3690,99 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== PUBLIC INVOICE PAYMENT PAGE ====================
+  app.get("/api/public/invoices/:id", async (req, res) => {
+    try {
+      const invoice = await storage.getInvoicePublic(param(req.params.id));
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+      const invoiceCurrency = (invoice as any).currency || 'USD';
+      const virtualAccountsList = await storage.getVirtualAccounts();
+      // Find a virtual account matching the invoice currency
+      const companyAccount = virtualAccountsList.find(
+        (a: any) => a.accountNumber && a.currency?.toUpperCase() === invoiceCurrency.toUpperCase()
+      ) || virtualAccountsList.find((a: any) => a.accountNumber) || null;
+      const settings = await storage.getOrganizationSettings();
+
+      // Check if Stripe is available for online payment
+      let stripePaymentAvailable = false;
+      try {
+        const stripeKey = process.env.STRIPE_SECRET_KEY;
+        if (stripeKey) stripePaymentAvailable = true;
+      } catch {}
+
+      res.json({
+        invoice,
+        companyName: (settings as any)?.companyName || settings?.name || 'Spendly',
+        companyLogo: (settings as any)?.companyLogo || settings?.logo || null,
+        stripePaymentAvailable,
+        paymentDetails: companyAccount ? {
+          bankName: companyAccount.bankName,
+          accountNumber: companyAccount.accountNumber,
+          accountName: companyAccount.accountName,
+          currency: companyAccount.currency || invoiceCurrency,
+          reference: `INV-${invoice.invoiceNumber}`,
+          instructions: `Please include reference INV-${invoice.invoiceNumber} in your payment`,
+        } : null,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch invoice details" });
+    }
+  });
+
+  // Create Stripe Checkout Session for invoice payment (public - no auth required)
+  app.post("/api/public/invoices/:id/pay", async (req, res) => {
+    try {
+      const invoice = await storage.getInvoicePublic(param(req.params.id));
+      if (!invoice) {
+        return res.status(404).json({ error: "Invoice not found" });
+      }
+      if (invoice.status === 'paid') {
+        return res.status(400).json({ error: "Invoice already paid" });
+      }
+
+      const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+      if (!stripeSecretKey) {
+        return res.status(503).json({ error: "Online payment is not configured" });
+      }
+
+      const stripe = getStripeClient();
+      const invoiceCurrency = ((invoice as any).currency || 'USD').toLowerCase();
+      const amount = Math.round(parseFloat(invoice.amount) * 100); // cents
+      const appUrl = process.env.APP_URL || 'https://spendlymanager.com';
+
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: [{
+          price_data: {
+            currency: invoiceCurrency,
+            product_data: {
+              name: `Invoice ${invoice.invoiceNumber}`,
+              description: `Payment to ${(await storage.getOrganizationSettings() as any)?.companyName || 'Spendly'}`,
+            },
+            unit_amount: amount,
+          },
+          quantity: 1,
+        }],
+        mode: 'payment',
+        success_url: `${appUrl}/pay/${invoice.id}?payment=success`,
+        cancel_url: `${appUrl}/pay/${invoice.id}?payment=cancelled`,
+        metadata: {
+          invoiceId: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+          type: 'invoice_payment',
+          companyId: (invoice as any).companyId || '',
+        },
+      });
+
+      res.json({ checkoutUrl: session.url });
+    } catch (error: any) {
+      console.error('Invoice payment session error:', error.message);
+      res.status(500).json({ error: "Failed to create payment session" });
+    }
+  });
+
   // ==================== INVOICES ====================
   app.get("/api/invoices", requireAuth, async (req, res) => {
     try {
@@ -3184,7 +3797,7 @@ export async function registerRoutes(
   app.get("/api/invoices/:id", requireAuth, async (req, res) => {
     try {
       const company = await resolveUserCompany(req);
-      const invoice = await storage.getInvoice(req.params.id);
+      const invoice = await storage.getInvoice(param(req.params.id));
       if (!invoice) {
         return res.status(404).json({ error: "Invoice not found" });
       }
@@ -3203,36 +3816,42 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid invoice data", details: result.error.issues });
       }
-      const { client, clientEmail, amount, dueDate, items } = result.data;
+      const { client, clientEmail, amount, subtotal, taxRate, taxAmount, currency: invoiceCurrency, notes, dueDate, items } = result.data;
 
-      const invoiceNumber = `INV-2026-${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`;
-      
+      const currentYear = new Date().getFullYear();
+      const invoiceNumber = await storage.getNextInvoiceNumber(currentYear);
+      const company = await resolveUserCompany(req);
+
       const invoice = await storage.createInvoice({
         invoiceNumber,
         client,
         clientEmail: clientEmail || '',
         amount,
+        subtotal: subtotal || amount,
+        taxRate: taxRate || '0',
+        taxAmount: taxAmount || '0',
+        currency: invoiceCurrency || 'USD',
+        notes: notes || null,
+        companyId: company?.companyId || null,
         dueDate: dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         issuedDate: new Date().toISOString().split('T')[0],
         status: 'pending',
         items: items || [],
-      });
-      
+      } as any);
+
       // Send invoice email to client if email provided
       if (clientEmail) {
         const settings = await storage.getOrganizationSettings();
-        const companyName = settings?.companyName || 'Spendly';
-        const appUrl = process.env.REPLIT_DEV_DOMAIN 
-          ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
-          : 'https://spendlymanager.com';
-        
+        const companyName = (settings as any)?.companyName || settings?.name || 'Spendly';
+        const appUrl = process.env.APP_URL || 'https://spendlymanager.com';
+
         notificationService.sendInvoiceEmail({
           email: clientEmail,
           clientName: client,
           senderName: companyName,
           invoiceNumber,
           amount: parseFloat(amount),
-          currency: settings?.currency || 'USD',
+          currency: invoiceCurrency || settings?.currency || 'USD',
           dueDate: invoice.dueDate,
           items: (items || []).map((item: any) => ({
             description: item.description || 'Service',
@@ -3255,7 +3874,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid invoice data", details: result.error.issues });
       }
-      const invoice = await storage.updateInvoice(req.params.id, result.data as any);
+      const invoice = await storage.updateInvoice(param(req.params.id), result.data as any);
       if (!invoice) {
         return res.status(404).json({ error: "Invoice not found" });
       }
@@ -3267,7 +3886,7 @@ export async function registerRoutes(
 
   app.delete("/api/invoices/:id", requireAuth, async (req, res) => {
     try {
-      const deleted = await storage.deleteInvoice(req.params.id);
+      const deleted = await storage.deleteInvoice(param(req.params.id));
       if (!deleted) {
         return res.status(404).json({ error: "Invoice not found" });
       }
@@ -3291,7 +3910,7 @@ export async function registerRoutes(
   app.get("/api/vendors/:id", requireAuth, async (req, res) => {
     try {
       const company = await resolveUserCompany(req);
-      const vendor = await storage.getVendor(req.params.id);
+      const vendor = await storage.getVendor(param(req.params.id));
       if (!vendor) {
         return res.status(404).json({ error: "Vendor not found" });
       }
@@ -3311,6 +3930,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid vendor data", details: result.error.issues });
       }
       const { name, email, phone, address, category } = result.data;
+      const company = await resolveUserCompany(req);
 
       const vendor = await storage.createVendor({
         name,
@@ -3318,10 +3938,13 @@ export async function registerRoutes(
         phone: phone || '',
         address: address || '',
         category: category || 'Other',
+        currency: req.body.currency || 'USD',
         status: 'active',
         totalPaid: '0',
         pendingPayments: '0',
-        lastPayment: '',
+        lastPayment: null,
+        companyId: company?.companyId || null,
+        paymentTerms: req.body.paymentTerms || null,
       });
       
       res.status(201).json(vendor);
@@ -3336,7 +3959,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid vendor data", details: result.error.issues });
       }
-      const vendor = await storage.updateVendor(req.params.id, result.data as any);
+      const vendor = await storage.updateVendor(param(req.params.id), result.data as any);
       if (!vendor) {
         return res.status(404).json({ error: "Vendor not found" });
       }
@@ -3348,7 +3971,7 @@ export async function registerRoutes(
 
   app.delete("/api/vendors/:id", requireAuth, async (req, res) => {
     try {
-      const deleted = await storage.deleteVendor(req.params.id);
+      const deleted = await storage.deleteVendor(param(req.params.id));
       if (!deleted) {
         return res.status(404).json({ error: "Vendor not found" });
       }
@@ -3359,19 +3982,41 @@ export async function registerRoutes(
   });
 
   // ==================== SETTINGS ====================
-  app.get("/api/settings", async (req, res) => {
+  app.get("/api/settings", requireAuth, async (req, res) => {
     try {
-      const settings = await storage.getSettings();
+      // Try company-aware settings first (from companies table)
+      const company = await resolveUserCompany(req);
+      if (company?.companyId) {
+        const companySettings = await storage.getCompanyAsSettings(company.companyId);
+        if (companySettings) {
+          return res.json(companySettings);
+        }
+      }
+      // Fallback to legacy singleton for users without a company
+      const settings = await getSettingsForRequest(req);
       res.json(settings);
     } catch (error) {
+      console.error('Failed to fetch settings:', error);
       res.status(500).json({ error: "Failed to fetch settings" });
     }
   });
 
-  app.patch("/api/settings", async (req, res) => {
+  app.patch("/api/settings", requireAuth, async (req, res) => {
     try {
-      const settings = await storage.updateSettings(req.body);
-      
+      let settings;
+      const company = await resolveUserCompany(req);
+
+      // Write to companies table if user has a company
+      if (company?.companyId) {
+        settings = await storage.updateCompanyAsSettings(company.companyId, req.body);
+        if (!settings) {
+          // Company not found, fall back to singleton
+          settings = await storage.updateSettings(req.body);
+        }
+      } else {
+        settings = await storage.updateSettings(req.body);
+      }
+
       try {
         const auditName = await getAuditUserName(req);
         await storage.createAuditLog({
@@ -3379,8 +4024,8 @@ export async function registerRoutes(
           userId: (req as any).user?.uid || 'system',
           userName: auditName,
           entityType: 'settings',
-          entityId: 'company-settings',
-          details: { updatedFields: Object.keys(req.body) },
+          entityId: company?.companyId || 'company-settings',
+          details: { updatedFields: Object.keys(req.body), companyId: company?.companyId },
           ipAddress: req.ip || '',
           userAgent: req.headers['user-agent'] || '',
           createdAt: new Date().toISOString(),
@@ -3389,6 +4034,7 @@ export async function registerRoutes(
 
       res.json(settings);
     } catch (error) {
+      console.error('Failed to update settings:', error);
       res.status(500).json({ error: "Failed to update settings" });
     }
   });
@@ -3398,7 +4044,7 @@ export async function registerRoutes(
   // Freeze card
   app.post("/api/cards/:id/freeze", requireAuth, async (req, res) => {
     try {
-      const card = await storage.getCard(req.params.id);
+      const card = await storage.getCard(param(req.params.id));
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -3413,7 +4059,7 @@ export async function registerRoutes(
 
       try {
         await paymentService.updateCardStatus(card.stripeCardId, 'inactive');
-        const updatedCard = await storage.updateCard(req.params.id, { status: 'Frozen' });
+        const updatedCard = await storage.updateCard(param(req.params.id), { status: 'frozen' });
         res.json(updatedCard);
       } catch (stripeError: any) {
         const mapped = mapPaymentError(stripeError, 'stripe');
@@ -3427,7 +4073,7 @@ export async function registerRoutes(
   // Unfreeze card
   app.post("/api/cards/:id/unfreeze", requireAuth, async (req, res) => {
     try {
-      const card = await storage.getCard(req.params.id);
+      const card = await storage.getCard(param(req.params.id));
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -3442,7 +4088,7 @@ export async function registerRoutes(
 
       try {
         await paymentService.updateCardStatus(card.stripeCardId, 'active');
-        const updatedCard = await storage.updateCard(req.params.id, { status: 'Active' });
+        const updatedCard = await storage.updateCard(param(req.params.id), { status: 'active' });
         res.json(updatedCard);
       } catch (stripeError: any) {
         const mapped = mapPaymentError(stripeError, 'stripe');
@@ -3456,7 +4102,7 @@ export async function registerRoutes(
   // Get sensitive card details (card number, CVV) - Rate limited
   app.get("/api/cards/:id/details", sensitiveLimiter, requireAuth, async (req, res) => {
     try {
-      const card = await storage.getCard(req.params.id);
+      const card = await storage.getCard(param(req.params.id));
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -3485,7 +4131,7 @@ export async function registerRoutes(
   app.patch("/api/cards/:id/controls", requireAuth, async (req, res) => {
     try {
       const { spendingLimit, spendingLimitInterval, allowedCategories, blockedCategories } = req.body;
-      const card = await storage.getCard(req.params.id);
+      const card = await storage.getCard(param(req.params.id));
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -3508,10 +4154,10 @@ export async function registerRoutes(
 
         // Update local card limit if specified
         if (spendingLimit !== undefined) {
-          await storage.updateCard(req.params.id, { limit: spendingLimit });
+          await storage.updateCard(param(req.params.id), { limit: spendingLimit });
         }
 
-        const updatedCard = await storage.getCard(req.params.id);
+        const updatedCard = await storage.getCard(param(req.params.id));
         res.json(updatedCard);
       } catch (stripeError: any) {
         const mapped = mapPaymentError(stripeError, 'stripe');
@@ -3525,7 +4171,7 @@ export async function registerRoutes(
   // Cancel card permanently
   app.post("/api/cards/:id/cancel", requireAuth, async (req, res) => {
     try {
-      const card = await storage.getCard(req.params.id);
+      const card = await storage.getCard(param(req.params.id));
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -3540,7 +4186,7 @@ export async function registerRoutes(
 
       try {
         await paymentService.updateCardStatus(card.stripeCardId, 'canceled');
-        const updatedCard = await storage.updateCard(req.params.id, { status: 'Cancelled' });
+        const updatedCard = await storage.updateCard(param(req.params.id), { status: 'Cancelled' });
         res.json(updatedCard);
       } catch (stripeError: any) {
         const mapped = mapPaymentError(stripeError, 'stripe');
@@ -3555,7 +4201,7 @@ export async function registerRoutes(
   app.get("/api/cards/:id/transactions", requireAuth, async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 25;
-      const card = await storage.getCard(req.params.id);
+      const card = await storage.getCard(param(req.params.id));
       if (!card) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -3591,7 +4237,7 @@ export async function registerRoutes(
 
   app.get("/api/region/:countryCode", async (req, res) => {
     try {
-      const config = getRegionConfig(req.params.countryCode);
+      const config = getRegionConfig(param(req.params.countryCode));
       if (!config) {
         return res.status(404).json({ error: "Region not found for country" });
       }
@@ -3603,7 +4249,7 @@ export async function registerRoutes(
 
   app.get("/api/currency/:countryCode", async (req, res) => {
     try {
-      const currency = getCurrencyForCountry(req.params.countryCode);
+      const currency = getCurrencyForCountry(param(req.params.countryCode));
       res.json(currency);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch currency" });
@@ -3612,15 +4258,15 @@ export async function registerRoutes(
 
   app.get("/api/payment/keys", async (req, res) => {
     try {
-      let stripeKey = null;
-      let paystackKey = null;
-      
+      let stripeKey: string | null = null;
+      let paystackKey: string | null = null;
+
       try {
         stripeKey = await getStripePublishableKey();
       } catch (e) {
         console.log("Stripe not configured");
       }
-      
+
       try {
         paystackKey = getPaystackPublicKey();
       } catch (e) {
@@ -3646,7 +4292,7 @@ export async function registerRoutes(
     metadata: z.record(z.any()).optional(),
   });
 
-  app.post("/api/stripe/checkout-session", async (req, res) => {
+  app.post("/api/stripe/checkout-session", requireAuth, async (req, res) => {
     try {
       const result = checkoutSessionSchema.safeParse(req.body);
       if (!result.success) {
@@ -3687,7 +4333,7 @@ export async function registerRoutes(
     }
   });
 
-  const processedConfirmPayments = new Set<string>();
+  const processedConfirmPayments = new IdempotencyCache(10000, 3600000); // 1 hour TTL
   
   app.post("/api/stripe/confirm-payment", requireAuth, async (req, res) => {
     try {
@@ -3744,13 +4390,15 @@ export async function registerRoutes(
         }
         
         await storage.createTransaction({
-          type: 'Funding',
+          type: 'funding',
           amount: String(amount),
           fee: "0",
-          status: 'Completed',
+          status: 'completed',
           description: `Card payment via Stripe - ${sessionId}`,
           currency,
           date: new Date().toISOString().split('T')[0],
+          reference: null,
+          userId: null,
         });
         
         res.json({
@@ -3872,9 +4520,24 @@ export async function registerRoutes(
         });
       }
 
-      // SECURITY: Check daily transfer limits (per-user)
+      // SECURITY: Check daily transfer limits (per-user, per-currency)
+      // Limits are in local currency units to account for currency value differences
+      const DAILY_LIMITS: Record<string, number> = {
+        USD: 50000,     // $50,000
+        EUR: 45000,     // €45,000
+        GBP: 40000,     // £40,000
+        AUD: 75000,     // A$75,000
+        CAD: 65000,     // C$65,000
+        NGN: 50000000,  // ₦50M (CBN regulatory limit for transfers)
+        GHS: 500000,    // GH₵500,000
+        ZAR: 1000000,   // R1,000,000
+        KES: 5000000,   // KSh5,000,000
+        EGP: 2000000,   // E£2,000,000
+        RWF: 50000000,  // RF50,000,000
+        XOF: 30000000,  // CFA30,000,000
+      };
+      const DAILY_LIMIT = DAILY_LIMITS[currency] || 50000;
       const dailyTotal = await storage.getDailyTransferTotal(userId);
-      const DAILY_LIMIT = 50000; // $50k daily limit per user
       if (dailyTotal + amount > DAILY_LIMIT) {
         return res.status(400).json({
           error: "Daily transfer limit exceeded",
@@ -3885,8 +4548,13 @@ export async function registerRoutes(
         });
       }
 
-      // SECURITY: Large transaction requires additional verification
-      const LARGE_TRANSACTION_THRESHOLD = 10000;
+      // SECURITY: Large transaction alert threshold (scaled per currency)
+      const LARGE_THRESHOLDS: Record<string, number> = {
+        USD: 10000, EUR: 9000, GBP: 8000, AUD: 15000, CAD: 13000,
+        NGN: 10000000, GHS: 100000, ZAR: 200000, KES: 1000000,
+        EGP: 400000, RWF: 10000000, XOF: 6000000,
+      };
+      const LARGE_TRANSACTION_THRESHOLD = LARGE_THRESHOLDS[currency] || 10000;
       if (amount > LARGE_TRANSACTION_THRESHOLD) {
         console.log(`SECURITY ALERT: Large transfer of ${currency} ${amount} by user ${userId}`);
         // In production, this would require 2FA or admin approval
@@ -3915,20 +4583,32 @@ export async function registerRoutes(
       // Create transaction record with provider reference for webhook tracking
       const providerRef = transferResult.reference || transferResult.transferId || transferReference;
       await storage.createTransaction({
-        type: 'Transfer',
+        type: 'transfer',
         amount: String(amount),
         fee: "0",
-        status: 'Processing',
+        status: 'processing',
         date: new Date().toISOString().split('T')[0],
         description: providerRef, // Store provider reference in description for lookup
         currency,
+        reference: null,
+        userId: null,
       });
 
-      // Send notification
+      // Send notification (in-app + push) and email separately
       try {
+        const userId = (req as any).user?.uid || (req as any).user?.cognitoSub;
         const userEmail = (req as any).user?.email;
+        if (userId) {
+          await notificationService.notifyPayoutProcessed(userId, {
+            amount,
+            currency,
+            recipientName: recipientDetails.accountName || 'Recipient',
+            bankName: recipientDetails.bankCode,
+            reference: providerRef,
+          });
+        }
         if (userEmail) {
-          await notificationService.notifyPayoutProcessed({
+          await notificationService.sendPayoutConfirmationEmail({
             email: userEmail,
             name: recipientDetails.accountName || 'User',
             recipientName: recipientDetails.accountName || 'Recipient',
@@ -4014,7 +4694,7 @@ export async function registerRoutes(
 
   app.get("/api/payment/banks/:countryCode", requireAuth, async (req, res) => {
     try {
-      const banks = await paymentService.getBanks(req.params.countryCode);
+      const banks = await paymentService.getBanks(param(req.params.countryCode));
       res.json(banks);
     } catch (error: any) {
       const mapped = mapPaymentError(error, 'banks');
@@ -4024,7 +4704,7 @@ export async function registerRoutes(
 
   app.get("/api/payment/provider-balance/:countryCode", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const balances = await paymentService.getBalance(req.params.countryCode);
+      const balances = await paymentService.getBalance(param(req.params.countryCode));
       res.json(balances);
     } catch (error: any) {
       const mapped = mapPaymentError(error, 'balance');
@@ -4039,7 +4719,7 @@ export async function registerRoutes(
     countryCode: z.string().min(2).max(2).default('US'),
   });
 
-  app.post("/api/bills/pay", requireAuth, async (req, res) => {
+  app.post("/api/bills/pay", financialLimiter, requireAuth, async (req, res) => {
     try {
       const result = billPaymentSchema.safeParse(req.body);
       if (!result.success) {
@@ -4053,7 +4733,7 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Bill not found" });
       }
 
-      if (bill.status === 'Paid') {
+      if (bill.status?.toLowerCase() === 'paid') {
         return res.status(400).json({ error: "Bill already paid" });
       }
 
@@ -4100,16 +4780,18 @@ export async function registerRoutes(
           await storage.updateBalances({ [balanceField]: String(currentBalance - billAmount) });
         }
         
-        await storage.updateBill(billId, { status: 'Paid' });
+        await storage.updateBill(billId, { status: 'paid' });
         
         await storage.createTransaction({
-          type: 'Bill',
+          type: 'bill',
           amount: String(bill.amount),
           fee: "0",
-          status: 'Completed',
+          status: 'completed',
           date: new Date().toISOString().split('T')[0],
           description: `Bill payment - ${bill.name}`,
           currency: billCurrency,
+          reference: `BILL-${billId}`,
+          userId: (req as any).user?.uid || null,
         });
 
         // Send bill payment notification
@@ -4272,13 +4954,15 @@ export async function registerRoutes(
       }
 
       await storage.createTransaction({
-        type: 'Funding',
+        type: 'funding',
         amount: String(amount),
         fee: "0",
-        status: 'Completed',
+        status: 'completed',
         date: new Date().toISOString().split('T')[0],
         description: `Wallet deposit confirmed - DEP-${idempotencyKey}`,
         currency: depositCurrency,
+        reference: null,
+        userId: null,
       });
 
       // Send deposit notification
@@ -4357,13 +5041,15 @@ export async function registerRoutes(
       }
 
       await storage.createTransaction({
-        type: 'Payout',
+        type: 'payout',
         amount: String(amount),
         fee: "0",
-        status: 'Processing',
+        status: 'processing',
         date: new Date().toISOString().split('T')[0],
         description: reason,
         currency,
+        reference: null,
+        userId: null,
       });
 
       const userId = (req as any).user?.uid || 'system';
@@ -4466,6 +5152,9 @@ export async function registerRoutes(
     EU: { phone: /^\+?[0-9]{8,15}$/, meter: /^[A-Z]{2}[0-9A-Z]{8,16}$/i, smartcard: /^\d{10,14}$/ },
     DE: { phone: /^\+?49[0-9]{9,12}$/, meter: /^DE[0-9A-Z]{10,14}$/i, smartcard: /^\d{10,12}$/ },
     FR: { phone: /^\+?33[0-9]{9}$/, meter: /^[0-9]{14}$/, smartcard: /^\d{10}$/ },
+    EG: { phone: /^(\+?20)?1[0-9]{9}$/, meter: /^\d{10,14}$/, smartcard: /^\d{10,12}$/ },
+    RW: { phone: /^(\+?250|07)[0-9]{7,9}$/, meter: /^\d{8,12}$/, smartcard: /^\d{10}$/ },
+    CI: { phone: /^(\+?225|0)[0-9]{8,10}$/, meter: /^\d{10,14}$/, smartcard: /^\d{10,12}$/ },
   };
 
   // Use getPaymentProvider from paymentService (imported at top) instead of local duplicate
@@ -4541,7 +5230,7 @@ export async function registerRoutes(
       }
 
       // Get wallet for balance check - try user's wallet first, then company balance
-      let wallet = null;
+      let wallet: any = null;
       const authUserId = (req as any).user?.uid;
       const effectiveUserId = userId || authUserId;
       
@@ -4641,7 +5330,7 @@ export async function registerRoutes(
 
       // Create transaction record with real provider reference
       await storage.createTransaction({
-        type: 'Bill',
+        type: 'bill',
         amount: String(amount),
         fee: "0",
         status: finalStatus,
@@ -4649,6 +5338,7 @@ export async function registerRoutes(
         description: `${type.charAt(0).toUpperCase() + type.slice(1)} - ${provider} (${phoneNumber || meterNumber || smartCardNumber || reference})`,
         currency: wallet?.currency || 'USD',
         reference: providerResult.reference || providerResult.orderId || utilityRef,
+        userId: null,
       });
 
       try {
@@ -4696,12 +5386,10 @@ export async function registerRoutes(
   const BCRYPT_ROUNDS = 10;
   
   const setPinSchema = z.object({
-    firebaseUid: z.string().min(1),
     pin: z.string().length(4).regex(/^\d{4}$/, "PIN must be 4 digits"),
   });
   
   const verifyPinSchema = z.object({
-    firebaseUid: z.string().min(1),
     pin: z.string().length(4),
   });
 
@@ -4712,15 +5400,17 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid PIN format. Must be 4 digits." });
       }
       
-      const { firebaseUid, pin } = result.data;
+      // SECURITY: Use authenticated user's identity, not client-provided value
+      const cognitoSub = (req as any).user?.cognitoSub || (req as any).user?.uid;
+      const { pin } = result.data;
       const pinHash = await bcrypt.hash(pin, BCRYPT_ROUNDS);
-      
-      const profile = await storage.getUserProfile(firebaseUid);
+
+      const profile = await storage.getUserProfileByCognitoSub(cognitoSub);
       if (!profile) {
         return res.status(404).json({ error: "User profile not found" });
       }
       
-      await storage.updateUserProfile(firebaseUid, {
+      await storage.updateUserProfile(cognitoSub, {
         transactionPinHash: pinHash,
         transactionPinEnabled: true,
       });
@@ -4732,15 +5422,17 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/user/verify-pin", async (req, res) => {
+  app.post("/api/user/verify-pin", requireAuth, async (req, res) => {
     try {
       const result = verifyPinSchema.safeParse(req.body);
       if (!result.success) {
         return res.status(400).json({ error: "Invalid PIN format" });
       }
 
-      const { firebaseUid, pin } = result.data;
-      const profile = await storage.getUserProfile(firebaseUid);
+      // SECURITY: Use authenticated user's identity, not client-provided value
+      const cognitoSub = (req as any).user?.cognitoSub || (req as any).user?.uid;
+      const { pin } = result.data;
+      const profile = await storage.getUserProfileByCognitoSub(cognitoSub);
 
       if (!profile) {
         return res.status(404).json({ error: "User profile not found" });
@@ -4759,14 +5451,12 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/user/disable-pin", async (req, res) => {
+  app.post("/api/user/disable-pin", requireAuth, async (req, res) => {
     try {
-      const { firebaseUid } = req.body;
-      if (!firebaseUid) {
-        return res.status(400).json({ error: "Firebase UID required" });
-      }
+      // SECURITY: Use authenticated user's cognitoSub
+      const cognitoSub = req.user!.cognitoSub;
 
-      await storage.updateUserProfile(firebaseUid, {
+      await storage.updateUserProfile(cognitoSub, {
         transactionPinEnabled: false,
       });
 
@@ -4824,337 +5514,23 @@ export async function registerRoutes(
   });
 
   // ==================== PAYSTACK WEBHOOK ====================
-  const processedPaystackReferences = new Set<string>();
+  // TTL-bounded idempotency cache — prevents unbounded memory growth
+  // Entries expire after 1 hour, max 10,000 entries (evicts oldest on overflow)
+  const processedPaystackReferences = new IdempotencyCache(10000, 60 * 60 * 1000);
 
-  // NOTE: Primary Paystack webhook is registered at top of registerRoutes() using
-  // PaystackWebhookHandler with HMAC signature verification. This legacy handler is
-  // kept as dead code reference and will be removed in next cleanup.
-  // @deprecated — Use /api/paystack/webhook (registered above) instead.
-  const _legacyPaystackWebhook = false;
-  if (_legacyPaystackWebhook) { // @ts-ignore — Dead code block
-  app.post("/api/paystack/webhook-legacy", async (req, res) => {
-    try {
-      const crypto = await import('crypto');
-      const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
+  // Legacy Paystack webhook removed — primary webhook is /api/paystack/webhook
+  // registered at top of registerRoutes() using PaystackWebhookHandler with HMAC verification.
 
-      // SECURITY: Reject webhook if secret key is not configured
-      if (!paystackSecretKey) {
-        console.error('Paystack webhook rejected: PAYSTACK_SECRET_KEY not configured');
-        return res.status(500).json({ error: "Webhook configuration error" });
-      }
+  /* LEGACY_WEBHOOK_REMOVED: ~320 lines of dead code deleted.
+     Original route: POST /api/paystack/webhook-legacy
+     Handled: charge.success, dedicatedaccount.assign.success,
+     charge.success (dedicated_nuban), transfer.success, transfer.failed/reversed
+     All now handled by PaystackWebhookHandler in paystackWebhook.ts */
 
-      // Verify webhook signature
-      const hash = crypto.createHmac('sha512', paystackSecretKey)
-        .update(JSON.stringify(req.body))
-        .digest('hex');
+  // [REMOVED] Legacy dead-code webhook handler was here (4850-5172)
+  // Now using paystackWebhook.ts PaystackWebhookHandler exclusively.
 
-      const signature = req.headers['x-paystack-signature'];
-      if (hash !== signature) {
-        console.error('Paystack webhook signature verification failed');
-        return res.status(401).json({ error: "Invalid signature" });
-      }
-      
-      const event = req.body;
-      const eventType = event.event;
-      
-      if (eventType === 'charge.success') {
-        const { reference, amount, metadata } = event.data;
-        
-        if (processedPaystackReferences.has(reference)) {
-          console.log(`Paystack reference ${reference} already processed`);
-          return res.status(200).json({ received: true });
-        }
-        
-        processedPaystackReferences.add(reference);
-        const amountValue = amount / 100;
-        
-        if (metadata?.type === 'wallet_funding') {
-          const balances = await storage.getBalances();
-          const currentLocal = parseFloat(String(balances.local || 0));
-          await storage.updateBalances({ local: String(currentLocal + amountValue) });
-          
-          await storage.createTransaction({
-            type: 'Funding',
-            amount: amountValue.toString(),
-            fee: '0',
-            status: 'Completed',
-            description: 'Card payment via Paystack',
-            currency: event.data.currency || 'NGN',
-            date: new Date().toISOString().split('T')[0],
-          });
-        }
-        
-        console.log(`Paystack payment confirmed: ${reference}`);
-      }
-
-      // Handle dedicated virtual account assignment
-      if (eventType === 'dedicatedaccount.assign.success') {
-        const { customer, dedicated_account } = event.data;
-        console.log(`DVA assigned: ${dedicated_account.account_number} for customer ${customer.customer_code}`);
-        
-        // Store the DVA assignment for future reference
-        try {
-          await storage.createFundingSource({
-            userId: customer.email || customer.customer_code,
-            type: 'virtual_account',
-            provider: 'paystack',
-            accountNumber: dedicated_account.account_number,
-            bankName: dedicated_account.bank?.name || 'Wema Bank',
-            currency: 'NGN',
-            isActive: true,
-            isVerified: false,
-            metadata: { customerCode: customer.customer_code, assignedAt: new Date().toISOString() },
-          });
-        } catch (err) {
-          console.log('DVA funding source may already exist, skipping creation');
-        }
-      }
-
-      // Handle virtual account funding (incoming bank transfer via DVA)
-      if (eventType === 'charge.success' && event.data.channel === 'dedicated_nuban') {
-        const { reference, amount, customer, authorization } = event.data;
-        const dedicatedAccount = event.data.dedicated_account || {};
-        
-        // In-memory idempotency check
-        if (processedPaystackReferences.has(reference)) {
-          console.log(`DVA funding reference ${reference} already processed (memory)`);
-          return res.status(200).json({ received: true });
-        }
-        
-        // Storage-level idempotency: check if transaction with this reference already exists
-        const alreadyProcessed = await storage.isWebhookProcessed(reference);
-        if (alreadyProcessed) {
-          console.log(`DVA funding reference ${reference} already exists in storage`);
-          processedPaystackReferences.add(reference);
-          return res.status(200).json({ received: true });
-        }
-        
-        processedPaystackReferences.add(reference);
-        const amountValue = amount / 100;
-        
-        // Priority lookup for wallet:
-        // 1) Find virtual account by account number, get userId, find wallet
-        // 2) Match by Paystack customer code in wallet metadata
-        // 3) Match by email as userId
-        
-        let userWallet = null;
-        let virtualAccount = null;
-        
-        // First try to find by virtual account number
-        const virtualAccounts = await storage.getVirtualAccounts();
-        if (dedicatedAccount?.account_number) {
-          virtualAccount = virtualAccounts.find((va: any) => 
-            va.accountNumber === dedicatedAccount.account_number
-          );
-        }
-        
-        const wallets = await storage.getWallets();
-        
-        if (virtualAccount && virtualAccount.userId) {
-          // Found the virtual account, now find the user's wallet
-          userWallet = wallets.find((w: any) => w.userId === virtualAccount.userId);
-          console.log(`Found wallet via virtual account ${virtualAccount.accountNumber} for user ${virtualAccount.userId}`);
-        }
-        
-        // Fallback: match by Paystack customer code
-        if (!userWallet) {
-          userWallet = wallets.find((w: any) => 
-            w.metadata?.paystackCustomerCode === customer?.customer_code
-          );
-        }
-        
-        // Fallback: match by email if no customer code match
-        if (!userWallet) {
-          userWallet = wallets.find((w: any) => w.userId === customer?.email);
-        }
-
-        if (userWallet) {
-          // Credit the wallet
-          await storage.creditWallet(
-            userWallet.id,
-            amountValue,
-            'virtual_account_funding',
-            `Bank transfer via DVA - Ref: ${reference}`,
-            reference,
-            {
-              provider: 'paystack',
-              channel: 'dedicated_nuban',
-              customerCode: customer?.customer_code,
-              accountNumber: dedicatedAccount?.account_number,
-              senderName: authorization?.sender_name || 'Unknown'
-            }
-          );
-          console.log(`Wallet ${userWallet.id} credited with ${amountValue} via DVA (${reference})`);
-
-          // Send SMS notification if user has phone number
-          try {
-            if (userWallet.userId) {
-              const userProfile = await storage.getUserProfile(userWallet.userId);
-              if (userProfile?.phoneNumber) {
-                const wallet = await storage.getWallet(userWallet.id);
-                const settings = await storage.getSettings();
-                const currency = settings?.currency || 'NGN';
-                const newBalance = wallet?.balance || userWallet.balance;
-                await notificationService.sendTransactionAlertSms(
-                  userProfile.phoneNumber,
-                  'credit',
-                  amountValue,
-                  currency,
-                  `Bank transfer - ${reference.substring(0, 8)}`,
-                  parseFloat(String(newBalance))
-                );
-              }
-            }
-          } catch (smsError) {
-            console.error('Failed to send DVA funding SMS notification:', smsError);
-          }
-        } else {
-          // CRITICAL: Wallet not found - attempt to auto-create wallet
-          console.warn(`No wallet found for customer ${customer?.customer_code || customer?.email}. Attempting auto-creation.`);
-
-          try {
-            const userId = virtualAccount?.userId || customer?.email;
-            if (userId) {
-              // Auto-create wallet for this user
-              const newWallet = await storage.createWallet({
-                userId,
-                type: 'personal',
-                currency: event.data.currency || 'NGN',
-                balance: '0',
-                availableBalance: '0',
-                pendingBalance: '0',
-                status: 'active',
-                virtualAccountId: virtualAccount?.id || dedicatedAccount?.account_number,
-              });
-
-              // Now credit the newly created wallet
-              await storage.creditWallet(
-                newWallet.id,
-                amountValue,
-                'virtual_account_funding',
-                `Bank transfer via DVA - Ref: ${reference} (Auto-created wallet)`,
-                reference,
-                {
-                  provider: 'paystack',
-                  channel: 'dedicated_nuban',
-                  customerCode: customer?.customer_code,
-                  accountNumber: dedicatedAccount?.account_number,
-                  senderName: authorization?.sender_name || 'Unknown',
-                  autoCreated: true
-                }
-              );
-              console.log(`✅ Auto-created wallet ${newWallet.id} and credited ${amountValue} for user ${userId}`);
-            } else {
-              throw new Error('Cannot determine userId for wallet creation');
-            }
-          } catch (walletCreationError: any) {
-            // If auto-creation fails, store as pending transaction for manual reconciliation
-            console.error(`❌ Failed to auto-create wallet: ${walletCreationError.message}`);
-
-            await storage.createTransaction({
-              type: 'Funding',
-              amount: amountValue.toString(),
-              fee: '0',
-              status: 'Pending',
-              description: `UNMATCHED DVA DEPOSIT - Manual reconciliation required. Customer: ${customer?.customer_code || customer?.email}, Account: ${dedicatedAccount?.account_number}`,
-              currency: event.data.currency || 'NGN',
-              date: new Date().toISOString().split('T')[0],
-            });
-
-            // TODO: Send alert to administrators about unmatched deposit
-            console.error(`⚠️ ALERT: Unmatched deposit of ${amountValue} ${event.data.currency} stored as pending transaction. Reference: ${reference}`);
-          }
-        }
-      }
-
-      // Handle transfer success (payout completed)
-      if (eventType === 'transfer.success') {
-        const { reference } = event.data;
-        
-        // In-memory idempotency check
-        if (processedPaystackReferences.has(`transfer:${reference}`)) {
-          console.log(`Transfer success ${reference} already processed (memory)`);
-          return res.status(200).json({ received: true });
-        }
-        
-        // Find payout by provider reference (storage-level lookup)
-        const payouts = await storage.getPayouts({ providerReference: reference });
-        const payout = payouts[0]; // First match
-        
-        if (payout) {
-          // State guard: only update if not already completed (storage-level idempotency)
-          if (payout.status !== 'completed') {
-            processedPaystackReferences.add(`transfer:${reference}`);
-            
-            await storage.updatePayout(payout.id, {
-              status: 'completed',
-              processedAt: new Date().toISOString(),
-            });
-
-            // Update related expense if applicable
-            if (payout.relatedEntityType === 'expense' && payout.relatedEntityId) {
-              await storage.updateExpense(payout.relatedEntityId, {
-                status: 'PAID',
-                payoutStatus: 'completed',
-              });
-            }
-
-            console.log(`Payout ${payout.id} completed via transfer ${reference}`);
-          } else {
-            console.log(`Payout ${payout.id} already completed, skipping webhook update`);
-          }
-        } else {
-          console.warn(`No payout found for transfer reference ${reference}`);
-        }
-      }
-
-      // Handle transfer failure
-      if (eventType === 'transfer.failed' || eventType === 'transfer.reversed') {
-        const { reference, reason } = event.data;
-        
-        // In-memory idempotency check
-        if (processedPaystackReferences.has(`transfer:${reference}`)) {
-          console.log(`Transfer failure ${reference} already processed (memory)`);
-          return res.status(200).json({ received: true });
-        }
-        
-        // Find payout by provider reference (storage-level lookup)
-        const payouts = await storage.getPayouts({ providerReference: reference });
-        const payout = payouts[0]; // First match
-        
-        if (payout) {
-          // State guard: only update if not already in terminal state
-          if (payout.status !== 'failed' && payout.status !== 'completed') {
-            processedPaystackReferences.add(`transfer:${reference}`);
-            
-            await storage.updatePayout(payout.id, {
-              status: 'failed',
-              failureReason: reason || eventType,
-            });
-
-            // Update related expense if applicable
-            if (payout.relatedEntityType === 'expense' && payout.relatedEntityId) {
-              await storage.updateExpense(payout.relatedEntityId, {
-                payoutStatus: 'failed',
-              });
-            }
-
-            console.log(`Payout ${payout.id} failed: ${reason}`);
-          } else {
-            console.log(`Payout ${payout.id} already in terminal state (${payout.status}), skipping webhook update`);
-          }
-        } else {
-          console.warn(`No payout found for transfer reference ${reference}`);
-        }
-      }
-      
-      res.status(200).json({ received: true });
-    } catch (error: any) {
-      console.error('Paystack webhook error:', error);
-      res.status(500).json({ error: "Webhook processing failed" });
-    }
-  });
-  } // end legacy webhook dead code block
+  // Dead code removed — see comment above
 
   // ==================== PAYSTACK CALLBACK ====================
   app.get("/api/paystack/callback", async (req, res) => {
@@ -5163,31 +5539,42 @@ export async function registerRoutes(
       if (!reference || typeof reference !== 'string') {
         return res.redirect('/dashboard?payment=failed');
       }
-      
+
+      // In-memory idempotency check
       if (processedPaystackReferences.has(reference)) {
-        console.log(`Paystack reference ${reference} already processed via webhook`);
+        console.log(`Paystack callback: reference ${reference} already processed (memory)`);
         return res.redirect('/dashboard?payment=success');
       }
-      
+
+      // DB-level idempotency check — prevent double-crediting if webhook already handled this
+      const alreadyProcessed = await storage.isWebhookProcessed(`paystack_callback:${reference}`);
+      if (alreadyProcessed) {
+        console.log(`Paystack callback: reference ${reference} already processed (DB)`);
+        processedPaystackReferences.add(reference);
+        return res.redirect('/dashboard?payment=success');
+      }
+
       const verification = await paymentService.verifyPayment(reference, 'paystack');
-      
+
       if (verification.status === 'success') {
         processedPaystackReferences.add(reference);
-        
+
         const balances = await storage.getBalances();
         const currentLocal = parseFloat(String(balances.local || 0));
         await storage.updateBalances({ local: String(currentLocal + verification.amount) });
-        
+
         await storage.createTransaction({
-          type: 'Funding',
+          type: 'funding',
           amount: String(verification.amount),
           fee: "0",
-          status: 'Completed',
-          description: 'Card payment via Paystack',
+          status: 'completed',
+          description: `paystack_callback:${reference}`,
           currency: verification.currency || 'NGN',
           date: new Date().toISOString().split('T')[0],
+          reference: null,
+          userId: null,
         });
-        
+
         res.redirect('/dashboard?payment=success');
       } else {
         res.redirect('/dashboard?payment=failed');
@@ -5199,7 +5586,8 @@ export async function registerRoutes(
   });
 
   // ==================== STRIPE WEBHOOK ====================
-  const processedStripeEvents = new Set<string>();
+  // TTL-bounded idempotency cache — prevents unbounded memory growth
+  const processedStripeEvents = new IdempotencyCache(10000, 60 * 60 * 1000);
   
   app.post("/api/stripe/webhook", express.raw({ type: 'application/json' }), async (req, res) => {
     try {
@@ -5212,25 +5600,27 @@ export async function registerRoutes(
         return res.status(500).json({ error: "Webhook configuration error" });
       }
 
-      // If webhook secret is configured, verify signature
-      let event: any = req.body;
-      if (stripeWebhookSecret) {
-        const stripe = getStripeClient();
-        const sig = req.headers['stripe-signature'];
+      // SECURITY: Reject webhook if webhook secret is not configured
+      if (!stripeWebhookSecret) {
+        console.error('Stripe webhook rejected: STRIPE_WEBHOOK_SECRET not configured');
+        return res.status(500).json({ error: "Webhook configuration error" });
+      }
 
-        if (sig) {
-          try {
-            // Use raw body for signature verification (express.raw middleware already applied)
-            const payload = req.body;
-            event = stripe.webhooks.constructEvent(payload, sig, stripeWebhookSecret);
-          } catch (err: any) {
-            console.error('Stripe webhook signature verification failed:', err.message);
-            return res.status(401).json({ error: "Invalid signature" });
-          }
-        }
-      } else {
-        // If no webhook secret, parse the raw body to JSON
-        event = typeof req.body === 'string' ? JSON.parse(req.body) : (Buffer.isBuffer(req.body) ? JSON.parse(req.body.toString()) : req.body);
+      // SECURITY: Require stripe-signature header
+      const sig = req.headers['stripe-signature'];
+      if (!sig) {
+        console.error('Stripe webhook rejected: Missing stripe-signature header');
+        return res.status(401).json({ error: "Missing signature" });
+      }
+
+      // Verify signature using Stripe SDK
+      let event: any;
+      const stripe = getStripeClient();
+      try {
+        event = stripe.webhooks.constructEvent(req.body, sig, stripeWebhookSecret);
+      } catch (err: any) {
+        console.error('Stripe webhook signature verification failed:', err.message);
+        return res.status(401).json({ error: "Invalid signature" });
       }
 
       const eventId = event.id;
@@ -5252,7 +5642,7 @@ export async function registerRoutes(
         
         // Update transaction status
         await storage.updateTransactionByReference(reference, {
-          status: 'Completed',
+          status: 'completed',
         });
 
         // Find and update payout if exists
@@ -5275,7 +5665,7 @@ export async function registerRoutes(
         
         // Update transaction status
         await storage.updateTransactionByReference(reference, {
-          status: 'Failed',
+          status: 'failed',
         });
 
         // Find and update payout if exists
@@ -5358,13 +5748,15 @@ export async function registerRoutes(
           await storage.updateBalances({ usd: String(currentUsd + amount) });
           
           await storage.createTransaction({
-            type: 'Funding',
+            type: 'funding',
             amount: String(amount),
             fee: '0',
-            status: 'Completed',
+            status: 'completed',
             description: `Card payment via Stripe - ${reference}`,
             currency,
             date: new Date().toISOString().split('T')[0],
+            reference: null,
+            userId: null,
           });
         }
       }
@@ -5427,14 +5819,15 @@ export async function registerRoutes(
           // Create card transaction record
           await storage.createCardTransaction({
             cardId: dbCard.id,
+            companyId: dbCard.companyId || null,
             amount: String(amount),
+            currency: dbCard.currency || 'USD',
             merchant: merchantName,
             category: merchantCategory,
-            status: 'Completed',
+            description: `Purchase at ${merchantName}`,
+            status: 'completed',
             date: new Date().toISOString(),
-            currency,
-            type: 'purchase',
-          } as any);
+          });
 
           paymentLogger.info('card_balance_updated', { cardId: dbCard.id, oldBalance: currentBalance, newBalance, merchant: merchantName });
         }
@@ -5482,13 +5875,15 @@ export async function registerRoutes(
 
           // Create transaction record
           await storage.createTransaction({
-            type: 'Funding',
+            type: 'funding',
             amount: String(amount),
             fee: '0',
-            status: 'Completed',
+            status: 'completed',
             description: `Virtual account deposit: ${description}`,
             currency,
             date: new Date().toISOString(),
+            reference: null,
+            userId: null,
           });
         }
       }
@@ -5520,7 +5915,7 @@ export async function registerRoutes(
   });
 
   // ==================== PAYSTACK AUTO-DEBIT & SUBSCRIPTIONS ====================
-  app.post("/api/paystack/plans", async (req, res) => {
+  app.post("/api/paystack/plans", requireAuth, requireAdmin, async (req, res) => {
     try {
       const { name, amount, interval, description } = req.body;
       if (!name || !amount || !interval) {
@@ -5534,7 +5929,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/paystack/plans", async (req, res) => {
+  app.get("/api/paystack/plans", requireAuth, async (req, res) => {
     try {
       const result = await paystackClient.listPlans();
       res.json(result);
@@ -5544,7 +5939,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/paystack/subscriptions", async (req, res) => {
+  app.post("/api/paystack/subscriptions", requireAuth, sensitiveLimiter, async (req, res) => {
     try {
       const { customerEmail, planCode, authorizationCode } = req.body;
       if (!customerEmail || !planCode) {
@@ -5558,7 +5953,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/paystack/subscriptions", async (req, res) => {
+  app.get("/api/paystack/subscriptions", requireAuth, async (req, res) => {
     try {
       const result = await paystackClient.listSubscriptions();
       res.json(result);
@@ -5568,7 +5963,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/paystack/subscriptions/enable", async (req, res) => {
+  app.post("/api/paystack/subscriptions/enable", requireAuth, async (req, res) => {
     try {
       const { subscriptionCode, emailToken } = req.body;
       if (!subscriptionCode || !emailToken) {
@@ -5582,7 +5977,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/paystack/subscriptions/disable", async (req, res) => {
+  app.post("/api/paystack/subscriptions/disable", requireAuth, async (req, res) => {
     try {
       const { subscriptionCode, emailToken } = req.body;
       if (!subscriptionCode || !emailToken) {
@@ -5596,7 +5991,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/paystack/charge-authorization", async (req, res) => {
+  app.post("/api/paystack/charge-authorization", requireAuth, financialLimiter, async (req, res) => {
     try {
       const { email, amount, authorizationCode, reference, metadata } = req.body;
       if (!email || !amount || !authorizationCode) {
@@ -5607,13 +6002,15 @@ export async function registerRoutes(
       if (result.status && result.data?.status === 'success') {
         const amountInNaira = result.data.amount / 100;
         await storage.createTransaction({
-          type: 'Payout',
+          type: 'payout',
           amount: String(amountInNaira),
           fee: "0",
-          status: 'Completed',
+          status: 'completed',
           description: metadata?.description || 'Auto-debit charge',
           currency: 'NGN',
           date: new Date().toISOString().split('T')[0],
+          reference: null,
+          userId: null,
         });
       }
       
@@ -5624,9 +6021,9 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/paystack/authorizations/:email", async (req, res) => {
+  app.get("/api/paystack/authorizations/:email", requireAuth, async (req, res) => {
     try {
-      const result = await paystackClient.listAuthorizations(req.params.email);
+      const result = await paystackClient.listAuthorizations(param(req.params.email));
       res.json(result);
     } catch (error: any) {
       const mapped = mapPaymentError(error, 'subscription');
@@ -5634,7 +6031,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/paystack/deactivate-authorization", async (req, res) => {
+  app.post("/api/paystack/deactivate-authorization", requireAuth, sensitiveLimiter, async (req, res) => {
     try {
       const { authorizationCode } = req.body;
       if (!authorizationCode) {
@@ -5698,7 +6095,7 @@ export async function registerRoutes(
 
   app.get("/api/paystack/transfers/:transferCode", requireAuth, async (req, res) => {
     try {
-      const { transferCode } = req.params;
+      const transferCode = param(req.params.transferCode);
       const result = await paystackClient.fetchTransfer(transferCode);
       res.json(result.data);
     } catch (error: any) {
@@ -5721,7 +6118,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/paystack/transfers/finalize", requireAuth, async (req, res) => {
+  app.post("/api/paystack/transfers/finalize", requireAuth, financialLimiter, async (req, res) => {
     try {
       const { transferCode, otp } = req.body;
       if (!transferCode || !otp) {
@@ -5735,7 +6132,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/paystack/transfers/bulk", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/paystack/transfers/bulk", requireAuth, requireAdmin, financialLimiter, async (req, res) => {
     try {
       const { transfers } = req.body;
       if (!Array.isArray(transfers) || transfers.length === 0) {
@@ -5763,7 +6160,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/paystack/managed-accounts", requireAuth, async (req, res) => {
+  app.post("/api/paystack/managed-accounts", requireAuth, sensitiveLimiter, async (req, res) => {
     try {
       const { customerId, currency, name } = req.body;
       if (!customerId || !currency || !name) {
@@ -5786,11 +6183,13 @@ export async function registerRoutes(
 
   const parseNum = (v: any) => parseFloat(String(v)) || 0;
 
-  app.get("/api/analytics/summary", async (req, res) => {
+  app.get("/api/analytics/summary", requireAuth, async (req, res) => {
     try {
-      const expenses = await storage.getExpenses();
-      const transactions = await storage.getTransactions();
-      const budgets = await storage.getBudgets();
+      const analyticsCompany = await resolveUserCompany(req);
+      const analyticsCompanyId = analyticsCompany?.companyId;
+      const expenses = await storage.getExpenses(analyticsCompanyId);
+      const transactions = await storage.getTransactions(analyticsCompanyId);
+      const budgets = await storage.getBudgets(analyticsCompanyId);
       
       const totalExpenses = expenses.reduce((sum, e) => sum + parseNum(e.amount), 0);
       const totalIncome = transactions
@@ -5833,15 +6232,17 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/analytics/kpis", async (req, res) => {
+  app.get("/api/analytics/kpis", requireAuth, async (req, res) => {
     try {
+      const kpiCompany = await resolveUserCompany(req);
+      const kpiCompanyId = kpiCompany?.companyId;
       const [expenses, transactions, budgets, bills, invoicesList, payroll, walletsList, vendorsList] = await Promise.all([
-        storage.getExpenses(),
-        storage.getTransactions(),
-        storage.getBudgets(),
-        storage.getBills(),
+        storage.getExpenses(kpiCompanyId),
+        storage.getTransactions(kpiCompanyId),
+        storage.getBudgets(kpiCompanyId),
+        storage.getBills(kpiCompanyId),
         storage.getInvoices(),
-        storage.getPayroll(),
+        storage.getPayroll(kpiCompanyId),
         storage.getWallets(),
         storage.getVendors(),
       ]);
@@ -5911,14 +6312,16 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/analytics/cash-flow", async (req, res) => {
+  app.get("/api/analytics/cash-flow", requireAuth, async (req, res) => {
     try {
+      const cashFlowCompany = await resolveUserCompany(req);
+      const cashFlowCompanyId = cashFlowCompany?.companyId;
       const [transactions, expenses, bills, invoicesList, payroll] = await Promise.all([
-        storage.getTransactions(),
-        storage.getExpenses(),
-        storage.getBills(),
+        storage.getTransactions(cashFlowCompanyId),
+        storage.getExpenses(cashFlowCompanyId),
+        storage.getBills(cashFlowCompanyId),
         storage.getInvoices(),
-        storage.getPayroll(),
+        storage.getPayroll(cashFlowCompanyId),
       ]);
 
       const now = new Date();
@@ -5988,7 +6391,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/analytics/vendor-performance", async (req, res) => {
+  app.get("/api/analytics/vendor-performance", requireAuth, async (req, res) => {
     try {
       const [vendorsList, expenses] = await Promise.all([
         storage.getVendors(),
@@ -6045,7 +6448,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/analytics/payroll-summary", async (req, res) => {
+  app.get("/api/analytics/payroll-summary", requireAuth, async (req, res) => {
     try {
       const [payroll, team] = await Promise.all([
         storage.getPayroll(),
@@ -6121,15 +6524,17 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/analytics/insights", async (req, res) => {
+  app.get("/api/analytics/insights", requireAuth, async (req, res) => {
     try {
+      const insightsCompany = await resolveUserCompany(req);
+      const insightsCompanyId = insightsCompany?.companyId;
       const [expenses, transactions, budgets, bills, invoicesList, payroll, vendorsList, walletsList] = await Promise.all([
-        storage.getExpenses(),
-        storage.getTransactions(),
-        storage.getBudgets(),
-        storage.getBills(),
+        storage.getExpenses(insightsCompanyId),
+        storage.getTransactions(insightsCompanyId),
+        storage.getBudgets(insightsCompanyId),
+        storage.getBills(insightsCompanyId),
         storage.getInvoices(),
-        storage.getPayroll(),
+        storage.getPayroll(insightsCompanyId),
         storage.getVendors(),
         storage.getWallets(),
       ]);
@@ -6325,7 +6730,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/analytics/snapshots", async (req, res) => {
+  app.get("/api/analytics/snapshots", requireAuth, async (req, res) => {
     try {
       const periodType = req.query.periodType as string | undefined;
       const snapshots = await storage.getAnalyticsSnapshots(periodType);
@@ -6335,7 +6740,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/analytics/stored-insights", async (req, res) => {
+  app.get("/api/analytics/stored-insights", requireAuth, async (req, res) => {
     try {
       const category = req.query.category as string | undefined;
       const insights = await storage.getBusinessInsights(category);
@@ -6347,11 +6752,11 @@ export async function registerRoutes(
 
   // ==================== KYC & ONBOARDING API ====================
   
-  // Get user profile by Firebase UID
-  app.get("/api/user-profile/:firebaseUid", async (req, res) => {
+  // Get user profile by Cognito Sub
+  app.get("/api/user-profile/:cognitoSub", requireAuth, requireOwnership, async (req, res) => {
     try {
-      const { firebaseUid } = req.params;
-      const profile = await storage.getUserProfile(firebaseUid);
+      const cognitoSub = param(req.params.cognitoSub);
+      const profile = await storage.getUserProfileByCognitoSub(cognitoSub);
       if (!profile) {
         return res.status(404).json({ error: "Profile not found" });
       }
@@ -6362,17 +6767,21 @@ export async function registerRoutes(
   });
 
   // Create user profile
-  app.post("/api/user-profile", async (req, res) => {
+  app.post("/api/user-profile", requireAuth, async (req, res) => {
     try {
-      const { firebaseUid, email, displayName, photoUrl, phoneNumber, country } = req.body;
-      if (!firebaseUid || !email) {
-        return res.status(400).json({ error: "firebaseUid and email are required" });
+      const { cognitoSub, email, displayName, photoUrl, phoneNumber, country } = req.body;
+      if (!cognitoSub || !email) {
+        return res.status(400).json({ error: "cognitoSub and email are required" });
+      }
+      // SECURITY: Ensure user can only create their own profile
+      if (cognitoSub !== req.user!.cognitoSub) {
+        return res.status(403).json({ error: "Cannot create profile for another user" });
       }
       
-      const existing = await storage.getUserProfile(firebaseUid);
+      const existing = await storage.getUserProfileByCognitoSub(cognitoSub);
       if (existing) {
         if ((phoneNumber || country) && (!existing.phoneNumber || !existing.country)) {
-          const updated = await storage.updateUserProfile(firebaseUid, {
+          const updated = await storage.updateUserProfile(cognitoSub, {
             ...(phoneNumber && !existing.phoneNumber ? { phoneNumber } : {}),
             ...(country && !existing.country ? { country } : {}),
           });
@@ -6383,7 +6792,7 @@ export async function registerRoutes(
       
       const now = new Date().toISOString();
       const profile = await storage.createUserProfile({
-        firebaseUid,
+        cognitoSub,
         email,
         displayName: displayName || null,
         photoUrl: photoUrl || null,
@@ -6406,7 +6815,7 @@ export async function registerRoutes(
       try {
         const now2 = new Date().toISOString();
         await storage.createNotificationSettings({
-          userId: firebaseUid,
+          userId: cognitoSub,
           emailEnabled: true,
           smsEnabled: !!phoneNumber,
           pushEnabled: true,
@@ -6440,10 +6849,10 @@ export async function registerRoutes(
   });
 
   // Update user profile
-  app.patch("/api/user-profile/:firebaseUid", async (req, res) => {
+  app.patch("/api/user-profile/:cognitoSub", requireAuth, requireOwnership, async (req, res) => {
     try {
-      const { firebaseUid } = req.params;
-      const profile = await storage.updateUserProfile(firebaseUid, req.body);
+      const cognitoSub = param(req.params.cognitoSub);
+      const profile = await storage.updateUserProfile(cognitoSub, req.body);
       if (!profile) {
         return res.status(404).json({ error: "Profile not found" });
       }
@@ -6454,23 +6863,26 @@ export async function registerRoutes(
   });
 
   // Get user settings (notification preferences, etc.)
-  app.get("/api/user-settings/:firebaseUid", async (req, res) => {
+  app.get("/api/user-settings/:cognitoSub", requireAuth, requireOwnership, async (req, res) => {
     try {
-      const { firebaseUid } = req.params;
-      const profile = await storage.getUserProfile(firebaseUid);
+      const cognitoSub = param(req.params.cognitoSub);
+      const profile = await storage.getUserProfileByCognitoSub(cognitoSub);
       if (!profile) {
         return res.status(404).json({ error: "User not found" });
       }
-      
-      // Return user-specific settings
+
+      // Read notification preferences from notificationSettings table (single source of truth)
+      const notifSettings = await storage.getNotificationSettings(cognitoSub);
+
+      // Return user-specific settings (preferences from userProfiles, notifications from notificationSettings)
       res.json({
-        emailNotifications: profile.emailNotifications ?? true,
-        pushNotifications: profile.pushNotifications ?? true,
-        smsNotifications: profile.smsNotifications ?? false,
-        expenseAlerts: profile.expenseAlerts ?? true,
-        budgetWarnings: profile.budgetWarnings ?? true,
-        paymentReminders: profile.paymentReminders ?? true,
-        weeklyDigest: profile.weeklyDigest ?? true,
+        emailNotifications: notifSettings?.emailEnabled ?? profile.emailNotifications ?? true,
+        pushNotifications: notifSettings?.pushEnabled ?? profile.pushNotifications ?? true,
+        smsNotifications: notifSettings?.smsEnabled ?? profile.smsNotifications ?? false,
+        expenseAlerts: notifSettings?.expenseNotifications ?? profile.expenseAlerts ?? true,
+        budgetWarnings: notifSettings?.budgetNotifications ?? profile.budgetWarnings ?? true,
+        paymentReminders: notifSettings?.paymentNotifications ?? profile.paymentReminders ?? true,
+        weeklyDigest: notifSettings?.weeklyDigest ?? profile.weeklyDigest ?? true,
         preferredCurrency: profile.preferredCurrency ?? 'USD',
         preferredLanguage: profile.preferredLanguage ?? 'en',
         preferredTimezone: profile.preferredTimezone ?? 'America/Los_Angeles',
@@ -6486,41 +6898,87 @@ export async function registerRoutes(
   });
 
   // Update user settings
-  app.patch("/api/user-settings/:firebaseUid", async (req, res) => {
+  app.patch("/api/user-settings/:cognitoSub", requireAuth, requireOwnership, async (req, res) => {
     try {
-      const { firebaseUid } = req.params;
-      const allowedFields = [
-        'emailNotifications', 'pushNotifications', 'smsNotifications',
-        'expenseAlerts', 'budgetWarnings', 'paymentReminders', 'weeklyDigest',
-        'preferredCurrency', 'preferredLanguage', 'preferredTimezone', 
+      const cognitoSub = param(req.params.cognitoSub);
+
+      // Notification fields map from API names to notificationSettings column names
+      const notifFieldMap: Record<string, string> = {
+        emailNotifications: 'emailEnabled',
+        pushNotifications: 'pushEnabled',
+        smsNotifications: 'smsEnabled',
+        expenseAlerts: 'expenseNotifications',
+        budgetWarnings: 'budgetNotifications',
+        paymentReminders: 'paymentNotifications',
+        weeklyDigest: 'weeklyDigest',
+      };
+
+      // Preference fields stay on userProfiles
+      const profileFields = [
+        'preferredCurrency', 'preferredLanguage', 'preferredTimezone',
         'preferredDateFormat', 'darkMode', 'sessionTimeout',
         'transactionPinEnabled', 'twoFactorEnabled'
       ];
-      
-      // Filter to only allowed settings fields
-      const updates: Record<string, any> = {};
-      for (const key of allowedFields) {
-        if (req.body[key] !== undefined) {
-          updates[key] = req.body[key];
+
+      // Split updates: notification fields → notificationSettings, preferences → userProfiles
+      const notifUpdates: Record<string, any> = {};
+      const profileUpdates: Record<string, any> = {};
+
+      for (const [apiKey, dbKey] of Object.entries(notifFieldMap)) {
+        if (req.body[apiKey] !== undefined) {
+          notifUpdates[dbKey] = req.body[apiKey];
+          // Also write to userProfiles for backward compat during transition
+          profileUpdates[apiKey] = req.body[apiKey];
         }
       }
-      
-      const profile = await storage.updateUserProfile(firebaseUid, updates);
+
+      for (const key of profileFields) {
+        if (req.body[key] !== undefined) {
+          profileUpdates[key] = req.body[key];
+        }
+      }
+
+      // Update userProfiles (preferences + deprecated notification fields for backward compat)
+      let profile;
+      if (Object.keys(profileUpdates).length > 0) {
+        profile = await storage.updateUserProfile(cognitoSub, profileUpdates);
+      } else {
+        profile = await storage.getUserProfileByCognitoSub(cognitoSub);
+      }
       if (!profile) {
         return res.status(404).json({ error: "User not found" });
       }
-      
+
+      // Update notificationSettings (single source of truth for notification preferences)
+      if (Object.keys(notifUpdates).length > 0) {
+        const existing = await storage.getNotificationSettings(cognitoSub);
+        if (existing) {
+          await storage.updateNotificationSettings(cognitoSub, notifUpdates);
+        } else {
+          // Create notificationSettings row if it doesn't exist yet
+          await storage.createNotificationSettings({
+            userId: cognitoSub,
+            ...notifUpdates,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          } as any);
+        }
+      }
+
+      // Read back notification settings for response
+      const notifSettings = await storage.getNotificationSettings(cognitoSub);
+
       res.json({
         success: true,
         message: "Settings updated successfully",
         settings: {
-          emailNotifications: profile.emailNotifications,
-          pushNotifications: profile.pushNotifications,
-          smsNotifications: profile.smsNotifications,
-          expenseAlerts: profile.expenseAlerts,
-          budgetWarnings: profile.budgetWarnings,
-          paymentReminders: profile.paymentReminders,
-          weeklyDigest: profile.weeklyDigest,
+          emailNotifications: notifSettings?.emailEnabled ?? profile.emailNotifications,
+          pushNotifications: notifSettings?.pushEnabled ?? profile.pushNotifications,
+          smsNotifications: notifSettings?.smsEnabled ?? profile.smsNotifications,
+          expenseAlerts: notifSettings?.expenseNotifications ?? profile.expenseAlerts,
+          budgetWarnings: notifSettings?.budgetNotifications ?? profile.budgetWarnings,
+          paymentReminders: notifSettings?.paymentNotifications ?? profile.paymentReminders,
+          weeklyDigest: notifSettings?.weeklyDigest ?? profile.weeklyDigest,
           preferredCurrency: profile.preferredCurrency,
           preferredLanguage: profile.preferredLanguage,
           preferredTimezone: profile.preferredTimezone,
@@ -6539,7 +6997,7 @@ export async function registerRoutes(
   // Get KYC submission
   app.get("/api/kyc/:userProfileId", requireAuth, async (req, res) => {
     try {
-      const { userProfileId } = req.params;
+      const userProfileId = param(req.params.userProfileId);
       const submission = await storage.getKycSubmission(userProfileId);
       if (!submission) {
         return res.status(404).json({ error: "KYC submission not found" });
@@ -6567,8 +7025,8 @@ export async function registerRoutes(
   );
   
   const kycSubmissionSchema = z.object({
-    firebaseUid: requiredString("Firebase UID"),
-    email: optionalString,
+    cognitoSub: requiredString("Cognito Sub"),
+    email: requiredString("Email"),
     firstName: requiredString("First name"),
     lastName: requiredString("Last name"),
     middleName: optionalString,
@@ -6583,8 +7041,8 @@ export async function registerRoutes(
     state: requiredString("State"),
     country: requiredString("Country"),
     postalCode: requiredString("Postal code"),
-    idType: optionalString,
-    idNumber: optionalString,
+    idType: requiredString("ID type"),
+    idNumber: requiredString("ID number"),
     idExpiryDate: optionalString,
     idFrontUrl: optionalString,
     idBackUrl: optionalString,
@@ -6600,9 +7058,6 @@ export async function registerRoutes(
     acceptTerms: z.union([z.boolean(), z.string()]).optional().transform(v => v === true || v === 'true'),
     accountType: optionalString,
     bvnNumber: optionalString,
-    // Auto-approval flags
-    bvnVerified: z.union([z.boolean(), z.string()]).optional().transform(v => v === true || v === 'true'),
-    stripeVerified: z.union([z.boolean(), z.string()]).optional().transform(v => v === true || v === 'true'),
   });
 
   // Submit KYC
@@ -6618,9 +7073,59 @@ export async function registerRoutes(
       }
 
       const data = parseResult.data;
-      
-      // Get user profile by firebaseUid to get the profile ID, or create if not exists
-      let userProfile = await storage.getUserProfile(data.firebaseUid);
+
+      // SECURITY: Always use cognitoSub from authenticated token, never from client
+      const cognitoSub = (req as any).user?.cognitoSub;
+      if (!cognitoSub) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // SERVER-SIDE VALIDATION: ID type, expiry, age
+      const VALID_ID_TYPES_BY_COUNTRY: Record<string, string[]> = {
+        NG: ['BVN', 'NIN', 'VOTERS_CARD', 'DRIVERS_LICENSE', 'INTERNATIONAL_PASSPORT'],
+        GH: ['GHANA_CARD', 'VOTERS_ID', 'DRIVERS_LICENSE', 'PASSPORT'],
+        ZA: ['SOUTH_AFRICAN_ID', 'PASSPORT', 'DRIVERS_LICENSE'],
+        KE: ['NATIONAL_ID', 'PASSPORT', 'DRIVERS_LICENSE'],
+        US: ['SSN', 'DRIVERS_LICENSE', 'PASSPORT', 'STATE_ID'],
+        GB: ['PASSPORT', 'DRIVERS_LICENSE'],
+        CA: ['PASSPORT', 'DRIVERS_LICENSE'],
+        AU: ['PASSPORT', 'DRIVERS_LICENSE'],
+      };
+      const upperCountry = data.country?.toUpperCase();
+      const validTypes = VALID_ID_TYPES_BY_COUNTRY[upperCountry];
+      if (validTypes && !validTypes.includes(data.idType.toUpperCase())) {
+        return res.status(400).json({ error: `Invalid ID type '${data.idType}' for ${upperCountry}. Valid: ${validTypes.join(', ')}` });
+      }
+
+      if (data.idExpiryDate) {
+        const expiryDate = new Date(data.idExpiryDate);
+        if (isNaN(expiryDate.getTime())) {
+          return res.status(400).json({ error: 'Invalid ID expiry date format' });
+        }
+        if (expiryDate < new Date()) {
+          return res.status(400).json({ error: 'ID document has expired. Please provide a valid, non-expired ID.' });
+        }
+      }
+
+      const dob = new Date(data.dateOfBirth);
+      if (isNaN(dob.getTime())) {
+        return res.status(400).json({ error: 'Invalid date of birth format' });
+      }
+      const today = new Date();
+      let age = today.getFullYear() - dob.getFullYear();
+      const monthDiff = today.getMonth() - dob.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+        age--;
+      }
+      if (age < 18) {
+        return res.status(400).json({ error: 'You must be at least 18 years old.' });
+      }
+      if (age > 120) {
+        return res.status(400).json({ error: 'Invalid date of birth.' });
+      }
+
+      // Get user profile by cognitoSub to get the profile ID, or create if not exists
+      let userProfile = await storage.getUserProfileByCognitoSub(cognitoSub);
       if (!userProfile) {
         // Auto-create user profile from KYC submission data
         const now = new Date().toISOString();
@@ -6628,10 +7133,10 @@ export async function registerRoutes(
         const fullAddress = [data.addressLine1, data.addressLine2, data.city, data.state, data.postalCode, data.country]
           .filter(Boolean)
           .join(', ');
-        
+
         userProfile = await storage.createUserProfile({
-          firebaseUid: data.firebaseUid,
-          email: data.email || `${data.firebaseUid}@pending.spendly.com`,
+          cognitoSub: cognitoSub,
+          email: data.email,
           displayName: fullName,
           phoneNumber: data.phoneNumber,
           address: fullAddress,
@@ -6650,9 +7155,51 @@ export async function registerRoutes(
       }
 
       const now = new Date().toISOString();
-      
-      // Auto-approve if BVN or Stripe verification was successful
-      const isAutoApproved = data.bvnVerified || data.stripeVerified;
+
+      // SECURITY: Server-side verification — NEVER trust client-sent flags
+      let isAutoApproved = false;
+
+      // For Nigerian users with BVN, verify server-side via Paystack
+      if (data.bvnNumber && data.country?.toUpperCase() === 'NG') {
+        try {
+          const bvnResult = await paystackClient.resolveBVN(data.bvnNumber);
+          if (bvnResult && bvnResult.status && bvnResult.data) {
+            const bvnFirst = (bvnResult.data.first_name || '').toLowerCase().trim();
+            const bvnLast = (bvnResult.data.last_name || '').toLowerCase().trim();
+            const submittedFirst = data.firstName.toLowerCase().trim();
+            const submittedLast = data.lastName.toLowerCase().trim();
+            if (bvnFirst === submittedFirst && bvnLast === submittedLast) {
+              isAutoApproved = true;
+            } else {
+              paymentLogger.warn('bvn_name_mismatch', {
+                bvn: `***${data.bvnNumber.slice(-4)}`,
+                expected: `${submittedFirst} ${submittedLast}`,
+                got: `${bvnFirst} ${bvnLast}`,
+              });
+            }
+          }
+        } catch (bvnErr) {
+          paymentLogger.warn('bvn_verification_failed', { error: (bvnErr as Error).message });
+          // Fall through to pending_review — safe default
+        }
+      }
+
+      // For Stripe-supported countries, check if there's a completed Stripe Identity session
+      const STRIPE_COUNTRIES = ['US', 'GB', 'CA', 'DE', 'FR', 'AU', 'NL', 'IE', 'AT', 'BE', 'ES', 'IT', 'PT', 'FI', 'SE', 'DK', 'NO', 'NZ', 'SG', 'JP'];
+      if (!isAutoApproved && STRIPE_COUNTRIES.includes(data.country?.toUpperCase())) {
+        try {
+          // Check if user has a verified Stripe Identity session
+          const kycRecord = await storage.getKycSubmission(userProfile.id);
+          // If there's an existing approved session, trust it
+          const hasVerifiedSession = kycRecord && (kycRecord as any).status === 'approved' && (kycRecord as any).reviewedBy === 'stripe_identity';
+          if (hasVerifiedSession) {
+            isAutoApproved = true;
+          }
+        } catch (stripeErr) {
+          paymentLogger.warn('stripe_verification_check_failed', { error: (stripeErr as Error).message });
+        }
+      }
+
       const kycStatus = isAutoApproved ? 'approved' : 'pending_review';
       
       const submission = await storage.createKycSubmission({
@@ -6671,8 +7218,8 @@ export async function registerRoutes(
         state: data.state,
         country: data.country,
         postalCode: data.postalCode,
-        idType: data.idType || 'BVN', // Default to BVN if not provided (BVN-verified users)
-        idNumber: data.idNumber || data.bvnNumber || 'N/A', // Use BVN number if available
+        idType: data.idType,
+        idNumber: data.idNumber,
         idExpiryDate: data.idExpiryDate || null,
         idFrontUrl: data.idFrontUrl || null,
         idBackUrl: data.idBackUrl || null,
@@ -6685,7 +7232,7 @@ export async function registerRoutes(
         businessAddress: data.businessAddress || null,
         businessDocumentUrl: data.businessDocumentUrl || null,
         status: kycStatus,
-        reviewNotes: isAutoApproved ? 'Auto-approved via BVN/Stripe verification' : null,
+        reviewNotes: isAutoApproved ? 'Auto-approved via server-side provider verification' : null,
         reviewedBy: isAutoApproved ? 'system' : null,
         reviewedAt: isAutoApproved ? now : null,
         submittedAt: now,
@@ -6693,21 +7240,92 @@ export async function registerRoutes(
         updatedAt: now,
       });
 
-      // Update user profile KYC status using firebaseUid
-      await storage.updateUserProfile(data.firebaseUid, { 
+      // Update user profile KYC status using cognitoSub
+      await storage.updateUserProfile(cognitoSub, {
         kycStatus: kycStatus,
         onboardingCompleted: true,
         onboardingStep: 5,
       });
 
-      // Auto-create virtual account if approved
-      let virtualAccount = null;
-      if (isAutoApproved) {
+      // Auto-create company if user doesn't have one yet
+      const existingCompanies = await storage.getUserCompanies(cognitoSub);
+      if (existingCompanies.length === 0) {
+        try {
+          const companyName = data.isBusinessAccount && data.businessName
+            ? data.businessName
+            : `${data.firstName}'s Company`;
+          let slug = companyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `company-${Date.now()}`;
+          const existingSlug = await storage.getCompanyBySlug(slug);
+          if (existingSlug) slug = `${slug}-${Date.now().toString(36)}`;
+
+          const country = (data.country || 'US').toUpperCase();
+          const currencyConfig = getCurrencyForCountry(country);
+          const isAfrican = ['NG', 'GH', 'KE', 'ZA', 'EG', 'RW', 'CI', 'TZ', 'UG'].includes(country);
+
+          const newCompany = await storage.createCompany({
+            name: companyName,
+            slug,
+            ownerId: cognitoSub,
+            industry: data.businessType || null,
+            country,
+            currency: currencyConfig.currency,
+            status: 'active',
+            email: data.email,
+            phone: data.phoneNumber || null,
+            address: data.addressLine1 || null,
+            city: data.city || null,
+            state: data.state || null,
+            postalCode: data.postalCode || null,
+            countryCode: country,
+            region: isAfrican ? 'Africa' : 'North America',
+            paymentProvider: isAfrican ? 'paystack' : 'stripe',
+          });
+
+          await storage.createCompanyMember({
+            companyId: newCompany.id,
+            userId: cognitoSub,
+            email: data.email,
+            role: 'OWNER',
+            status: 'active',
+            invitedAt: now,
+            joinedAt: now,
+          });
+
+          // Link user profile to company
+          await storage.updateUserProfile(cognitoSub, {
+            companyId: newCompany.id,
+          });
+
+          // Create wallet for this company
+          const existingWallet = await storage.getWalletByUserId(cognitoSub);
+          if (!existingWallet) {
+            await storage.createWallet({
+              userId: cognitoSub,
+              companyId: newCompany.id,
+              currency: currencyConfig.currency,
+              type: 'business',
+              balance: '0',
+              availableBalance: '0',
+              pendingBalance: '0',
+              status: 'active',
+            });
+          }
+
+          console.log(`Auto-created company '${companyName}' (${newCompany.id}) for user ${cognitoSub}`);
+        } catch (companyErr: any) {
+          console.error('Auto-create company failed (non-blocking):', companyErr.message);
+        }
+      }
+
+      // Auto-create virtual account if approved (only for DVA-supported countries)
+      const DVA_SUPPORTED_COUNTRIES = ['NG', 'GH', 'US', 'GB', 'CA', 'DE', 'FR', 'AU', 'NL', 'IE', 'AT', 'BE', 'ES', 'IT', 'PT', 'FI', 'SE', 'DK', 'NO', 'NZ', 'SG', 'JP'];
+      let virtualAccount: any = null;
+      if (isAutoApproved && DVA_SUPPORTED_COUNTRIES.includes(data.country?.toUpperCase())) {
         try {
           // Check if user already has a virtual account
           const existingAccounts = await storage.getVirtualAccounts();
-          const userAccount = existingAccounts.find((a: any) => a.userId === data.firebaseUid);
-          
+          const userAccount = existingAccounts.find((a: any) => a.userId === cognitoSub);
+
           if (!userAccount) {
             // Create virtual account via payment provider
             const result = await paymentService.createVirtualAccount(
@@ -6719,23 +7337,31 @@ export async function registerRoutes(
 
             // Store in database
             virtualAccount = await storage.createVirtualAccount({
-              userId: data.firebaseUid,
+              userId: cognitoSub,
               name: result.accountName || `${data.firstName} ${data.lastName}`,
               accountNumber: result.accountNumber || '',
               bankName: result.bankName || 'Spendly',
               bankCode: result.bankCode || 'SPENDLY',
+              routingNumber: null,
+              swiftCode: null,
+              country: data.country || 'US',
               currency: getCurrencyForCountry(data.country).currency,
               balance: '0',
               type: 'personal',
               status: 'active',
               createdAt: new Date().toISOString(),
+              provider: 'system',
+              accountName: null,
+              providerAccountId: null,
+              providerCustomerCode: null,
+              companyId: null,
             });
 
             // Create wallet for this user if not exists
-            const existingWallet = await storage.getWalletByUserId(data.firebaseUid);
+            const existingWallet = await storage.getWalletByUserId(cognitoSub);
             if (!existingWallet) {
               await storage.createWallet({
-                userId: data.firebaseUid,
+                userId: cognitoSub,
                 currency: getCurrencyForCountry(data.country).currency,
                 type: 'personal',
                 balance: '0',
@@ -6767,11 +7393,47 @@ export async function registerRoutes(
   // Update KYC submission
   app.patch("/api/kyc/:id", requireAuth, async (req, res) => {
     try {
-      const { id } = req.params;
-      const submission = await storage.updateKycSubmission(id, req.body);
-      if (!submission) {
+      const id = param(req.params.id);
+      const cognitoSub = (req as any).user?.cognitoSub;
+
+      // Verify ownership - fetch existing submission first
+      const existing = await storage.getKycSubmission(id);
+      if (!existing) {
         return res.status(404).json({ error: "KYC submission not found" });
       }
+
+      // Only allow owner to update their own KYC, or admin
+      const userProfile = await storage.getUserProfileByCognitoSub(cognitoSub);
+      const isOwner = userProfile && existing.userProfileId === userProfile.id;
+      const isAdmin = (req as any).user?.role === 'admin';
+      if (!isOwner && !isAdmin) {
+        return res.status(403).json({ error: "Not authorized to update this KYC submission" });
+      }
+
+      // Only allow certain fields to be updated by regular users
+      const allowedUserFields = ['firstName', 'lastName', 'middleName', 'dateOfBirth', 'gender',
+        'nationality', 'phoneNumber', 'alternatePhone', 'addressLine1', 'addressLine2',
+        'city', 'state', 'country', 'postalCode', 'idType', 'idNumber', 'idExpiryDate',
+        'idFrontUrl', 'idBackUrl', 'selfieUrl', 'proofOfAddressUrl',
+        'businessName', 'businessType', 'businessRegistrationNumber', 'businessAddress', 'businessDocumentUrl'];
+
+      const adminOnlyFields = ['status', 'reviewedBy', 'reviewedAt', 'reviewNotes'];
+
+      const updateData: Record<string, any> = {};
+      for (const [key, value] of Object.entries(req.body)) {
+        if (isAdmin && adminOnlyFields.includes(key)) {
+          updateData[key] = value;
+        } else if (allowedUserFields.includes(key)) {
+          updateData[key] = value;
+        }
+        // Silently ignore disallowed fields
+      }
+
+      if (Object.keys(updateData).length === 0) {
+        return res.status(400).json({ error: "No valid fields to update" });
+      }
+
+      const submission = await storage.updateKycSubmission(id, updateData);
       res.json(submission);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to update KYC submission" });
@@ -6845,11 +7507,11 @@ export async function registerRoutes(
   // Check Stripe Identity verification status
   app.get("/api/kyc/stripe/status/:sessionId", requireAuth, async (req, res) => {
     try {
-      const { sessionId } = req.params;
+      const sessionId = param(req.params.sessionId);
 
       const stripe = getStripeClient();
 
-      const verificationSession = await stripe.identity.verificationSessions.retrieve(sessionId);
+      const verificationSession = await (stripe as any).identity.verificationSessions.retrieve(sessionId);
 
       res.json({
         id: verificationSession.id,
@@ -7051,7 +7713,7 @@ export async function registerRoutes(
   // ==================== NOTIFICATIONS API ====================
 
   // Get all notifications for a user
-  app.get("/api/notifications", async (req, res) => {
+  app.get("/api/notifications", requireAuth, async (req, res) => {
     try {
       const userId = req.query.userId as string;
       if (!userId) {
@@ -7065,7 +7727,7 @@ export async function registerRoutes(
   });
 
   // Get unread notification count
-  app.get("/api/notifications/unread-count", async (req, res) => {
+  app.get("/api/notifications/unread-count", requireAuth, async (req, res) => {
     try {
       const userId = req.query.userId as string;
       if (!userId) {
@@ -7080,9 +7742,9 @@ export async function registerRoutes(
   });
 
   // Mark notification as read
-  app.patch("/api/notifications/:id/read", async (req, res) => {
+  app.patch("/api/notifications/:id/read", requireAuth, async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(param(req.params.id));
       const notification = await storage.markNotificationRead(id);
       if (!notification) {
         return res.status(404).json({ error: "Notification not found" });
@@ -7094,7 +7756,7 @@ export async function registerRoutes(
   });
 
   // Mark all notifications as read
-  app.post("/api/notifications/mark-all-read", async (req, res) => {
+  app.post("/api/notifications/mark-all-read", requireAuth, async (req, res) => {
     try {
       const { userId } = req.body;
       if (!userId) {
@@ -7108,9 +7770,9 @@ export async function registerRoutes(
   });
 
   // Delete notification
-  app.delete("/api/notifications/:id", async (req, res) => {
+  app.delete("/api/notifications/:id", requireAuth, async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseInt(param(req.params.id));
       const deleted = await storage.deleteNotification(id);
       if (!deleted) {
         return res.status(404).json({ error: "Notification not found" });
@@ -7122,7 +7784,7 @@ export async function registerRoutes(
   });
 
   // Test email delivery - sends a test email via AWS SES
-  app.post("/api/notifications/test-email", emailLimiter, async (req, res) => {
+  app.post("/api/notifications/test-email", emailLimiter, requireAuth, async (req, res) => {
     try {
       const { email } = req.body;
       // Default to the verified SES sender email for self-test
@@ -7155,7 +7817,7 @@ export async function registerRoutes(
   });
 
   // Send test notification
-  app.post("/api/notifications/send", async (req, res) => {
+  app.post("/api/notifications/send", requireAuth, async (req, res) => {
     try {
       const { userId, type, title, message, data, channels } = req.body;
       if (!userId || !title || !message) {
@@ -7178,12 +7840,10 @@ export async function registerRoutes(
   // ==================== NOTIFICATION SETTINGS API ====================
 
   // Get notification settings
-  app.get("/api/notification-settings", async (req, res) => {
+  app.get("/api/notification-settings", requireAuth, async (req, res) => {
     try {
-      const userId = req.query.userId as string;
-      if (!userId) {
-        return res.status(400).json({ error: "User ID is required" });
-      }
+      // SECURITY: Use authenticated user's ID, not query parameter
+      const userId = req.user!.cognitoSub;
       const settings = await storage.getNotificationSettings(userId);
       if (!settings) {
         // Create default settings
@@ -7215,14 +7875,13 @@ export async function registerRoutes(
   });
 
   // Update notification settings
-  app.patch("/api/notification-settings", async (req, res) => {
+  app.patch("/api/notification-settings", requireAuth, async (req, res) => {
     try {
-      const { userId, ...settingsData } = req.body;
-      if (!userId) {
-        return res.status(400).json({ error: "User ID is required" });
-      }
+      // SECURITY: Use authenticated user's ID, ignore client-sent userId
+      const userId = req.user!.cognitoSub;
+      const { userId: _ignoredUserId, ...settingsData } = req.body;
       
-      let settings = await storage.getNotificationSettings(userId);
+      let settings: any = await storage.getNotificationSettings(userId);
       if (!settings) {
         const now = new Date().toISOString();
         settings = await storage.createNotificationSettings({
@@ -7256,11 +7915,13 @@ export async function registerRoutes(
   // ==================== PUSH TOKENS API ====================
 
   // Register push token
-  app.post("/api/push-tokens", async (req, res) => {
+  app.post("/api/push-tokens", requireAuth, async (req, res) => {
     try {
-      const { userId, token, platform, deviceId } = req.body;
-      if (!userId || !token || !platform) {
-        return res.status(400).json({ error: "userId, token, and platform are required" });
+      // SECURITY: Use authenticated user's ID
+      const userId = req.user!.cognitoSub;
+      const { token, platform, deviceId } = req.body;
+      if (!token || !platform) {
+        return res.status(400).json({ error: "token and platform are required" });
       }
 
       // Deactivate existing tokens for this device
@@ -7290,9 +7951,9 @@ export async function registerRoutes(
   });
 
   // Delete push token
-  app.delete("/api/push-tokens/:token", async (req, res) => {
+  app.delete("/api/push-tokens/:token", requireAuth, async (req, res) => {
     try {
-      const { token } = req.params;
+      const token = param(req.params.token);
       const deleted = await storage.deletePushToken(token);
       if (!deleted) {
         return res.status(404).json({ error: "Push token not found" });
@@ -7306,7 +7967,7 @@ export async function registerRoutes(
   // ==================== ADMIN ROUTES ====================
 
   // Get audit logs
-  app.get("/api/admin/audit-logs", async (req, res) => {
+  app.get("/api/admin/audit-logs", requireAdmin, async (req, res) => {
     try {
       const logs = await storage.getAuditLogs();
       res.json(logs);
@@ -7316,7 +7977,7 @@ export async function registerRoutes(
   });
 
   // Create audit log
-  app.post("/api/admin/audit-logs", async (req, res) => {
+  app.post("/api/admin/audit-logs", requireAdmin, async (req, res) => {
     try {
       const { userId, userName, action, entityType, entityId, details, ipAddress, userAgent } = req.body;
       if (!userId || !userName || !action || !entityType) {
@@ -7327,11 +7988,12 @@ export async function registerRoutes(
         userName,
         action,
         entityType,
-        entityId,
-        details: details || {},
-        ipAddress,
-        userAgent,
+        entityId: entityId || null,
+        details: details || null,
+        ipAddress: ipAddress || null,
+        userAgent: userAgent || null,
         createdAt: new Date().toISOString(),
+        companyId: null,
       });
       res.status(201).json(log);
     } catch (error: any) {
@@ -7340,7 +8002,7 @@ export async function registerRoutes(
   });
 
   // Get organization settings
-  app.get("/api/admin/organization", async (req, res) => {
+  app.get("/api/admin/organization", requireAdmin, async (req, res) => {
     try {
       const settings = await storage.getOrganizationSettings();
       res.json(settings || {
@@ -7356,7 +8018,7 @@ export async function registerRoutes(
   });
 
   // Update organization settings
-  app.put("/api/admin/organization", async (req, res) => {
+  app.put("/api/admin/organization", requireAdmin, async (req, res) => {
     try {
       const data = req.body;
       const settings = await storage.updateOrganizationSettings({
@@ -7370,7 +8032,7 @@ export async function registerRoutes(
   });
 
   // Get system settings
-  app.get("/api/admin/settings", async (req, res) => {
+  app.get("/api/admin/settings", requireAdmin, async (req, res) => {
     try {
       const settings = await storage.getSystemSettings();
       res.json(settings);
@@ -7380,9 +8042,9 @@ export async function registerRoutes(
   });
 
   // Update system setting
-  app.put("/api/admin/settings/:key", async (req, res) => {
+  app.put("/api/admin/settings/:key", requireAdmin, async (req, res) => {
     try {
-      const { key } = req.params;
+      const key = param(req.params.key);
       const { value, description, category } = req.body;
       const setting = await storage.updateSystemSetting(key, {
         value,
@@ -7396,11 +8058,53 @@ export async function registerRoutes(
     }
   });
 
-  // Update security settings (simplified)
-  app.put("/api/admin/security", async (req, res) => {
+  // Get security settings
+  app.get("/api/admin/security", requireAdmin, async (req, res) => {
+    try {
+      const allSettings = await storage.getSystemSettings();
+      const securitySettings = allSettings.filter((s) => s.category === "security");
+
+      const defaults: Record<string, any> = {
+        requireMfa: false,
+        sessionTimeout: "30",
+        passwordMinLength: "8",
+        passwordRequireUppercase: true,
+        passwordRequireNumber: true,
+        passwordRequireSpecial: true,
+        maxLoginAttempts: "5",
+        lockoutDuration: "30",
+        allowApiKeys: true,
+        auditLogRetention: "90",
+      };
+
+      for (const setting of securitySettings) {
+        if (setting.value != null) {
+          try {
+            defaults[setting.key] = JSON.parse(setting.value);
+          } catch {
+            defaults[setting.key] = setting.value;
+          }
+        }
+      }
+
+      res.json(defaults);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch security settings" });
+    }
+  });
+
+  // Update security settings
+  app.put("/api/admin/security", requireAdmin, async (req, res) => {
     try {
       const settings = req.body;
-      // In a real app, you'd store these in system_settings table
+
+      for (const key of Object.keys(settings)) {
+        await storage.updateSystemSetting(key, {
+          value: JSON.stringify(settings[key]),
+          category: "security",
+        });
+      }
+
       res.json({ success: true, ...settings });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to update security settings" });
@@ -7408,7 +8112,7 @@ export async function registerRoutes(
   });
 
   // Get role permissions
-  app.get("/api/admin/roles", async (req, res) => {
+  app.get("/api/admin/roles", requireAdmin, async (req, res) => {
     try {
       const roles = await storage.getRolePermissions();
       res.json(roles);
@@ -7418,9 +8122,9 @@ export async function registerRoutes(
   });
 
   // Update role permissions
-  app.put("/api/admin/roles/:role", async (req, res) => {
+  app.put("/api/admin/roles/:role", requireAdmin, async (req, res) => {
     try {
-      const { role } = req.params;
+      const role = param(req.params.role);
       const { permissions, description } = req.body;
       const updated = await storage.updateRolePermissions(role, {
         permissions,
@@ -7436,10 +8140,13 @@ export async function registerRoutes(
   // ==================== WALLET ROUTES ====================
   
   // Get all wallets (admin) or user's wallets
-  app.get("/api/wallets", async (req, res) => {
+  app.get("/api/wallets", requireAuth, async (req, res) => {
     try {
-      const { userId } = req.query;
-      const walletsList = await storage.getWallets(userId as string);
+      const userId = (req as any).user?.cognitoSub;
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      const walletsList = await storage.getWallets(userId);
       res.json(walletsList);
     } catch (error: any) {
       const mapped = mapPaymentError(error, 'wallet');
@@ -7448,11 +8155,16 @@ export async function registerRoutes(
   });
 
   // Get wallet by ID
-  app.get("/api/wallets/:id", async (req, res) => {
+  app.get("/api/wallets/:id", requireAuth, async (req, res) => {
     try {
-      const wallet = await storage.getWallet(req.params.id);
+      const wallet = await storage.getWallet(param(req.params.id));
       if (!wallet) {
         return res.status(404).json({ error: "Wallet not found" });
+      }
+      // SECURITY: Verify wallet belongs to authenticated user
+      const authUserId = (req as any).user?.cognitoSub;
+      if (wallet.userId !== authUserId) {
+        return res.status(403).json({ error: "Not authorized to access this wallet" });
       }
       res.json(wallet);
     } catch (error: any) {
@@ -7462,10 +8174,15 @@ export async function registerRoutes(
   });
 
   // Create wallet
-  app.post("/api/wallets", async (req, res) => {
+  app.post("/api/wallets", requireAuth, async (req, res) => {
     try {
-      const { userId, currency, type } = req.body;
-      
+      // SECURITY: Always use authenticated user's ID, never client-provided
+      const userId = (req as any).user?.cognitoSub;
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      const { currency, type } = req.body;
+
       // Check if wallet already exists for this user/currency
       const existing = await storage.getWalletByUserId(userId, currency);
       if (existing) {
@@ -7489,9 +8206,19 @@ export async function registerRoutes(
   });
 
   // Get wallet transactions
-  app.get("/api/wallets/:id/transactions", async (req, res) => {
+  app.get("/api/wallets/:id/transactions", requireAuth, async (req, res) => {
     try {
-      const transactions = await storage.getWalletTransactions(req.params.id);
+      // SECURITY: Verify wallet ownership before returning transactions
+      const wallet = await storage.getWallet(param(req.params.id));
+      if (!wallet) {
+        return res.status(404).json({ error: "Wallet not found" });
+      }
+      const authUserId = (req as any).user?.cognitoSub;
+      if (wallet.userId !== authUserId) {
+        return res.status(403).json({ error: "Not authorized to view these transactions" });
+      }
+
+      const transactions = await storage.getWalletTransactions(param(req.params.id));
       res.json(transactions);
     } catch (error: any) {
       const mapped = mapPaymentError(error, 'wallet');
@@ -7500,15 +8227,48 @@ export async function registerRoutes(
   });
 
   // Fund wallet (credit)
-  app.post("/api/wallets/:id/fund", async (req, res) => {
+  app.post("/api/wallets/:id/fund", financialLimiter, requireAuth, async (req, res) => {
     try {
-      const { amount, reference, description, metadata } = req.body;
+      const { amount, reference, description, metadata, provider } = req.body;
+
+      // Input validation
+      const amountCheck = validateAmount(amount);
+      if (!amountCheck.valid) {
+        return res.status(400).json({ error: amountCheck.error });
+      }
+      const parsedAmount = amountCheck.parsed;
+
+      // SECURITY: Verify wallet ownership
+      const wallet = await storage.getWallet(param(req.params.id));
+      if (!wallet) {
+        return res.status(404).json({ error: "Wallet not found" });
+      }
+      const authUserId = (req as any).user?.cognitoSub;
+      if (wallet.userId !== authUserId) {
+        return res.status(403).json({ error: "Not authorized to fund this wallet" });
+      }
+
+      // SECURITY: Verify payment with the provider before crediting to prevent self-crediting
+      if (!reference) {
+        return res.status(400).json({ error: "Payment reference is required for wallet funding" });
+      }
+      const fundingProvider = provider || 'stripe';
+      try {
+        const verification = await paymentService.verifyPayment(reference, fundingProvider);
+        if (verification.status !== 'succeeded' && verification.status !== 'success') {
+          return res.status(400).json({ error: 'Payment not confirmed. Wallet will be credited via webhook.' });
+        }
+      } catch (verifyErr: any) {
+        console.error(`[Wallet Fund] Payment verification failed for ref ${reference}:`, verifyErr.message);
+        return res.status(400).json({ error: 'Payment verification failed. Wallet will be credited via webhook if payment succeeds.' });
+      }
+
       const transaction = await storage.creditWallet(
-        req.params.id,
-        parseFloat(amount),
+        param(req.params.id),
+        parsedAmount,
         'funding',
         description || 'Wallet funding',
-        reference || `FUND-${Date.now()}`,
+        reference,
         metadata
       );
       res.json(transaction);
@@ -7519,12 +8279,30 @@ export async function registerRoutes(
   });
 
   // Withdraw from wallet (debit)
-  app.post("/api/wallets/:id/withdraw", async (req, res) => {
+  app.post("/api/wallets/:id/withdraw", financialLimiter, requireAuth, async (req, res) => {
     try {
       const { amount, reference, description, metadata } = req.body;
+
+      // Input validation
+      const amountCheck = validateAmount(amount);
+      if (!amountCheck.valid) {
+        return res.status(400).json({ error: amountCheck.error });
+      }
+      const parsedAmount = amountCheck.parsed;
+
+      // SECURITY: Verify wallet ownership
+      const wallet = await storage.getWallet(param(req.params.id));
+      if (!wallet) {
+        return res.status(404).json({ error: "Wallet not found" });
+      }
+      const authUserId = (req as any).user?.cognitoSub;
+      if (wallet.userId !== authUserId) {
+        return res.status(403).json({ error: "Not authorized to withdraw from this wallet" });
+      }
+
       const transaction = await storage.debitWallet(
-        req.params.id,
-        parseFloat(amount),
+        param(req.params.id),
+        parsedAmount,
         'withdrawal',
         description || 'Wallet withdrawal',
         reference || `WD-${Date.now()}`,
@@ -7539,7 +8317,7 @@ export async function registerRoutes(
 
   // ==================== EXCHANGE RATES ROUTES ====================
   
-  app.get("/api/exchange-rates", async (req, res) => {
+  app.get("/api/exchange-rates", requireAuth, async (req, res) => {
     try {
       const rates = await storage.getExchangeRates();
       res.json(rates);
@@ -7549,7 +8327,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/exchange-rates", async (req, res) => {
+  app.post("/api/exchange-rates", requireAdmin, async (req, res) => {
     try {
       const { baseCurrency, targetCurrency, rate, source } = req.body;
       const exchangeRate = await storage.createExchangeRate({
@@ -7566,9 +8344,10 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/exchange-rates/:base/:target", async (req, res) => {
+  app.get("/api/exchange-rates/:base/:target", requireAuth, async (req, res) => {
     try {
-      const { base, target } = req.params;
+      const base = param(req.params.base);
+      const target = param(req.params.target);
       const rate = await storage.getExchangeRate(base, target);
       if (!rate) {
         return res.status(404).json({ error: "Exchange rate not found" });
@@ -7597,7 +8376,7 @@ export async function registerRoutes(
         { baseCurrency: 'GBP', targetCurrency: 'NGN', rate: '1961.00' },
       ];
 
-      const createdRates = [];
+      const createdRates: any[] = [];
       for (const rateData of defaultRates) {
         // Check if rate already exists
         const existing = await storage.getExchangeRate(rateData.baseCurrency, rateData.targetCurrency);
@@ -7622,7 +8401,7 @@ export async function registerRoutes(
   });
 
   // Get exchange rate settings (markup percentages)
-  app.get("/api/exchange-rates/settings", async (req, res) => {
+  app.get("/api/exchange-rates/settings", requireAuth, async (req, res) => {
     try {
       let settings = await storage.getExchangeRateSettings();
       if (!settings) {
@@ -7723,9 +8502,10 @@ export async function registerRoutes(
   });
 
   // Get exchange rate with markup applied (for customer-facing transactions)
-  app.get("/api/exchange-rates/:base/:target/with-markup", async (req, res) => {
+  app.get("/api/exchange-rates/:base/:target/with-markup", requireAuth, async (req, res) => {
     try {
-      const { base, target } = req.params;
+      const base = param(req.params.base);
+      const target = param(req.params.target);
       const { type = 'buy' } = req.query; // 'buy' or 'sell'
 
       const rate = await storage.getExchangeRate(base, target);
@@ -7823,10 +8603,26 @@ export async function registerRoutes(
 
   app.put("/api/payout-destinations/:id", requireAuth, async (req, res) => {
     try {
-      const destination = await storage.updatePayoutDestination(req.params.id, req.body);
-      if (!destination) {
+      // Validate input
+      const updateSchema = (payoutDestinationSchema as any).partial();
+      const result = updateSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json({ error: "Invalid destination data", details: result.error.issues });
+      }
+
+      // Check destination exists
+      const existing = await storage.getPayoutDestination(param(req.params.id));
+      if (!existing) {
         return res.status(404).json({ error: "Payout destination not found" });
       }
+
+      // Ownership check
+      const authUserId = (req as any).user?.cognitoSub;
+      if (existing.userId && existing.userId !== authUserId) {
+        return res.status(403).json({ error: "Not authorized to update this destination" });
+      }
+
+      const destination = await storage.updatePayoutDestination(param(req.params.id), result.data);
       res.json(destination);
     } catch (error: any) {
       const mapped = mapPaymentError(error, 'payout');
@@ -7836,7 +8632,7 @@ export async function registerRoutes(
 
   app.delete("/api/payout-destinations/:id", requireAuth, async (req, res) => {
     try {
-      const deleted = await storage.deletePayoutDestination(req.params.id);
+      const deleted = await storage.deletePayoutDestination(param(req.params.id));
       if (!deleted) {
         return res.status(404).json({ error: "Payout destination not found" });
       }
@@ -7849,13 +8645,15 @@ export async function registerRoutes(
 
   // ==================== PAYOUT ROUTES ====================
 
-  app.get("/api/payouts", async (req, res) => {
+  app.get("/api/payouts", requireAuth, async (req, res) => {
     try {
       const { recipientType, recipientId, status } = req.query;
+      const payoutsCompany = await resolveUserCompany(req);
       const payoutsList = await storage.getPayouts({
         recipientType: recipientType as string,
         recipientId: recipientId as string,
         status: status as string,
+        companyId: payoutsCompany?.companyId,
       });
       res.json(payoutsList);
     } catch (error: any) {
@@ -7864,9 +8662,9 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/payouts/:id", async (req, res) => {
+  app.get("/api/payouts/:id", requireAuth, async (req, res) => {
     try {
-      const payout = await storage.getPayout(req.params.id);
+      const payout = await storage.getPayout(param(req.params.id));
       if (!payout) {
         return res.status(404).json({ error: "Payout not found" });
       }
@@ -7886,7 +8684,7 @@ export async function registerRoutes(
       } = req.body;
 
       // Get payout destination
-      let destination = null;
+      let destination: any = null;
       let provider = 'stripe';
 
       if (destinationId) {
@@ -7909,7 +8707,7 @@ export async function registerRoutes(
         provider,
         relatedEntityType,
         relatedEntityId,
-        initiatedBy,
+        initiatedBy: (req as any).user?.cognitoSub || initiatedBy,
       });
 
       res.status(201).json(payout);
@@ -7924,7 +8722,7 @@ export async function registerRoutes(
     try {
       const userId = (req as any).user?.uid;
       const userName = await getAuditUserName(req);
-      const payout = await storage.getPayout(req.params.id);
+      const payout = await storage.getPayout(param(req.params.id));
 
       if (!payout) {
         return res.status(404).json({ error: "Payout not found" });
@@ -7935,8 +8733,8 @@ export async function registerRoutes(
       }
 
       const amount = parseFloat(payout.amount);
-      const settings = await storage.getSettings();
-      const dualApprovalThreshold = parseFloat(settings?.dualApprovalThreshold?.toString() || '5000');
+      const settings = await getSettingsForRequest(req);
+      const dualApprovalThreshold = parseFloat((settings as any)?.dualApprovalThreshold?.toString() || '5000');
 
       // Check if dual approval is needed
       if (amount >= dualApprovalThreshold) {
@@ -8002,6 +8800,13 @@ export async function registerRoutes(
           { amount, makerChecker: true, firstApprover: metadata.firstApproval.by }
         );
 
+        // Notify the initiator their payout was approved
+        if (payout.initiatedBy) {
+          notificationService.notifyPayoutApproved(payout.initiatedBy, {
+            amount, currency: payout.currency, recipientName: payout.recipientName || 'Recipient', approverName: userName,
+          }).catch(console.error);
+        }
+
         return res.json({
           status: 'approved',
           message: 'Payout approved with dual authorization. Ready for processing.',
@@ -8026,6 +8831,13 @@ export async function registerRoutes(
         { amount, singleApproval: true }
       );
 
+      // Notify the initiator their payout was approved
+      if (payout.initiatedBy && payout.initiatedBy !== userId) {
+        notificationService.notifyPayoutApproved(payout.initiatedBy, {
+          amount, currency: payout.currency, recipientName: payout.recipientName || 'Recipient', approverName: userName,
+        }).catch(console.error);
+      }
+
       res.json({
         status: 'approved',
         message: 'Payout approved. Ready for processing.',
@@ -8040,7 +8852,7 @@ export async function registerRoutes(
   // Process payout (actually send money via Stripe/Paystack)
   app.post("/api/payouts/:id/process", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const payout = await storage.getPayout(req.params.id);
+      const payout = await storage.getPayout(param(req.params.id));
       if (!payout) {
         return res.status(404).json({ error: "Payout not found" });
       }
@@ -8093,7 +8905,7 @@ export async function registerRoutes(
           userId,
           userName,
           { status: 'pending' },
-          { status: 'processing', providerTransferId: updatedPayout.providerTransferId },
+          { status: 'processing', providerTransferId: updatedPayout!.providerTransferId },
           { provider: destination.provider, amount: payout.amount, currency: payout.currency }
         );
 
@@ -8123,22 +8935,22 @@ export async function registerRoutes(
           notificationService.notifyPayoutProcessed(payout.recipientId, {
             amount: parseFloat(payout.amount),
             currency: payout.currency,
-            recipientName: payout.recipientName,
-            bankName: destination.bankName,
+            recipientName: payout.recipientName || 'Recipient',
+            bankName: destination.bankName || undefined,
             reference: transferResult.reference,
           }).catch(err => console.error('Failed to send payout notification:', err));
-          
+
           // Also send detailed payout confirmation email if user has email
-          const recipientProfile = await storage.getUserProfile(payout.recipientId);
+          const recipientProfile = await storage.getUserProfileByCognitoSub(payout.recipientId);
           if (recipientProfile?.email) {
             notificationService.sendPayoutConfirmationEmail({
               email: recipientProfile.email,
-              name: payout.recipientName,
+              name: payout.recipientName || 'Recipient',
               amount: parseFloat(payout.amount),
               currency: payout.currency,
-              recipientName: payout.recipientName,
-              recipientBank: destination.bankName,
-              recipientAccount: destination.accountNumber,
+              recipientName: payout.recipientName || 'Recipient',
+              recipientBank: destination.bankName || undefined,
+              recipientAccount: destination.accountNumber || undefined,
               reference: transferResult.reference || payout.id,
               date: new Date().toLocaleDateString(),
             }).catch(err => console.error('Failed to send payout email:', err));
@@ -8167,7 +8979,7 @@ export async function registerRoutes(
       const userName = await getAuditUserName(req);
       const { reason } = req.body;
 
-      const payout = await storage.getPayout(req.params.id);
+      const payout = await storage.getPayout(param(req.params.id));
       if (!payout) {
         return res.status(404).json({ error: "Payout not found" });
       }
@@ -8261,7 +9073,7 @@ export async function registerRoutes(
 
   app.patch("/api/scheduled-payments/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const payment = await storage.updateScheduledPayment(req.params.id, req.body);
+      const payment = await storage.updateScheduledPayment(param(req.params.id), req.body);
       if (!payment) {
         return res.status(404).json({ error: "Scheduled payment not found" });
       }
@@ -8273,7 +9085,7 @@ export async function registerRoutes(
 
   app.delete("/api/scheduled-payments/:id", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const deleted = await storage.deleteScheduledPayment(req.params.id);
+      const deleted = await storage.deleteScheduledPayment(param(req.params.id));
       if (!deleted) {
         return res.status(404).json({ error: "Scheduled payment not found" });
       }
@@ -8285,7 +9097,7 @@ export async function registerRoutes(
 
   app.post("/api/scheduled-payments/:id/pause", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const payment = await storage.updateScheduledPayment(req.params.id, { status: 'paused' });
+      const payment = await storage.updateScheduledPayment(param(req.params.id), { status: 'paused' });
       if (!payment) {
         return res.status(404).json({ error: "Scheduled payment not found" });
       }
@@ -8297,7 +9109,7 @@ export async function registerRoutes(
 
   app.post("/api/scheduled-payments/:id/resume", requireAuth, requireAdmin, async (req, res) => {
     try {
-      const payment = await storage.updateScheduledPayment(req.params.id, { status: 'active' });
+      const payment = await storage.updateScheduledPayment(param(req.params.id), { status: 'active' });
       if (!payment) {
         return res.status(404).json({ error: "Scheduled payment not found" });
       }
@@ -8318,25 +9130,35 @@ export async function registerRoutes(
 
   // ==================== BILL PAYMENT FROM WALLET ====================
 
-  app.post("/api/bills/:id/pay", requireAuth, async (req, res) => {
+  app.post("/api/bills/:id/pay", financialLimiter, requireAuth, async (req, res) => {
     try {
       const { walletId } = req.body;
       const company = await resolveUserCompany(req);
 
-      const bill = await storage.getBill(req.params.id);
+      const bill = await storage.getBill(param(req.params.id));
       if (!bill) {
         return res.status(404).json({ error: "Bill not found" });
       }
       if (company && !await verifyCompanyAccess(bill.companyId, company.companyId)) {
         return res.status(403).json({ error: "Access denied" });
       }
-      if (bill.status === 'Paid') {
+      if (bill.status?.toLowerCase() === 'paid') {
         return res.status(400).json({ error: "Bill already paid" });
       }
 
       const wallet = await storage.getWallet(walletId);
       if (!wallet) {
         return res.status(404).json({ error: "Wallet not found" });
+      }
+
+      // Validate wallet currency matches bill currency
+      const billCurrency = bill.currency || 'USD';
+      if (wallet.currency && wallet.currency.toUpperCase() !== billCurrency.toUpperCase()) {
+        return res.status(400).json({
+          error: `Currency mismatch: bill is in ${billCurrency} but wallet is in ${wallet.currency}. Please use a ${billCurrency} wallet.`,
+          billCurrency,
+          walletCurrency: wallet.currency,
+        });
       }
 
       const billAmount = parseFloat(bill.amount);
@@ -8353,13 +9175,16 @@ export async function registerRoutes(
 
       // Create a transaction record (outside atomic - informational only)
       await storage.createTransaction({
-        type: 'Bill',
+        type: 'bill',
         amount: bill.amount,
         fee: '0',
-        status: 'Completed',
+        status: 'completed',
         date: new Date().toISOString(),
         description: `Bill payment: ${bill.name}`,
-        currency: wallet.currency,
+        currency: billCurrency,
+        reference: `BILL-${bill.id}`,
+        userId: userId !== 'system' ? userId : null,
+        companyId: company?.companyId || null,
       });
 
       // Send bill payment confirmation email
@@ -8367,14 +9192,14 @@ export async function registerRoutes(
         if (userId !== 'system') {
           const userSettings = await storage.getNotificationSettings(userId);
           const userProfile = await storage.getUser(userId);
-          const userName = userProfile?.displayName || userProfile?.email?.split('@')[0] || 'User';
+          const userName = (userProfile as any)?.displayName || userProfile?.name || userProfile?.email?.split('@')[0] || 'User';
           if (userSettings?.email) {
             await notificationService.sendBillPaymentEmail({
               email: userSettings.email,
               name: userName,
               billName: bill.name,
               amount: billAmount,
-              currency: wallet.currency,
+              currency: billCurrency,
               provider: bill.provider || 'Direct',
               paymentDate: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
               reference: `BILL-${bill.id}`,
@@ -8401,7 +9226,7 @@ export async function registerRoutes(
       const userId = (req as any).user?.uid;
       const userName = await getAuditUserName(req);
 
-      const expense = await storage.getExpense(req.params.id);
+      const expense = await storage.getExpense(param(req.params.id));
       if (!expense) {
         return res.status(404).json({ error: "Expense not found" });
       }
@@ -8445,7 +9270,7 @@ export async function registerRoutes(
     try {
       const { approvedBy, vendorId } = req.body;
       
-      const expense = await storage.getExpense(req.params.id);
+      const expense = await storage.getExpense(param(req.params.id));
       if (!expense) {
         return res.status(404).json({ error: "Expense not found" });
       }
@@ -8534,8 +9359,8 @@ export async function registerRoutes(
   app.post("/api/payroll/batch-payout", requireAuth, requireAdmin, async (req, res) => {
     try {
       const { payrollIds, initiatedBy } = req.body;
-      
-      const results = [];
+
+      const results: any[] = [];
       
       for (const payrollId of payrollIds) {
         try {
@@ -8546,11 +9371,14 @@ export async function registerRoutes(
           const destinations = await storage.getPayoutDestinations(entry.employeeId);
           const defaultDestination = destinations.find(d => d.isDefault) || destinations[0];
 
+          const settings = await getSettingsForRequest(req);
+          const currency = settings.currency || 'USD';
+
           // Create payout
           const payout = await storage.createPayout({
             type: 'payroll',
             amount: entry.netPay || entry.salary,
-            currency: 'USD',
+            currency,
             status: 'pending',
             recipientType: 'employee',
             recipientId: entry.employeeId,
@@ -8587,7 +9415,7 @@ export async function registerRoutes(
     try {
       const { amount, description, initiatedBy, invoiceId } = req.body;
       
-      const vendor = await storage.getVendor(req.params.id);
+      const vendor = await storage.getVendor(param(req.params.id));
       if (!vendor) {
         return res.status(404).json({ error: "Vendor not found" });
       }
@@ -8600,11 +9428,14 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Vendor has no payout destination configured" });
       }
 
+      const settings = await getSettingsForRequest(req);
+      const currency = settings.currency || 'USD';
+
       // Create payout
       const payout = await storage.createPayout({
         type: 'vendor_payment',
         amount: amount.toString(),
-        currency: 'USD',
+        currency,
         status: 'pending',
         recipientType: 'vendor',
         recipientId: vendor.id,
@@ -8625,13 +9456,11 @@ export async function registerRoutes(
 
   // ==================== VIRTUAL ACCOUNT CREATION ON SIGNUP ====================
   
-  app.post("/api/virtual-accounts/create", async (req, res) => {
+  app.post("/api/virtual-accounts/create", requireAuth, async (req, res) => {
     try {
-      const { userId, email, firstName, lastName, countryCode, phone, bvn, bankAccountNumber, bankCode: userBankCode } = req.body;
-
-      if (!userId) {
-        return res.status(400).json({ error: "User ID is required" });
-      }
+      // SECURITY: Use authenticated user's ID
+      const userId = req.user!.cognitoSub;
+      const { email, firstName, lastName, countryCode, phone, bvn, bankAccountNumber, bankCode: userBankCode } = req.body;
 
       const safeName = `${firstName || 'User'} ${lastName || ''}`.trim();
       const safeEmail = email || '';
@@ -8683,49 +9512,66 @@ export async function registerRoutes(
             providerMessage = 'Stripe Treasury account pending activation. Your account will be activated shortly.';
           }
         } else {
-          // Use Paystack for African countries
-          const providerResult = await paymentService.createVirtualAccount(
-            safeEmail,
-            firstName || 'User',
-            lastName || safeName,
-            safeCountry,
-            phone,
-            bvn,
-            bankAccountNumber,
-            userBankCode
-          );
+          // Use Paystack for African countries — DVA only works for NG and GH
+          const DVA_SUPPORTED = ['NG', 'GH'];
+          if (!DVA_SUPPORTED.includes(safeCountry.toUpperCase())) {
+            accountStatus = 'unavailable';
+            providerMessage = `Virtual accounts are not yet available in your country (${safeCountry}). This feature is currently supported in Nigeria and Ghana.`;
+          } else {
+            const providerResult = await paymentService.createVirtualAccount(
+              safeEmail,
+              firstName || 'User',
+              lastName || safeName,
+              safeCountry,
+              phone,
+              bvn,
+              bankAccountNumber,
+              userBankCode
+            );
 
-          if (providerResult.accountNumber) {
-            accountNumber = providerResult.accountNumber;
-            bankName = providerResult.bankName || bankName;
-            bankCode = providerResult.bankCode || bankCode;
-            accountName = providerResult.accountName || accountName;
-            accountStatus = 'active';
-          } else if (providerResult.status === 'pending_validation') {
-            accountStatus = 'pending';
-            providerMessage = providerResult.message || 'Account pending validation';
+            if (providerResult.accountNumber) {
+              accountNumber = providerResult.accountNumber;
+              bankName = providerResult.bankName || bankName;
+              bankCode = providerResult.bankCode || bankCode;
+              accountName = providerResult.accountName || accountName;
+              accountStatus = 'active';
+            } else if (providerResult.status === 'pending_validation') {
+              accountStatus = 'pending';
+              providerMessage = providerResult.message || 'Account pending validation';
+            }
           }
         }
       } catch (providerError: any) {
         console.log('Payment provider virtual account creation failed:', providerError.message);
       }
 
-      if (!accountNumber && accountStatus !== 'pending') {
-        accountStatus = 'pending';
-        providerMessage = 'Your dedicated bank account is being set up. Complete BVN verification in settings to activate it.';
+      // If no real account number was obtained, return error instead of creating fake account
+      if (!accountNumber) {
+        return res.status(502).json({
+          error: providerMessage || 'Failed to create virtual account with payment provider. Please try again or complete identity verification.',
+          status: accountStatus,
+        });
       }
 
       const virtualAccount = await storage.createVirtualAccount({
         userId,
         name: accountName,
-        accountNumber: accountNumber || `PENDING-${Date.now()}`,
-        bankName: accountNumber ? bankName : 'Pending Activation',
-        bankCode: accountNumber ? bankCode : 'PENDING',
+        accountNumber,
+        bankName,
+        bankCode,
+        routingNumber: null,
+        swiftCode: null,
+        country: countryCode || 'US',
         currency,
         balance: '0',
         type: 'personal',
         status: accountStatus,
         createdAt: new Date().toISOString(),
+        provider: getPaymentProvider(safeCountry),
+        accountName: accountName || null,
+        providerAccountId: null,
+        providerCustomerCode: null,
+        companyId: null,
       });
 
       const existingWallet = await storage.getWalletByUserId(userId);
@@ -8770,7 +9616,7 @@ export async function registerRoutes(
   // Update user (admin)
   app.put("/api/admin/users/:id", requireAdmin, async (req, res) => {
     try {
-      const user = await storage.updateUser(req.params.id, req.body);
+      const user = await storage.updateUser(param(req.params.id), req.body);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -8783,7 +9629,7 @@ export async function registerRoutes(
   // Delete user (admin)
   app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
     try {
-      const deleted = await storage.deleteUser(req.params.id);
+      const deleted = await storage.deleteUser(param(req.params.id));
       if (!deleted) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -8824,7 +9670,7 @@ export async function registerRoutes(
   });
 
   // Admin settings
-  app.get("/api/admin/admin-settings", async (req, res) => {
+  app.get("/api/admin/admin-settings", requireAdmin, async (req, res) => {
     try {
       const settings = await storage.getAdminSettings();
       res.json(settings);
@@ -8833,10 +9679,10 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/admin/admin-settings/:key", async (req, res) => {
+  app.put("/api/admin/admin-settings/:key", requireAdmin, async (req, res) => {
     try {
       const { value, description } = req.body;
-      const setting = await storage.setAdminSetting(req.params.key, value, description);
+      const setting = await storage.setAdminSetting(param(req.params.key), value, description);
       res.json(setting);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to update admin setting" });
@@ -8876,7 +9722,7 @@ export async function registerRoutes(
   // Get invoice with virtual account details
   app.get("/api/invoices/:id/payment-details", requireAuth, async (req, res) => {
     try {
-      const invoice = await storage.getInvoice(req.params.id);
+      const invoice = await storage.getInvoice(param(req.params.id));
       if (!invoice) {
         return res.status(404).json({ error: "Invoice not found" });
       }
@@ -8924,7 +9770,7 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid funding source data", details: result.error.issues });
       }
-      const source = await storage.createFundingSource(result.data);
+      const source = await storage.createFundingSource(result.data as any);
       res.status(201).json(source);
     } catch (error: any) {
       const mapped = mapPaymentError(error, 'funding');
@@ -8934,7 +9780,7 @@ export async function registerRoutes(
 
   app.delete("/api/funding-sources/:id", requireAuth, async (req, res) => {
     try {
-      const deleted = await storage.deleteFundingSource(req.params.id);
+      const deleted = await storage.deleteFundingSource(param(req.params.id));
       if (!deleted) {
         return res.status(404).json({ error: "Funding source not found" });
       }
@@ -8948,7 +9794,7 @@ export async function registerRoutes(
   // ==================== ADMIN USER MANAGEMENT ====================
   
   // Seed admin user (one-time setup)
-  app.post("/api/admin/seed", async (req, res) => {
+  app.post("/api/admin/seed", requireAdmin, async (req, res) => {
     try {
       const bcrypt = await import('bcryptjs');
       
@@ -8969,8 +9815,6 @@ export async function registerRoutes(
         email: 'info@spendlymanager.com',
         role: 'OWNER',
         department: 'Administration',
-        avatar: null,
-        permissions: ['all'],
       });
       
       res.status(201).json({ 
@@ -9020,7 +9864,7 @@ export async function registerRoutes(
         const userAgent = req.headers['user-agent'];
         notificationService.sendLoginAlertEmail({
           email: user.email,
-          name: user.displayName || user.username,
+          name: (user as any).displayName || user.name || user.username,
           loginTime: new Date().toLocaleString(),
           ipAddress: ipAddress?.split(',')[0],
           device: userAgent,
@@ -9036,37 +9880,57 @@ export async function registerRoutes(
     }
   });
 
-  // Get all admin users
-  app.get("/api/admin/users", async (req, res) => {
+  // Admin session verification - validates stored admin session is still valid
+  app.post("/api/admin/verify-session", async (req, res) => {
     try {
+      const { userId } = req.body;
+
+      if (!userId) {
+        return res.status(400).json({ valid: false, error: "User ID is required" });
+      }
+
       const users = await storage.getUsers();
-      const adminUsers = users
-        .filter(u => ['OWNER', 'ADMIN'].includes(u.role))
-        .map(({ password, ...user }) => user);
-      res.json(adminUsers);
+      const user = users.find(u => u.id === userId || u.id === String(userId));
+
+      if (!user) {
+        return res.status(401).json({ valid: false, error: "User not found" });
+      }
+
+      if (!['OWNER', 'ADMIN'].includes(user.role)) {
+        return res.status(403).json({ valid: false, error: "Admin privileges revoked" });
+      }
+
+      // Return sanitized user info (no password)
+      const { password: _, ...userWithoutPassword } = user;
+
+      res.json({ valid: true, user: userWithoutPassword });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to fetch admin users" });
+      res.status(500).json({ valid: false, error: "Session verification failed" });
     }
   });
 
+  // NOTE: Duplicate GET /api/admin/users endpoint was removed here.
+  // The protected version with requireAdmin middleware exists at line ~8699.
+
   // ==================== NOTIFICATION API ENDPOINTS ====================
 
-  // Track user login (called from frontend after Firebase auth)
-  app.post("/api/auth/track-login", async (req, res) => {
+  // Track user login (called from frontend after Cognito auth)
+  app.post("/api/auth/track-login", requireAuth, async (req, res) => {
     try {
-      const { userId, email, displayName } = req.body;
-      
+      const userId = (req as any).user?.cognitoSub;
+      const { email, displayName } = req.body;
+
       if (!userId || !email) {
         return res.status(400).json({ error: "userId and email are required" });
       }
-      
+
       // Get user settings to check if login alerts are enabled
       const settings = await storage.getNotificationSettings(userId);
-      
+
       if (settings?.securityNotifications) {
         const ipAddress = req.headers['x-forwarded-for'] as string || req.socket.remoteAddress;
         const userAgent = req.headers['user-agent'];
-        
+
         notificationService.sendLoginAlertEmail({
           email,
           name: displayName || email.split('@')[0],
@@ -9075,7 +9939,7 @@ export async function registerRoutes(
           device: userAgent,
         }).catch(err => console.error('Failed to send login alert:', err));
       }
-      
+
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to track login" });
@@ -9089,18 +9953,17 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Email is required" });
       }
 
-      const profile = await storage.getUserProfileByEmail(email);
-      if (!profile) {
-        return res.status(404).json({ error: "No account found with this email address. Please check the email or sign up for a new account." });
-      }
-
+      // Always return 200 with generic message to prevent account enumeration
       res.json({
         success: true,
-        userName: profile.displayName || email.split('@')[0],
-        message: "User verified. Proceed with password reset."
+        message: "If an account exists with this email, you may proceed with password reset."
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to verify account" });
+      // Still return 200 with generic message to prevent enumeration via error timing
+      res.json({
+        success: true,
+        message: "If an account exists with this email, you may proceed with password reset."
+      });
     }
   });
 
@@ -9146,7 +10009,7 @@ export async function registerRoutes(
   });
 
   // Send transaction SMS alert
-  app.post("/api/notifications/transaction-sms", async (req, res) => {
+  app.post("/api/notifications/transaction-sms", requireAuth, async (req, res) => {
     try {
       const { phone, type, amount, currency, description, balance } = req.body;
       
@@ -9170,9 +10033,9 @@ export async function registerRoutes(
   });
 
   // Resend invoice email
-  app.post("/api/invoices/:id/send", emailLimiter, async (req, res) => {
+  app.post("/api/invoices/:id/send", requireAuth, emailLimiter, async (req, res) => {
     try {
-      const invoice = await storage.getInvoice(req.params.id);
+      const invoice = await storage.getInvoice(param(req.params.id));
       if (!invoice) {
         return res.status(404).json({ error: "Invoice not found" });
       }
@@ -9182,13 +10045,11 @@ export async function registerRoutes(
       }
       
       const settings = await storage.getOrganizationSettings();
-      const companyName = settings?.companyName || 'Spendly';
-      const appUrl = process.env.REPLIT_DEV_DOMAIN 
-        ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
-        : 'https://spendlymanager.com';
-      
+      const companyName = (settings as any)?.companyName || settings?.name || 'Spendly';
+      const appUrl = process.env.APP_URL || 'https://spendlymanager.com';
+
       const items = Array.isArray(invoice.items) ? invoice.items : [];
-      
+
       const result = await notificationService.sendInvoiceEmail({
         email: invoice.clientEmail,
         clientName: invoice.client,
@@ -9348,7 +10209,7 @@ export async function registerRoutes(
       // Process Paystack batch if any
       if (paystackBatch.length > 0) {
         try {
-          const bulkTransfers = [];
+          const bulkTransfers: any[] = [];
           for (const { payout, destination } of paystackBatch) {
             // Create recipient first
             const recipientResult = await paystackClient.createTransferRecipient(
@@ -9405,6 +10266,12 @@ export async function registerRoutes(
       const mapped = mapPaymentError(error, 'payout');
       res.status(mapped.statusCode).json({ error: mapped.userMessage });
     }
+  });
+
+  // ==================== API 404 CATCH-ALL ====================
+  // Return proper JSON 404 for any unmatched /api/* routes
+  app.all("/api/{*rest}", (_req, res) => {
+    res.status(404).json({ error: "API endpoint not found" });
   });
 
   return httpServer;

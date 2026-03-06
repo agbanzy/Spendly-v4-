@@ -1,3 +1,4 @@
+import { useState, useEffect, useCallback } from "react";
 import { Switch, Route, useLocation, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -8,6 +9,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { QuickActions } from "@/components/quick-actions";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { CompanyProvider } from "@/lib/company-context";
 import NotFound from "@/pages/not-found";
@@ -43,6 +45,7 @@ import AdminExchangeRates from "@/pages/admin-exchange-rates";
 import AdminDatabase from "@/pages/admin-database";
 import AdminLogin from "@/pages/admin-login";
 import InvitePage from "@/pages/invite";
+import PayInvoice from "@/pages/pay-invoice";
 import VirtualAccounts from "@/pages/virtual-accounts";
 
 function AuthLoading() {
@@ -50,7 +53,7 @@ function AuthLoading() {
     <div className="h-screen w-full flex items-center justify-center bg-background texture-mesh">
       <div className="flex flex-col items-center gap-4 animate-scale-in">
         <div className="relative">
-          <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center shadow-lg shadow-primary/25 animate-pulse-glow">
+          <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-sky-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-primary/25 animate-pulse-glow">
             <img src="/spendly-logo.png" alt="Spendly" className="h-8 w-8 rounded-lg" />
           </div>
           <div className="absolute -inset-2 bg-primary/10 rounded-3xl blur-xl" />
@@ -78,18 +81,71 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
   return <Component />;
 }
 
+function useAdminSessionVerification() {
+  const [isAdminVerified, setIsAdminVerified] = useState(false);
+  const [isAdminVerifying, setIsAdminVerifying] = useState(true);
+
+  const verifyAdminSession = useCallback(async () => {
+    const stored = localStorage.getItem("adminUser");
+    if (!stored) {
+      setIsAdminVerified(false);
+      setIsAdminVerifying(false);
+      return false;
+    }
+
+    try {
+      const adminData = JSON.parse(stored);
+      const res = await fetch("/api/admin/verify-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: adminData.id }),
+        credentials: "include",
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.valid) {
+          // Refresh stored admin data with verified server data
+          localStorage.setItem("adminUser", JSON.stringify(data.user));
+          setIsAdminVerified(true);
+          setIsAdminVerifying(false);
+          return true;
+        }
+      }
+
+      // Server rejected the session - clear invalid data
+      localStorage.removeItem("adminUser");
+      setIsAdminVerified(false);
+      setIsAdminVerifying(false);
+      return false;
+    } catch {
+      // Network error - clear potentially stale data for safety
+      localStorage.removeItem("adminUser");
+      setIsAdminVerified(false);
+      setIsAdminVerifying(false);
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    verifyAdminSession();
+  }, [verifyAdminSession]);
+
+  return { isAdminVerified, isAdminVerifying, verifyAdminSession };
+}
+
 function AdminRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
-  const adminUser = localStorage.getItem("adminUser");
-  
-  if (isLoading) {
+  const { isAdminVerified, isAdminVerifying } = useAdminSessionVerification();
+
+  if (isLoading || isAdminVerifying) {
     return <AuthLoading />;
   }
-  
-  if (!isAuthenticated && !adminUser) {
+
+  if (!isAuthenticated && !isAdminVerified) {
     return <Redirect to="/admin-login" />;
   }
-  
+
   return <Component />;
 }
 
@@ -170,20 +226,24 @@ function PublicRoute({ component: Component }: { component: React.ComponentType 
 function AppContent() {
   const [location] = useLocation();
   const { isAuthenticated, isLoading } = useAuth();
-  const adminUser = localStorage.getItem("adminUser");
-  const isAdminAuthenticated = !!adminUser;
-  
+  const { isAdminVerified, isAdminVerifying } = useAdminSessionVerification();
+
   const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/terms", "/privacy", "/onboarding", "/admin-login"];
   const isPublicRoute = publicRoutes.includes(location);
   const isAdminRoute = location.startsWith("/admin");
   const isInviteRoute = location.startsWith("/invite/");
+  const isPayRoute = location.startsWith("/pay/");
 
-  if (isLoading) {
+  if (isLoading || (isAdminRoute && isAdminVerifying)) {
     return <AuthLoading />;
   }
 
   if (isInviteRoute) {
     return <InvitePage />;
+  }
+
+  if (isPayRoute) {
+    return <PayInvoice />;
   }
 
   if (isPublicRoute) {
@@ -201,7 +261,7 @@ function AppContent() {
     );
   }
 
-  if (isAdminRoute && !isAuthenticated && !isAdminAuthenticated) {
+  if (isAdminRoute && !isAuthenticated && !isAdminVerified) {
     return <Redirect to="/admin-login" />;
   }
 
@@ -210,18 +270,20 @@ function AppContent() {
 
 function App() {
   return (
-    <ThemeProvider defaultTheme="light" storageKey="spendly-theme">
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <AuthProvider>
-            <CompanyProvider>
-              <AppContent />
-            </CompanyProvider>
-          </AuthProvider>
-          <Toaster />
-        </TooltipProvider>
-      </QueryClientProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider defaultTheme="light" storageKey="spendly-theme">
+        <QueryClientProvider client={queryClient}>
+          <TooltipProvider>
+            <AuthProvider>
+              <CompanyProvider>
+                <AppContent />
+              </CompanyProvider>
+            </AuthProvider>
+            <Toaster />
+          </TooltipProvider>
+        </QueryClientProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
 

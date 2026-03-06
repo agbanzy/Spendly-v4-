@@ -48,7 +48,7 @@ export default function VendorsPage() {
   });
 
   const createVendorMutation = useMutation({
-    mutationFn: async (vendorData: { name: string; email: string; phone: string; address: string; category: string }) => {
+    mutationFn: async (vendorData: { name: string; email: string; phone: string; address: string; category: string; paymentTerms: string }) => {
       return apiRequest("POST", "/api/vendors", vendorData);
     },
     onSuccess: () => {
@@ -90,6 +90,7 @@ export default function VendorsPage() {
       phone: vendorForm.phone,
       address: vendorForm.address,
       category: vendorForm.category || "Other",
+      paymentTerms: vendorForm.paymentTerms || "net30",
     });
   };
 
@@ -252,6 +253,7 @@ export default function VendorsPage() {
         </motion.div>
 
         <GlassCard className="border-slate-200 dark:border-slate-700">
+          <Tabs defaultValue="all" className="w-full">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4">
             <TabsList className="bg-slate-100 dark:bg-slate-800">
               <TabsTrigger value="all">All Vendors</TabsTrigger>
@@ -269,8 +271,6 @@ export default function VendorsPage() {
               />
             </div>
           </div>
-
-          <Tabs defaultValue="all" className="w-full">
             <TabsContent value="all" className="p-4">
               {filteredVendors.length === 0 ? (
                 <EmptyState
@@ -360,6 +360,7 @@ export default function VendorsPage() {
             </TabsContent>
           </Tabs>
         </GlassCard>
+
       </motion.div>
     </PageWrapper>
   );

@@ -1,5 +1,5 @@
 import { getUncachableStripeClient, getStripeClient } from './stripeClient';
-import { paystackClient } from './paystackClient';
+import { paystackClient, validateTransferDetails, validateStripeBankDetails } from './paystackClient';
 import { Money, paymentLogger, validateCurrencyForProvider, mapPaymentError } from './utils/paymentUtils';
 
 export interface RegionConfig {
@@ -128,8 +128,8 @@ export const paymentService = {
         if (!email || typeof email !== 'string' || !email.includes('@')) {
           throw new Error('A valid customer email is required for Paystack transactions');
         }
-        const paystackCallback = callbackUrl || (process.env.REPLIT_DOMAINS ?
-          `https://${process.env.REPLIT_DOMAINS.split(',')[0]}/api/paystack/callback` :
+        const paystackCallback = callbackUrl || (process.env.APP_URL ?
+          `${process.env.APP_URL}/api/paystack/callback` :
           undefined);
         const result = await paystackClient.initializeTransaction(email, amount, currency, metadata, paystackCallback);
         return {
@@ -140,7 +140,9 @@ export const paymentService = {
         };
       } else {
         const stripe = await getUncachableStripeClient();
-        const idempotencyKey = `pi-${currency}-${amount}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        // Deterministic idempotency key: same user+amount+currency produces same key within a short window
+        const userEmail = metadata?.email || metadata?.userId || 'anonymous';
+        const idempotencyKey = `pi-${userEmail}-${currency}-${amount}-${Math.floor(Date.now() / 60000)}`; // 1-min window
         const paymentIntent = await stripe.paymentIntents.create({
           amount: Money.toMinor(amount),
           currency: currency.toLowerCase(),
@@ -169,11 +171,21 @@ export const paymentService = {
     return paymentLogger.trackOperation('initiate_transfer', { provider, amount, currency, countryCode, reason }, async () => {
       if (provider === 'paystack') {
         const { accountNumber, bankCode, accountName } = recipientDetails;
+        const recipientType = recipientDetails.type; // Allow override (e.g., 'mobile_money')
+
+        // Validate transfer details for the country
+        const validation = validateTransferDetails(countryCode, accountNumber, bankCode, recipientType);
+        if (!validation.valid) {
+          throw new Error(validation.message || 'Invalid transfer details');
+        }
+
         const recipientResult = await paystackClient.createTransferRecipient(
           accountName,
           accountNumber,
           bankCode,
-          currency
+          currency,
+          countryCode,
+          recipientType
         );
         const transfer = await paystackClient.initiateTransfer(
           amount,
@@ -190,9 +202,22 @@ export const paymentService = {
       } else {
         const stripe = await getUncachableStripeClient();
 
+        // Validate bank details for the Stripe country
+        const bankValidation = validateStripeBankDetails(countryCode, {
+          accountNumber: recipientDetails.accountNumber,
+          routingNumber: recipientDetails.routingNumber || recipientDetails.bankCode,
+          sortCode: recipientDetails.sortCode,
+          bsbNumber: recipientDetails.bsbNumber,
+          iban: recipientDetails.iban,
+        });
+        if (!bankValidation.valid) {
+          throw new Error(bankValidation.message || 'Invalid bank details');
+        }
+
         // If stripeAccountId is provided, use Connect Transfer (marketplace model)
         if (recipientDetails.stripeAccountId) {
-          const transferIdempotencyKey = `txfr-${recipientDetails.stripeAccountId}-${amount}-${Date.now()}`;
+          const userRef = recipientDetails.accountName || 'unknown';
+          const transferIdempotencyKey = `txfr-${recipientDetails.stripeAccountId}-${amount}-${Math.floor(Date.now() / 60000)}`;
           const transfer = await stripe.transfers.create({
             amount: Money.toMinor(amount),
             currency: recipientDetails.currency || currency.toLowerCase(),
@@ -750,7 +775,8 @@ export const paymentService = {
       } else {
         const stripe = await getUncachableStripeClient();
         const { currency } = getCurrencyForCountry(params.countryCode);
-        const idempotencyKey = `util-${params.type}-${params.customer}-${Date.now()}`;
+        // Deterministic idempotency key: same customer+type+amount within 1-min window
+        const idempotencyKey = `util-${params.type}-${params.customer}-${params.amount}-${Math.floor(Date.now() / 60000)}`;
 
         const paymentIntent = await stripe.paymentIntents.create({
           amount: Money.toMinor(params.amount),
@@ -816,6 +842,27 @@ export const paymentService = {
         electricity: ['Eskom', 'City Power'],
         cable: ['DSTV SA', 'GOtv SA'],
         internet: ['Telkom SA Fibre', 'Afrihost'],
+      },
+      EG: {
+        airtime: ['Vodafone Egypt', 'Orange Egypt', 'Etisalat Egypt', 'WE'],
+        data: ['Vodafone Data Egypt', 'Orange Data Egypt', 'Etisalat Data Egypt'],
+        electricity: ['South Cairo Electricity', 'North Cairo Electricity', 'Alexandria Electricity'],
+        cable: ['beIN Sports Egypt', 'OSN Egypt'],
+        internet: ['WE Internet', 'Vodafone Home Egypt', 'Orange DSL Egypt'],
+      },
+      RW: {
+        airtime: ['MTN Rwanda', 'Airtel Rwanda'],
+        data: ['MTN Data Rwanda', 'Airtel Data Rwanda'],
+        electricity: ['REG (Rwanda Energy Group)'],
+        cable: ['DSTV Rwanda', 'GOtv Rwanda', 'StarTimes Rwanda'],
+        internet: ['MTN Home Rwanda', 'Liquid Telecom Rwanda'],
+      },
+      CI: {
+        airtime: ['Orange CI', 'MTN CI', 'Moov CI'],
+        data: ['Orange Data CI', 'MTN Data CI', 'Moov Data CI'],
+        electricity: ['CIE (Compagnie Ivoirienne d\'Electricité)'],
+        cable: ['Canal+ CI', 'DSTV CI'],
+        internet: ['Orange Fibre CI', 'MTN Fibre CI'],
       },
     };
 

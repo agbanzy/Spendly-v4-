@@ -1,6 +1,9 @@
 node_modules
 dist
 .DS_Store
+.env
+.env.local
+.env.production
 server/public
 vite.config.ts.*
 *.tar.gz
@@ -15,3 +18,13 @@ attached_assets/*.txt
 attached_assets/.env_*
 mobile/.env
 mobile/.expo/
+
+# Generated reports & scripts
+unpacked-audit/
+generate-audit-report.cjs
+payment-audit-report.cjs
+AUDIT_AND_PRD.md
+
+# Dev scripts
+dev.sh
+start-local.sh

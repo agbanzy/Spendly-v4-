@@ -17,34 +17,14 @@ import { useAuth } from '../lib/auth-context';
 import { useTheme } from '../lib/theme-context';
 import { ColorTokens } from '../lib/colors';
 import { isBiometricAvailable, getBiometricType, authenticateWithBiometric, isBiometricEnabled, setBiometricEnabled } from '../lib/biometric';
+import { getCognitoErrorMessage } from '../lib/cognito';
 
 interface LoginScreenProps {
   navigation: any;
 }
 
-function getFirebaseErrorMessage(error: any): string {
-  const code = error?.code || '';
-  switch (code) {
-    case 'auth/user-not-found':
-      return 'No account found with this email address.';
-    case 'auth/wrong-password':
-      return 'Incorrect password. Please try again.';
-    case 'auth/invalid-credential':
-      return 'Invalid email or password. Please check your credentials.';
-    case 'auth/too-many-requests':
-      return 'Too many failed attempts. Please try again later.';
-    case 'auth/invalid-email':
-      return 'Please enter a valid email address.';
-    case 'auth/user-disabled':
-      return 'This account has been disabled. Contact support.';
-    case 'auth/network-request-failed':
-      return 'Network error. Please check your internet connection.';
-    default:
-      if (error?.message?.includes('network') || error?.message?.includes('Network')) {
-        return 'Network error. Please check your internet connection.';
-      }
-      return 'Login failed. Please check your credentials and try again.';
-  }
+function getAuthErrorMessage(error: any): string {
+  return getCognitoErrorMessage(error);
 }
 
 export default function LoginScreen({ navigation }: LoginScreenProps) {
@@ -115,7 +95,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
       }
     } catch (error: any) {
       console.error('Login error:', error?.code, error?.message);
-      Alert.alert('Login Failed', getFirebaseErrorMessage(error));
+      Alert.alert('Login Failed', getAuthErrorMessage(error));
     } finally {
       setLoading(false);
     }

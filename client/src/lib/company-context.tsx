@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
-import { queryClient } from "@/lib/queryClient";
+import { queryClient, setActiveCompanyId } from "@/lib/queryClient";
 
 interface Company {
   id: string;
@@ -50,8 +50,14 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     }
   }, [isLoading, companies]);
 
+  // Sync active company ID to queryClient for API headers
+  useEffect(() => {
+    setActiveCompanyId(currentCompanyId);
+  }, [currentCompanyId]);
+
   const switchCompany = (companyId: string) => {
     setCurrentCompanyId(companyId);
+    setActiveCompanyId(companyId);
     localStorage.setItem("spendly-active-company", companyId);
     queryClient.invalidateQueries({ queryKey: ["/api/team"] });
     queryClient.invalidateQueries({ queryKey: ["/api/departments"] });

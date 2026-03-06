@@ -52,7 +52,6 @@ export function PinVerificationDialog({
   const verifyMutation = useMutation({
     mutationFn: async (pinValue: string) => {
       const res = await apiRequest("POST", "/api/user/verify-pin", {
-        firebaseUid: user?.id,
         pin: pinValue,
       });
       return res.json();
@@ -178,8 +177,8 @@ export function usePinVerification() {
 
   useEffect(() => {
     if (!user?.id) return;
-    fetch(`/api/user-profile/${user.id}`)
-      .then((res) => res.ok ? res.json() : null)
+    apiRequest("GET", `/api/user-profile/${user.id}`)
+      .then((res) => res.json())
       .then((profile) => {
         if (profile?.transactionPinEnabled) {
           setIsPinRequired(true);

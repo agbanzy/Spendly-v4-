@@ -129,14 +129,7 @@ export default function SignupPage() {
         setLocation("/onboarding");
       }
     } catch (error: any) {
-      let errorMessage = "Signup failed. Please try again.";
-      if (error?.code === "auth/email-already-in-use") {
-        errorMessage = "An account with this email already exists.";
-      } else if (error?.code === "auth/weak-password") {
-        errorMessage = "Password is too weak. Use at least 6 characters.";
-      } else if (error?.code === "auth/invalid-email") {
-        errorMessage = "Please enter a valid email address.";
-      }
+      const errorMessage = error?.message || "Signup failed. Please try again.";
       toast({ title: "Error", description: errorMessage, variant: "destructive" });
     } finally {
       setIsLoading(false);
@@ -154,7 +147,7 @@ export default function SignupPage() {
     <div className="min-h-screen flex">
       {/* Left panel */}
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-primary via-violet-600 to-purple-700" />
+        <div className="absolute inset-0 bg-gradient-to-br from-sky-600 via-blue-600 to-cyan-600" />
         <div className="absolute inset-0 opacity-10 texture-grid" />
 
         <div className="absolute top-1/3 -left-20 w-80 h-80 bg-white/10 rounded-full blur-3xl animate-float" />
@@ -164,7 +157,7 @@ export default function SignupPage() {
           <Link href="/">
             <div className="flex items-center gap-3 text-white cursor-pointer group">
               <div className="relative">
-                <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl shadow-lg" />
+                <img src="/spendly-logo.png" alt="Spendly" className="h-12 w-12 rounded-xl shadow-lg" />
                 <div className="absolute -inset-1 bg-white/20 rounded-xl blur-sm opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
               <span className="font-bold text-2xl tracking-tight">Spendly</span>
@@ -176,7 +169,7 @@ export default function SignupPage() {
               <Sparkles className="h-3.5 w-3.5" />
               Join 10,000+ teams worldwide
             </div>
-            <h1 className="text-4xl md:text-5xl font-extrabold text-white leading-tight tracking-tight">
+            <h1 className="text-4xl md:text-5xl font-extrabold font-display text-white leading-tight tracking-tight">
               Get started<br />with Spendly
             </h1>
             <p className="text-lg text-white/70 max-w-md leading-relaxed">
@@ -210,12 +203,12 @@ export default function SignupPage() {
         <div className="w-full max-w-md py-8 relative z-10">
           <Link href="/">
             <div className="lg:hidden flex items-center gap-2.5 justify-center mb-8 cursor-pointer">
-              <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl shadow-md" />
+              <img src="/spendly-logo.png" alt="Spendly" className="h-12 w-12 rounded-xl shadow-md" />
               <span className="font-bold text-2xl tracking-tight">Spendly</span>
             </div>
           </Link>
 
-          <Card className="shadow-xl shadow-primary/5 border-border/50">
+          <Card className="shadow-2xl shadow-primary/8 border-border/50">
             <CardHeader className="text-center pb-2">
               <CardTitle className="text-2xl font-bold tracking-tight" data-testid="text-signup-title">Create your account</CardTitle>
               <CardDescription>Start managing your finances today</CardDescription>
@@ -359,7 +352,7 @@ export default function SignupPage() {
                   </Label>
                 </div>
 
-                <Button type="submit" className="w-full h-11 text-sm font-medium shadow-md shadow-primary/20 gap-2" disabled={isLoading} data-testid="button-submit-signup">
+                <Button type="submit" className="w-full h-12 text-sm font-medium shadow-md shadow-primary/20 gap-2" disabled={isLoading} data-testid="button-submit-signup">
                   {isLoading ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />

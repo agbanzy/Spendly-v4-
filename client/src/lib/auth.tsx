@@ -1,13 +1,14 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { 
-  auth, 
-  signInWithEmail, 
-  signUpWithEmail, 
-  signInWithGoogle, 
-  logOut, 
-  onAuthChange,
-  type User as FirebaseUser 
-} from "./firebase";
+import {
+  signInWithEmail,
+  signUpWithEmail,
+  signInWithGoogle as cognitoSignInWithGoogle,
+  signOut as cognitoSignOut,
+  checkAuthState,
+  getUserInfoFromSession,
+  getCognitoErrorMessage,
+  type CognitoUserInfo,
+} from "./cognito";
 import { apiRequest } from "./queryClient";
 
 interface User {
@@ -30,13 +31,13 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-function mapFirebaseUser(firebaseUser: FirebaseUser, serverRole?: string): User {
+function mapCognitoUser(userInfo: CognitoUserInfo, serverRole?: string): User {
   return {
-    id: firebaseUser.uid,
-    name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
-    email: firebaseUser.email || "",
+    id: userInfo.sub,
+    name: userInfo.name,
+    email: userInfo.email,
     role: serverRole || "",
-    photoURL: firebaseUser.photoURL || undefined
+    photoURL: userInfo.photoURL,
   };
 }
 
@@ -45,25 +46,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthChange((firebaseUser) => {
-      if (firebaseUser) {
-        setUser(mapFirebaseUser(firebaseUser));
-      } else {
-        setUser(null);
+    // Check for existing Cognito session on mount
+    const initAuth = async () => {
+      try {
+        const session = await checkAuthState();
+        if (session && session.isValid()) {
+          const userInfo = getUserInfoFromSession(session);
+          setUser(mapCognitoUser(userInfo));
+        }
+      } catch {
+        // No valid session
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
-    });
-
-    return () => unsubscribe();
+    };
+    initAuth();
   }, []);
 
-  const ensureUserProfile = async (firebaseUser: FirebaseUser, extra?: { phoneNumber?: string; country?: string }): Promise<string | undefined> => {
+  const ensureUserProfile = async (
+    userInfo: CognitoUserInfo,
+    extra?: { phoneNumber?: string; country?: string }
+  ): Promise<string | undefined> => {
     try {
       const res = await apiRequest("POST", "/api/user-profile", {
-        firebaseUid: firebaseUser.uid,
-        email: firebaseUser.email,
-        displayName: firebaseUser.displayName || firebaseUser.email?.split("@")[0],
-        photoUrl: firebaseUser.photoURL || null,
+        cognitoSub: userInfo.sub,
+        email: userInfo.email,
+        displayName: userInfo.name,
+        photoUrl: userInfo.photoURL || null,
         ...(extra?.phoneNumber ? { phoneNumber: extra.phoneNumber } : {}),
         ...(extra?.country ? { country: extra.country } : {}),
       });
@@ -76,37 +85,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const login = async (email: string, password: string) => {
-    const userCredential = await signInWithEmail(email, password);
-    const serverRole = await ensureUserProfile(userCredential.user);
-    setUser(mapFirebaseUser(userCredential.user, serverRole));
+    try {
+      const session = await signInWithEmail(email, password);
+      const userInfo = getUserInfoFromSession(session);
+      const serverRole = await ensureUserProfile(userInfo);
+      setUser(mapCognitoUser(userInfo, serverRole));
+    } catch (error: any) {
+      throw new Error(getCognitoErrorMessage(error));
+    }
   };
 
   const loginWithGoogle = async () => {
-    const userCredential = await signInWithGoogle();
-    const serverRole = await ensureUserProfile(userCredential.user);
-    setUser(mapFirebaseUser(userCredential.user, serverRole));
+    // Redirect to Cognito Hosted UI — user returns via /auth/callback
+    cognitoSignInWithGoogle();
   };
 
-  const signup = async (name: string, email: string, password: string, extra?: { phoneNumber?: string; country?: string }) => {
-    const userCredential = await signUpWithEmail(email, password, name);
-    const serverRole = await ensureUserProfile(userCredential.user, extra);
-    setUser(mapFirebaseUser(userCredential.user, serverRole));
+  const signup = async (
+    name: string,
+    email: string,
+    password: string,
+    extra?: { phoneNumber?: string; country?: string }
+  ) => {
+    try {
+      await signUpWithEmail(email, password, name);
+      // Auto-confirm Lambda auto-verifies the user, so sign in immediately
+      const session = await signInWithEmail(email, password);
+      const userInfo = getUserInfoFromSession(session);
+      const serverRole = await ensureUserProfile(userInfo, extra);
+      setUser(mapCognitoUser(userInfo, serverRole));
+    } catch (error: any) {
+      throw new Error(getCognitoErrorMessage(error));
+    }
   };
 
   const logout = async () => {
-    await logOut();
+    cognitoSignOut();
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
+    <AuthContext.Provider value={{
+      user,
       isAuthenticated: !!user,
       isLoading,
       login,
       loginWithGoogle,
-      signup, 
-      logout 
+      signup,
+      logout
     }}>
       {children}
     </AuthContext.Provider>

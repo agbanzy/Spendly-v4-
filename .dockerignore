@@ -1,0 +1,18 @@
+node_modules
+mobile
+.git
+.env
+.env.local
+*.md
+!README.md
+# migrations directory included for drizzle-kit
+dist
+.claude
+infrastructure
+unpacked-audit
+*.cjs
+dev.sh
+start-local.sh
+generate-audit-report.cjs
+payment-audit-report.cjs
+AUDIT_AND_PRD.md

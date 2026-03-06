@@ -14,22 +14,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../lib/auth-context';
 import { useTheme } from '../lib/theme-context';
 import { ColorTokens } from '../lib/colors';
+import { getCognitoErrorMessage } from '../lib/cognito';
 
 interface ForgotPasswordScreenProps {
   navigation: any;
 }
 
-function getFirebaseErrorMessage(code: string): string {
-  switch (code) {
-    case 'auth/user-not-found':
-      return 'No account found with this email address.';
-    case 'auth/invalid-email':
-      return 'Please enter a valid email address.';
-    case 'auth/too-many-requests':
-      return 'Too many attempts. Please try again later.';
-    default:
-      return 'Failed to send reset email. Please try again.';
-  }
+function getAuthErrorMessage(error: any): string {
+  return getCognitoErrorMessage(error);
 }
 
 export default function ForgotPasswordScreen({ navigation }: ForgotPasswordScreenProps) {
@@ -55,8 +47,7 @@ export default function ForgotPasswordScreen({ navigation }: ForgotPasswordScree
       await resetPassword(email.trim());
       setSent(true);
     } catch (error: any) {
-      const errorCode = error?.code || '';
-      Alert.alert('Error', getFirebaseErrorMessage(errorCode));
+      Alert.alert('Error', getAuthErrorMessage(error));
     } finally {
       setLoading(false);
     }

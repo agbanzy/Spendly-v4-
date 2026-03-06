@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, jsonb, decimal, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, jsonb, decimal, serial, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -47,35 +47,35 @@ export const ExpenseStatus = {
 export type ExpenseStatus = typeof ExpenseStatus[keyof typeof ExpenseStatus];
 
 export const TransactionType = {
-  PAYOUT: 'Payout',
-  DEPOSIT: 'Deposit',
-  REFUND: 'Refund',
-  BILL: 'Bill',
-  FEE: 'Fee',
-  FUNDING: 'Funding',
-  TRANSFER: 'Transfer',
-  WITHDRAWAL: 'Withdrawal',
+  PAYOUT: 'payout',
+  DEPOSIT: 'deposit',
+  REFUND: 'refund',
+  BILL: 'bill',
+  FEE: 'fee',
+  FUNDING: 'funding',
+  TRANSFER: 'transfer',
+  WITHDRAWAL: 'withdrawal',
 } as const;
 export type TransactionType = typeof TransactionType[keyof typeof TransactionType];
 
 export const TransactionStatus = {
-  COMPLETED: 'Completed',
-  PROCESSING: 'Processing',
-  FAILED: 'Failed',
-  PENDING: 'Pending',
+  COMPLETED: 'completed',
+  PROCESSING: 'processing',
+  FAILED: 'failed',
+  PENDING: 'pending',
 } as const;
 export type TransactionStatus = typeof TransactionStatus[keyof typeof TransactionStatus];
 
 export const BillStatus = {
-  PAID: 'Paid',
-  UNPAID: 'Unpaid',
-  OVERDUE: 'Overdue',
+  PAID: 'paid',
+  UNPAID: 'unpaid',
+  OVERDUE: 'overdue',
 } as const;
 export type BillStatus = typeof BillStatus[keyof typeof BillStatus];
 
 export const CardStatus = {
-  ACTIVE: 'Active',
-  FROZEN: 'Frozen',
+  ACTIVE: 'active',
+  FROZEN: 'frozen',
 } as const;
 export type CardStatus = typeof CardStatus[keyof typeof CardStatus];
 
@@ -96,7 +96,7 @@ export type MembershipStatus = typeof MembershipStatus[keyof typeof MembershipSt
 
 // ==================== DATABASE TABLES ====================
 
-// Companies table
+// Companies table — enriched with fields from companySettings and organizationSettings
 export const companies = pgTable("companies", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
@@ -109,6 +109,43 @@ export const companies = pgTable("companies", {
   country: text("country").default('US'),
   currency: text("currency").default('USD'),
   status: text("status").notNull().default('active'),
+  // Contact & address (from companySettings/organizationSettings)
+  email: text("email"),
+  phone: text("phone"),
+  address: text("address"),
+  city: text("city"),
+  state: text("state"),
+  postalCode: text("postal_code"),
+  // Operational settings (from companySettings)
+  timezone: text("timezone").default('America/Los_Angeles'),
+  fiscalYearStart: text("fiscal_year_start").default('January'),
+  dateFormat: text("date_format").default('MM/DD/YYYY'),
+  language: text("language").default('en'),
+  taxId: text("tax_id"),
+  registrationNumber: text("registration_number"),
+  // Branding (from companySettings)
+  tagline: text("tagline"),
+  primaryColor: text("primary_color").default('#4f46e5'),
+  secondaryColor: text("secondary_color").default('#10b981'),
+  // Invoice settings (from companySettings)
+  invoicePrefix: text("invoice_prefix").default('INV'),
+  invoiceFooter: text("invoice_footer"),
+  invoiceTerms: text("invoice_terms").default('Payment due within 30 days'),
+  showLogoOnInvoice: boolean("show_logo_on_invoice").default(true),
+  showLogoOnReceipts: boolean("show_logo_on_receipts").default(true),
+  // Expense settings (from companySettings)
+  autoApproveBelow: decimal("auto_approve_below", { precision: 12, scale: 2 }).default('100'),
+  requireReceipts: boolean("require_receipts").default(true),
+  expenseCategories: jsonb("expense_categories").$type<string[]>().default(['Software', 'Travel', 'Office', 'Marketing', 'Food', 'Equipment', 'Utilities', 'Legal', 'Other']),
+  // Payment settings (from companySettings)
+  countryCode: text("country_code").default('US'),
+  region: text("region").default('North America'),
+  paymentProvider: text("payment_provider").default('stripe'),
+  paystackEnabled: boolean("paystack_enabled").default(true),
+  stripeEnabled: boolean("stripe_enabled").default(true),
+  // Feature toggles (from companySettings)
+  notificationsEnabled: boolean("notifications_enabled").default(true),
+  twoFactorEnabled: boolean("two_factor_enabled").default(false),
   createdAt: text("created_at").notNull().default(sql`now()`),
   updatedAt: text("updated_at").notNull().default(sql`now()`),
 });
@@ -116,19 +153,23 @@ export const companies = pgTable("companies", {
 // Company Members table - links users to companies with roles
 export const companyMembers = pgTable("company_members", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-  companyId: text("company_id").notNull(),
+  companyId: text("company_id").notNull().references(() => companies.id, { onDelete: 'cascade' }),
   userId: text("user_id"),
   email: text("email").notNull(),
   role: text("role").notNull().default('EMPLOYEE'),
   status: text("status").notNull().default('active'),
   invitedAt: text("invited_at").notNull().default(sql`now()`),
   joinedAt: text("joined_at"),
-});
+}, (t) => [
+  index("company_members_company_id_idx").on(t.companyId),
+  index("company_members_user_id_idx").on(t.userId),
+  index("company_members_email_idx").on(t.email),
+]);
 
 // Company Invitations table - token-based invite system
 export const companyInvitations = pgTable("company_invitations", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-  companyId: text("company_id").notNull(),
+  companyId: text("company_id").notNull().references(() => companies.id, { onDelete: 'cascade' }),
   email: text("email").notNull(),
   role: text("role").notNull().default('EMPLOYEE'),
   department: text("department"),
@@ -139,9 +180,12 @@ export const companyInvitations = pgTable("company_invitations", {
   expiresAt: text("expires_at").notNull(),
   acceptedAt: text("accepted_at"),
   createdAt: text("created_at").notNull().default(sql`now()`),
-});
+}, (t) => [
+  index("company_invitations_company_id_idx").on(t.companyId),
+]);
 
-// Users table
+// @deprecated — Legacy users table. Auth moved to Cognito; user data lives in userProfiles.
+// Kept for backward compatibility. Plan removal after confirming zero active usage.
 export const users = pgTable("users", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
@@ -166,29 +210,53 @@ export const expenses = pgTable("expenses", {
   status: text("status").notNull().default('PENDING'),
   user: text("user_name").notNull(),
   userId: text("user_id").notNull(),
-  companyId: text("company_id"),
-  department: text("department").notNull().default('General'),
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
+  department: text("department").notNull().default('General'), // Cached display value
+  departmentId: text("department_id").default(sql`null`).references(() => departments.id, { onDelete: 'set null' }),
   note: text("note"),
   receiptUrl: text("receipt_url"),
   expenseType: text("expense_type").notNull().default('request'),
   attachments: jsonb("attachments").$type<string[]>().default([]),
   taggedReviewers: jsonb("tagged_reviewers").$type<string[]>().default([]),
-  vendorId: text("vendor_id"),
+  approvedBy: text("approved_by"),
+  approvedAt: text("approved_at"),
+  rejectedBy: text("rejected_by"),
+  rejectedAt: text("rejected_at"),
+  approvalComments: text("approval_comments"),
+  vendorId: text("vendor_id").references(() => vendors.id, { onDelete: 'set null' }),
   payoutStatus: text("payout_status").default('not_started'),
   payoutId: text("payout_id"),
-});
+}, (t) => [
+  index("expenses_user_id_idx").on(t.userId),
+  index("expenses_company_id_idx").on(t.companyId),
+  index("expenses_date_idx").on(t.date),
+  index("expenses_status_idx").on(t.status),
+  index("expenses_company_id_status_idx").on(t.companyId, t.status),
+]);
 
-// Transactions table
+// Transactions table — external-facing transaction records
 export const transactions = pgTable("transactions", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   type: text("type").notNull(),
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
   fee: decimal("fee", { precision: 12, scale: 2 }).notNull().default('0'),
-  status: text("status").notNull().default('Pending'),
+  status: text("status").notNull().default('pending'),
   date: text("date").notNull(),
   description: text("description").notNull(),
   currency: text("currency").notNull().default('USD'),
-});
+  userId: text("user_id").default(sql`null`),
+  reference: text("reference").default(sql`null`),
+  // NOTE: walletTransactionId FK to walletTransactions.id is enforced at the database level via migration
+  // (walletTransactions table is defined after transactions, Drizzle doesn't support forward references)
+  walletTransactionId: text("wallet_transaction_id").default(sql`null`),
+  companyId: text("company_id").default(sql`null`).references(() => companies.id, { onDelete: 'set null' }),
+}, (t) => [
+  index("transactions_date_idx").on(t.date),
+  index("transactions_status_idx").on(t.status),
+  index("transactions_type_idx").on(t.type),
+  index("transactions_company_id_idx").on(t.companyId),
+  index("transactions_reference_idx").on(t.reference),
+]);
 
 // Bills table
 export const bills = pgTable("bills", {
@@ -198,16 +266,28 @@ export const bills = pgTable("bills", {
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
   dueDate: text("due_date").notNull(),
   category: text("category").notNull(),
-  status: text("status").notNull().default('Unpaid'),
+  status: text("status").notNull().default('unpaid'),
   currency: text("currency").notNull().default('USD'),
   logo: text("logo"),
   userId: varchar("user_id", { length: 36 }),
-  companyId: text("company_id"),
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
   recurring: boolean("recurring").default(false),
   frequency: text("frequency").default('monthly'),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
+  // Bill payment tracking fields
+  paidAmount: decimal("paid_amount", { precision: 12, scale: 2 }),
+  paidDate: text("paid_date"),
+  paidBy: text("paid_by"),
+  paymentMethod: text("payment_method"),
+  paymentReference: text("payment_reference"),
+  walletTransactionId: text("wallet_transaction_id").default(sql`null`),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+}, (t) => [
+  index("bills_user_id_idx").on(t.userId),
+  index("bills_company_id_idx").on(t.companyId),
+  index("bills_due_date_idx").on(t.dueDate),
+  index("bills_status_idx").on(t.status),
+]);
 
 // Budgets table
 export const budgets = pgTable("budgets", {
@@ -218,7 +298,10 @@ export const budgets = pgTable("budgets", {
   spent: decimal("spent", { precision: 12, scale: 2 }).notNull().default('0'),
   currency: text("currency").notNull().default('USD'),
   period: text("period").notNull().default('monthly'),
-});
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'cascade' }),
+}, (t) => [
+  index("budgets_company_id_idx").on(t.companyId),
+]);
 
 // Virtual Cards table
 export const virtualCards = pgTable("virtual_cards", {
@@ -230,10 +313,14 @@ export const virtualCards = pgTable("virtual_cards", {
   type: text("type").notNull().default('Visa'),
   color: text("color").notNull().default('indigo'),
   currency: text("currency").notNull().default('USD'),
-  status: text("status").notNull().default('Active'),
+  status: text("status").notNull().default('active'),
   stripeCardId: text("stripe_card_id"),
   stripeCardholderId: text("stripe_cardholder_id"),
-});
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
+}, (t) => [
+  index("virtual_cards_stripe_card_id_idx").on(t.stripeCardId),
+  index("virtual_cards_company_id_idx").on(t.companyId),
+]);
 
 // Departments table
 export const departments = pgTable("departments", {
@@ -244,10 +331,12 @@ export const departments = pgTable("departments", {
   budget: decimal("budget", { precision: 12, scale: 2 }),
   color: text("color").notNull().default('#6366f1'),
   memberCount: integer("member_count").notNull().default(0),
-  status: text("status").notNull().default('Active'),
-  companyId: text("company_id"),
+  status: text("status").notNull().default('active'),
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'cascade' }),
   createdAt: text("created_at").notNull(),
-});
+}, (t) => [
+  index("departments_company_id_idx").on(t.companyId),
+]);
 
 // Team Members table
 export const teamMembers = pgTable("team_members", {
@@ -256,24 +345,30 @@ export const teamMembers = pgTable("team_members", {
   email: text("email").notNull(),
   role: text("role").notNull().default('EMPLOYEE'),
   department: text("department").notNull().default('General'),
-  departmentId: text("department_id"),
+  departmentId: text("department_id").references(() => departments.id, { onDelete: 'set null' }),
   avatar: text("avatar"),
-  status: text("status").notNull().default('Active'),
-  companyId: text("company_id"),
+  status: text("status").notNull().default('active'),
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'cascade' }),
   userId: text("user_id"),
   joinedAt: text("joined_at").notNull(),
   permissions: jsonb("permissions").$type<string[]>().default([]),
-});
+}, (t) => [
+  index("team_members_company_id_idx").on(t.companyId),
+]);
 
-// Payroll table
+// Payroll table — employeeName/department/bank fields are intentional snapshots for audit trail
 export const payrollEntries = pgTable("payroll_entries", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   employeeId: text("employee_id").notNull(),
   employeeName: text("employee_name").notNull(),
-  department: text("department").notNull(),
+  department: text("department").notNull(), // Snapshot at time of payment
+  departmentId: text("department_id").default(sql`null`).references(() => departments.id, { onDelete: 'set null' }),
+  country: text("country"),
+  currency: text("currency").default('USD'),
   salary: decimal("salary", { precision: 12, scale: 2 }).notNull(),
   bonus: decimal("bonus", { precision: 12, scale: 2 }).notNull().default('0'),
   deductions: decimal("deductions", { precision: 12, scale: 2 }).notNull().default('0'),
+  deductionBreakdown: jsonb("deduction_breakdown").$type<{ tax: number; pension: number; insurance: number; other: number }>(),
   netPay: decimal("net_pay", { precision: 12, scale: 2 }).notNull(),
   status: text("status").notNull().default('pending'),
   payDate: text("pay_date").notNull(),
@@ -283,9 +378,12 @@ export const payrollEntries = pgTable("payroll_entries", {
   recurring: boolean("recurring").default(false),
   frequency: text("frequency").default('monthly'),
   nextPayDate: text("next_pay_date"),
-  companyId: text("company_id"),
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
   email: text("email"),
-});
+}, (t) => [
+  index("payroll_entries_company_id_idx").on(t.companyId),
+  index("payroll_entries_employee_id_idx").on(t.employeeId),
+]);
 
 // Invoices table
 export const invoices = pgTable("invoices", {
@@ -294,11 +392,20 @@ export const invoices = pgTable("invoices", {
   client: text("client").notNull(),
   clientEmail: text("client_email").notNull(),
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  subtotal: decimal("subtotal", { precision: 12, scale: 2 }),
+  taxRate: decimal("tax_rate", { precision: 5, scale: 2 }).default('0'),
+  taxAmount: decimal("tax_amount", { precision: 12, scale: 2 }).default('0'),
+  currency: text("currency").default('USD'),
+  notes: text("notes"),
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
   dueDate: text("due_date").notNull(),
   issuedDate: text("issued_date").notNull(),
   status: text("status").notNull().default('pending'),
   items: jsonb("items").$type<{ description: string; quantity: number; rate: number }[]>().default([]),
-});
+}, (t) => [
+  index("invoices_company_id_idx").on(t.companyId),
+  index("invoices_status_idx").on(t.status),
+]);
 
 // Vendors table
 export const vendors = pgTable("vendors", {
@@ -308,11 +415,16 @@ export const vendors = pgTable("vendors", {
   phone: text("phone").notNull(),
   address: text("address").notNull(),
   category: text("category").notNull(),
+  currency: text("currency").default('USD'),
   status: text("status").notNull().default('active'),
   totalPaid: decimal("total_paid", { precision: 12, scale: 2 }).notNull().default('0'),
   pendingPayments: decimal("pending_payments", { precision: 12, scale: 2 }).notNull().default('0'),
   lastPayment: text("last_payment"),
-});
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
+  paymentTerms: text("payment_terms"),
+}, (t) => [
+  index("vendors_company_id_idx").on(t.companyId),
+]);
 
 // Reports table
 export const reports = pgTable("reports", {
@@ -323,30 +435,42 @@ export const reports = pgTable("reports", {
   createdAt: text("created_at").notNull(),
   status: text("status").notNull().default('completed'),
   fileSize: text("file_size").notNull().default('0 KB'),
-});
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'cascade' }),
+}, (t) => [
+  index("reports_company_id_idx").on(t.companyId),
+]);
 
 // Card Transactions table
 export const cardTransactions = pgTable("card_transactions", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-  cardId: text("card_id").notNull(),
+  cardId: text("card_id").notNull().references(() => virtualCards.id, { onDelete: 'cascade' }),
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  currency: text("currency").notNull().default('USD'),
   merchant: text("merchant").notNull(),
   category: text("category").notNull(),
   description: text("description").notNull(),
   status: text("status").notNull().default('pending'),
   date: text("date").notNull(),
-});
+}, (t) => [
+  index("card_transactions_card_id_idx").on(t.cardId),
+  index("card_transactions_date_idx").on(t.date),
+  index("card_transactions_company_id_idx").on(t.companyId),
+]);
 
 // Virtual Accounts table
 export const virtualAccounts = pgTable("virtual_accounts", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   userId: text("user_id"),
-  companyId: text("company_id"),
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
   name: text("name").notNull(),
   accountNumber: text("account_number").notNull(),
   accountName: text("account_name"),
   bankName: text("bank_name").notNull(),
   bankCode: text("bank_code").notNull(),
+  routingNumber: text("routing_number"),
+  swiftCode: text("swift_code"),
+  country: text("country").default('US'),
   currency: text("currency").notNull().default('USD'),
   balance: decimal("balance", { precision: 12, scale: 2 }).notNull().default('0'),
   type: text("type").notNull().default('collection'),
@@ -355,24 +479,31 @@ export const virtualAccounts = pgTable("virtual_accounts", {
   providerAccountId: text("provider_account_id"),
   providerCustomerCode: text("provider_customer_code"),
   createdAt: text("created_at").notNull(),
-});
+}, (t) => [
+  index("virtual_accounts_user_id_idx").on(t.userId),
+  index("virtual_accounts_company_id_idx").on(t.companyId),
+  index("virtual_accounts_status_idx").on(t.status),
+]);
 
-// Company Balances table (single row)
+// Company Balances table — keyed by companyId for multi-tenant support
 export const companyBalances = pgTable("company_balances", {
-  id: integer("id").primaryKey().default(1),
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  companyId: text("company_id").notNull().unique().references(() => companies.id, { onDelete: 'cascade' }),
   local: decimal("local", { precision: 12, scale: 2 }).notNull().default('0'),
   usd: decimal("usd", { precision: 12, scale: 2 }).notNull().default('0'),
   escrow: decimal("escrow", { precision: 12, scale: 2 }).notNull().default('0'),
   localCurrency: text("local_currency").notNull().default('USD'),
-});
+}, (t) => [
+  index("company_balances_company_id_idx").on(t.companyId),
+]);
 
 // Company Settings table (single row)
 export const companySettings = pgTable("company_settings", {
   id: integer("id").primaryKey().default(1),
-  companyName: text("company_name").notNull().default('Spendly'),
-  companyEmail: text("company_email").notNull().default('finance@spendlymanager.com'),
-  companyPhone: text("company_phone").notNull().default('+1 (555) 123-4567'),
-  companyAddress: text("company_address").notNull().default('123 Business Ave, San Francisco, CA 94105'),
+  companyName: text("company_name").notNull().default(''),
+  companyEmail: text("company_email").notNull().default(''),
+  companyPhone: text("company_phone").notNull().default(''),
+  companyAddress: text("company_address").notNull().default(''),
   currency: text("currency").notNull().default('USD'),
   timezone: text("timezone").notNull().default('America/Los_Angeles'),
   fiscalYearStart: text("fiscal_year_start").notNull().default('January'),
@@ -417,9 +548,10 @@ export type KycStatus = typeof KycStatus[keyof typeof KycStatus];
 // User Profiles table (extended user data for KYC)
 export const userProfiles = pgTable("user_profiles", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-  firebaseUid: text("firebase_uid").notNull().unique(),
+  cognitoSub: text("cognito_sub").notNull().unique(),
+  userId: text("user_id"),
   email: text("email").notNull(),
-  companyId: text("company_id"),
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
   displayName: text("display_name"),
   photoUrl: text("photo_url"),
   phoneNumber: text("phone_number"),
@@ -435,7 +567,7 @@ export const userProfiles = pgTable("user_profiles", {
   onboardingStep: integer("onboarding_step").notNull().default(1),
   transactionPinHash: text("transaction_pin_hash"),
   transactionPinEnabled: boolean("transaction_pin_enabled").notNull().default(false),
-  // User Notification Settings
+  // @deprecated — Use notificationSettings table instead. Will be removed in Phase 6.
   emailNotifications: boolean("email_notifications").notNull().default(true),
   pushNotifications: boolean("push_notifications").notNull().default(true),
   smsNotifications: boolean("sms_notifications").notNull().default(false),
@@ -457,12 +589,17 @@ export const userProfiles = pgTable("user_profiles", {
   lastLoginIp: text("last_login_ip"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
-});
+}, (t) => [
+  index("user_profiles_cognito_sub_idx").on(t.cognitoSub),
+  index("user_profiles_email_idx").on(t.email),
+  index("user_profiles_company_id_idx").on(t.companyId),
+  index("user_profiles_kyc_status_idx").on(t.kycStatus),
+]);
 
 // KYC Submissions table
 export const kycSubmissions = pgTable("kyc_submissions", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-  userProfileId: text("user_profile_id").notNull(),
+  userProfileId: text("user_profile_id").notNull().references(() => userProfiles.id, { onDelete: 'cascade' }),
   
   // Personal Information
   firstName: text("first_name").notNull(),
@@ -511,7 +648,10 @@ export const kycSubmissions = pgTable("kyc_submissions", {
   submittedAt: text("submitted_at").notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
-});
+}, (t) => [
+  index("kyc_submissions_user_profile_id_idx").on(t.userProfileId),
+  index("kyc_submissions_status_idx").on(t.status),
+]);
 
 // Audit Logs table
 export const auditLogs = pgTable("audit_logs", {
@@ -524,8 +664,13 @@ export const auditLogs = pgTable("audit_logs", {
   details: jsonb("details").$type<Record<string, any>>().default({}),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
   createdAt: text("created_at").notNull().default(sql`now()`),
-});
+}, (t) => [
+  index("audit_logs_user_id_idx").on(t.userId),
+  index("audit_logs_entity_type_entity_id_idx").on(t.entityType, t.entityId),
+  index("audit_logs_created_at_idx").on(t.createdAt),
+]);
 
 // Organization Settings table
 export const organizationSettings = pgTable("organization_settings", {
@@ -550,11 +695,12 @@ export const organizationSettings = pgTable("organization_settings", {
   updatedAt: text("updated_at").notNull().default(sql`now()`),
 });
 
-// System Settings table
+// System Settings table — also absorbs adminSettings key-value pairs
 export const systemSettings = pgTable("system_settings", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   key: text("key").notNull().unique(),
   value: text("value"),
+  valueType: text("value_type").default('string'),
   category: text("category").notNull().default('general'),
   description: text("description"),
   isPublic: boolean("is_public").default(false),
@@ -579,22 +725,25 @@ export const rolePermissions = pgTable("role_permissions", {
 export const wallets = pgTable("wallets", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   userId: text("user_id").notNull(),
-  companyId: text("company_id"),
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
   type: text("type").notNull().default('personal'),
   currency: text("currency").notNull().default('USD'),
   balance: decimal("balance", { precision: 16, scale: 2 }).notNull().default('0'),
   availableBalance: decimal("available_balance", { precision: 16, scale: 2 }).notNull().default('0'),
   pendingBalance: decimal("pending_balance", { precision: 16, scale: 2 }).notNull().default('0'),
   status: text("status").notNull().default('active'),
-  virtualAccountId: text("virtual_account_id"),
+  virtualAccountId: text("virtual_account_id").references(() => virtualAccounts.id, { onDelete: 'set null' }),
   createdAt: text("created_at").notNull().default(sql`now()`),
   updatedAt: text("updated_at").notNull().default(sql`now()`),
-});
+}, (t) => [
+  index("wallets_user_id_idx").on(t.userId),
+  index("wallets_company_id_idx").on(t.companyId),
+]);
 
 // Wallet Transactions table - ledger for all wallet credits/debits
 export const walletTransactions = pgTable("wallet_transactions", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-  walletId: text("wallet_id").notNull(),
+  walletId: text("wallet_id").notNull().references(() => wallets.id, { onDelete: 'cascade' }),
   type: text("type").notNull(),
   amount: decimal("amount", { precision: 16, scale: 2 }).notNull(),
   currency: text("currency").notNull().default('USD'),
@@ -607,8 +756,13 @@ export const walletTransactions = pgTable("wallet_transactions", {
   relatedEntityId: text("related_entity_id"),
   metadata: jsonb("metadata").$type<Record<string, unknown>>(),
   status: text("status").notNull().default('completed'),
+  reversedAt: text("reversed_at"),
+  reversedByTxId: text("reversed_by_tx_id"),
   createdAt: text("created_at").notNull().default(sql`now()`),
-});
+}, (t) => [
+  index("wallet_transactions_wallet_id_idx").on(t.walletId),
+  index("wallet_transactions_created_at_idx").on(t.createdAt),
+]);
 
 // Exchange Rates table - for currency conversion
 export const exchangeRates = pgTable("exchange_rates", {
@@ -636,7 +790,7 @@ export const exchangeRateSettings = pgTable("exchange_rate_settings", {
 export const payoutDestinations = pgTable("payout_destinations", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   userId: text("user_id"),
-  vendorId: text("vendor_id"),
+  vendorId: text("vendor_id").references(() => vendors.id, { onDelete: 'set null' }),
   type: text("type").notNull().default('bank_account'),
   provider: text("provider").notNull(),
   bankName: text("bank_name"),
@@ -653,7 +807,10 @@ export const payoutDestinations = pgTable("payout_destinations", {
   metadata: jsonb("metadata").$type<Record<string, unknown>>(),
   createdAt: text("created_at").notNull().default(sql`now()`),
   updatedAt: text("updated_at").notNull().default(sql`now()`),
-});
+}, (t) => [
+  index("payout_destinations_user_id_idx").on(t.userId),
+  index("payout_destinations_vendor_id_idx").on(t.vendorId),
+]);
 
 // Payouts table - track all payouts (expense reimbursements, payroll, vendor payments)
 export const payouts = pgTable("payouts", {
@@ -665,7 +822,7 @@ export const payouts = pgTable("payouts", {
   recipientType: text("recipient_type").notNull(),
   recipientId: text("recipient_id").notNull(),
   recipientName: text("recipient_name"),
-  destinationId: text("destination_id"),
+  destinationId: text("destination_id").references(() => payoutDestinations.id, { onDelete: 'set null' }),
   provider: text("provider").notNull(),
   providerTransferId: text("provider_transfer_id"),
   providerReference: text("provider_reference"),
@@ -676,9 +833,12 @@ export const payouts = pgTable("payouts", {
   exchangeRate: decimal("exchange_rate", { precision: 16, scale: 6 }),
   failureReason: text("failure_reason"),
   metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+  companyId: text("company_id").default(sql`null`).references(() => companies.id, { onDelete: 'set null' }),
   initiatedBy: text("initiated_by"),
   approvedBy: text("approved_by"),
+  approvedAt: text("approved_at"),
   firstApprovedBy: text("first_approved_by"),
+  firstApprovedAt: text("first_approved_at"),
   approvalStatus: text("approval_status").default('none'),
   processedAt: text("processed_at"),
   recurring: boolean("recurring").default(false),
@@ -686,7 +846,11 @@ export const payouts = pgTable("payouts", {
   nextRunDate: text("next_run_date"),
   createdAt: text("created_at").notNull().default(sql`now()`),
   updatedAt: text("updated_at").notNull().default(sql`now()`),
-});
+}, (t) => [
+  index("payouts_status_idx").on(t.status),
+  index("payouts_recipient_id_idx").on(t.recipientId),
+  index("payouts_created_at_idx").on(t.createdAt),
+]);
 
 export const scheduledPayments = pgTable("scheduled_payments", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
@@ -703,11 +867,15 @@ export const scheduledPayments = pgTable("scheduled_payments", {
   recipientId: text("recipient_id"),
   recipientName: text("recipient_name"),
   metadata: jsonb("metadata").$type<Record<string, unknown>>(),
-  companyId: text("company_id"),
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
   createdBy: text("created_by"),
   createdAt: text("created_at").notNull().default(sql`now()`),
   updatedAt: text("updated_at").notNull().default(sql`now()`),
-});
+}, (t) => [
+  index("scheduled_payments_company_id_idx").on(t.companyId),
+  index("scheduled_payments_status_idx").on(t.status),
+  index("scheduled_payments_next_run_date_idx").on(t.nextRunDate),
+]);
 
 // Funding Sources table - methods users can use to fund their wallet
 export const fundingSources = pgTable("funding_sources", {
@@ -724,7 +892,9 @@ export const fundingSources = pgTable("funding_sources", {
   isVerified: boolean("is_verified").default(false),
   metadata: jsonb("metadata").$type<Record<string, unknown>>(),
   createdAt: text("created_at").notNull().default(sql`now()`),
-});
+}, (t) => [
+  index("funding_sources_user_id_idx").on(t.userId),
+]);
 
 // Admin Settings table - for single admin enforcement and other admin configs
 export const adminSettings = pgTable("admin_settings", {
@@ -794,6 +964,17 @@ export type Transaction = typeof transactions.$inferSelect;
 export type InsertBill = z.infer<typeof insertBillSchema>;
 export type Bill = typeof bills.$inferSelect;
 
+// Helper type: makes specified keys optional while keeping everything else required
+type OptionalFields<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
+
+// Create-input types: select types with newly-added nullable columns made optional
+// so existing call sites that omit these fields still type-check.
+export type CreateTransaction = OptionalFields<Omit<Transaction, 'id'>, 'walletTransactionId' | 'userId' | 'reference' | 'companyId'>;
+export type CreateExpense     = OptionalFields<Omit<Expense, 'id'>,     'departmentId' | 'approvedBy' | 'approvedAt' | 'rejectedBy' | 'rejectedAt' | 'approvalComments'>;
+export type CreateBill        = OptionalFields<Omit<Bill, 'id'>,        'walletTransactionId' | 'paidAmount' | 'paidDate' | 'paidBy' | 'paymentMethod' | 'paymentReference'>;
+export type CreatePayroll     = OptionalFields<Omit<PayrollEntry, 'id'>,'departmentId'>;
+export type CreateTeamMember  = OptionalFields<Omit<TeamMember, 'id'>,  'departmentId'>;
+
 export type InsertBudget = z.infer<typeof insertBudgetSchema>;
 export type Budget = typeof budgets.$inferSelect;
 
@@ -801,7 +982,7 @@ export type InsertVirtualCard = z.infer<typeof insertVirtualCardSchema>;
 export type VirtualCard = typeof virtualCards.$inferSelect;
 
 export type InsertDepartment = z.infer<typeof insertDepartmentSchema>;
-export type Department = typeof departments.$inferSelect;
+export type DepartmentRecord = typeof departments.$inferSelect;
 
 export type InsertTeamMember = z.infer<typeof insertTeamMemberSchema>;
 export type TeamMember = typeof teamMembers.$inferSelect;
@@ -932,9 +1113,13 @@ export const notifications = pgTable("notifications", {
   smsSent: boolean("sms_sent").default(false),
   pushSent: boolean("push_sent").default(false),
   createdAt: text("created_at").notNull(),
-});
+}, (t) => [
+  index("notifications_user_id_idx").on(t.userId),
+  index("notifications_created_at_idx").on(t.createdAt),
+  index("notifications_user_id_read_idx").on(t.userId, t.read),
+]);
 
-// Notification settings per user
+// Notification settings per user — SINGLE SOURCE OF TRUTH for notification preferences
 export const notificationSettings = pgTable("notification_settings", {
   id: serial("id").primaryKey(),
   userId: text("user_id").notNull().unique(),
@@ -951,9 +1136,12 @@ export const notificationSettings = pgTable("notification_settings", {
   budgetNotifications: boolean("budget_notifications").notNull().default(true),
   securityNotifications: boolean("security_notifications").notNull().default(true),
   marketingNotifications: boolean("marketing_notifications").notNull().default(false),
+  weeklyDigest: boolean("weekly_digest").notNull().default(true),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
-});
+}, (t) => [
+  index("notification_settings_user_id_idx").on(t.userId),
+]);
 
 // Push notification tokens
 export const pushTokens = pgTable("push_tokens", {
@@ -965,7 +1153,9 @@ export const pushTokens = pgTable("push_tokens", {
   active: boolean("active").notNull().default(true),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
-});
+}, (t) => [
+  index("push_tokens_user_id_idx").on(t.userId),
+]);
 
 // Insert schemas for notifications
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true });
@@ -1004,9 +1194,13 @@ export const analyticsSnapshots = pgTable("analytics_snapshots", {
   topVendor: text("top_vendor"),
   categoryBreakdown: jsonb("category_breakdown").$type<Record<string, number>>().default({}),
   departmentBreakdown: jsonb("department_breakdown").$type<Record<string, number>>().default({}),
-  companyId: text("company_id"),
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
   createdAt: text("created_at").notNull().default(sql`now()`),
-});
+}, (t) => [
+  index("analytics_snapshots_company_id_idx").on(t.companyId),
+  index("analytics_snapshots_period_type_idx").on(t.periodType),
+  index("analytics_snapshots_period_start_idx").on(t.periodStart),
+]);
 
 // Business Insights table - generated insights and recommendations
 export const businessInsights = pgTable("business_insights", {
@@ -1024,10 +1218,14 @@ export const businessInsights = pgTable("business_insights", {
   relatedEntityId: text("related_entity_id"),
   periodStart: text("period_start"),
   periodEnd: text("period_end"),
-  companyId: text("company_id"),
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: text("created_at").notNull().default(sql`now()`),
-});
+}, (t) => [
+  index("business_insights_company_id_idx").on(t.companyId),
+  index("business_insights_category_idx").on(t.category),
+  index("business_insights_is_active_idx").on(t.isActive),
+]);
 
 export const insertAnalyticsSnapshotSchema = createInsertSchema(analyticsSnapshots).omit({ id: true });
 export const insertBusinessInsightSchema = createInsertSchema(businessInsights).omit({ id: true });
@@ -1037,6 +1235,16 @@ export type AnalyticsSnapshot = typeof analyticsSnapshots.$inferSelect;
 
 export type InsertBusinessInsight = z.infer<typeof insertBusinessInsightSchema>;
 export type BusinessInsight = typeof businessInsights.$inferSelect;
+
+// Processed webhooks table — dedicated idempotency tracking for payment webhooks
+export const processedWebhooks = pgTable("processed_webhooks", {
+  id: serial("id").primaryKey(),
+  eventId: text("event_id").notNull().unique(),
+  provider: text("provider").notNull(), // 'stripe' | 'paystack'
+  eventType: text("event_type").notNull(),
+  processedAt: text("processed_at").notNull().default(sql`now()`),
+  metadata: jsonb("metadata"),
+});
 
 // Category icons mapping
 export const categoryIcons: Record<string, string> = {

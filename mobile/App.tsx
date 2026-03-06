@@ -12,6 +12,7 @@ import { NetworkProvider } from './src/lib/network-context';
 import { ThemeProvider, useTheme } from './src/lib/theme-context';
 import { CompanyProvider } from './src/lib/company-context';
 import AppNavigator from './src/navigation/AppNavigator';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 import {
   registerForPushNotifications,
   savePushToken,
@@ -72,19 +73,21 @@ export default function App() {
   }, []);
 
   return (
-    <SafeAreaProvider>
-      <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: asyncStoragePersister, maxAge: 1000 * 60 * 60 * 24 }}>
-        <NetworkProvider>
-          <ThemeProvider>
-            <AuthProvider>
-              <CompanyProvider>
-                <ThemedStatusBar />
-                <AppNavigator />
-              </CompanyProvider>
-            </AuthProvider>
-          </ThemeProvider>
-        </NetworkProvider>
-      </PersistQueryClientProvider>
-    </SafeAreaProvider>
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: asyncStoragePersister, maxAge: 1000 * 60 * 60 * 24 }}>
+          <NetworkProvider>
+            <ThemeProvider>
+              <AuthProvider>
+                <CompanyProvider>
+                  <ThemedStatusBar />
+                  <AppNavigator />
+                </CompanyProvider>
+              </AuthProvider>
+            </ThemeProvider>
+          </NetworkProvider>
+        </PersistQueryClientProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }

@@ -76,7 +76,7 @@ import {
   stagger,
 } from "@/components/ui-extended";
 import { motion } from "framer-motion";
-import type { TeamMember, Department, CompanySettings } from "@shared/schema";
+import type { TeamMember, DepartmentRecord, CompanySettings } from "@shared/schema";
 import { useCompany } from "@/lib/company-context";
 
 const roleColors: Record<string, { bg: string; text: string; badge: string }> = {
@@ -117,7 +117,7 @@ export default function Team() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ type: "member" | "department"; id: string; name: string } | null>(null);
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
-  const [editingDept, setEditingDept] = useState<Department | null>(null);
+  const [editingDept, setEditingDept] = useState<DepartmentRecord | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("all");
   const [isInviteOpen, setIsInviteOpen] = useState(false);
@@ -157,7 +157,7 @@ export default function Team() {
     queryKey: ["/api/team"],
   });
 
-  const { data: departments, isLoading: deptsLoading } = useQuery<Department[]>({
+  const { data: departments, isLoading: deptsLoading } = useQuery<DepartmentRecord[]>({
     queryKey: ["/api/departments"],
   });
 
@@ -361,7 +361,7 @@ export default function Team() {
     setIsMemberOpen(true);
   };
 
-  const openEditDept = (dept: Department) => {
+  const openEditDept = (dept: DepartmentRecord) => {
     setEditingDept(dept);
     setDeptForm({
       name: dept.name,
@@ -374,8 +374,12 @@ export default function Team() {
   };
 
   const handleMemberSubmit = () => {
-    if (!memberForm.name || !memberForm.email) {
-      toast({ title: "Please fill in all required fields", variant: "destructive" });
+    if (!memberForm.name.trim()) {
+      toast({ title: "Name is required", description: "Please enter a valid name.", variant: "destructive" });
+      return;
+    }
+    if (!memberForm.email.trim() || !memberForm.email.includes("@")) {
+      toast({ title: "Valid email is required", description: "Please enter an email address containing @.", variant: "destructive" });
       return;
     }
     if (editingMember) {
@@ -418,7 +422,7 @@ export default function Team() {
        member.department.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const activeMembers = team?.filter((m) => m.status === "Active").length || 0;
+  const activeMembers = team?.filter((m) => m.status === "active").length || 0;
   const departmentList = departments || [];
   const allDepartments = Array.from(new Set([...(team?.map(m => m.department) || []), ...departmentList.map(d => d.name)]));
 
@@ -578,7 +582,7 @@ export default function Team() {
                                 <p className="text-sm font-semibold truncate" data-testid={`text-member-name-${member.id}`}>
                                   {member.name}
                                 </p>
-                                {member.status === "Active" && (
+                                {member.status === "active" && (
                                   <span className="inline-block w-2 h-2 bg-emerald-500 rounded-full flex-shrink-0" />
                                 )}
                               </div>
@@ -611,8 +615,8 @@ export default function Team() {
                                 <DropdownMenuItem onClick={() => openEditMember(member)} data-testid={`button-edit-member-${member.id}`}>
                                   <Pencil className="h-4 w-4 mr-2" />Edit
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => toggleStatusMutation.mutate({ id: member.id, status: member.status === "Active" ? "Inactive" : "Active" })} data-testid={`button-toggle-status-${member.id}`}>
-                                  {member.status === "Active" ? (
+                                <DropdownMenuItem onClick={() => toggleStatusMutation.mutate({ id: member.id, status: member.status === "active" ? "inactive" : "active" })} data-testid={`button-toggle-status-${member.id}`}>
+                                  {member.status === "active" ? (
                                     <><UserX className="h-4 w-4 mr-2" />Deactivate</>
                                   ) : (
                                     <><UserCheck className="h-4 w-4 mr-2" />Activate</>
@@ -737,8 +741,8 @@ export default function Team() {
                             </div>
                           )}
                           <StatusBadge
-                            status={dept.status || "Active"}
-                            variant={dept.status === "Active" ? "default" : "secondary"}
+                            status={dept.status || "active"}
+                            variant={dept.status === "active" ? "default" : "secondary"}
                           />
                         </div>
                       </div>
@@ -1157,8 +1161,12 @@ export default function Team() {
             </Button>
             <Button
               onClick={() => {
-                if (!inviteForm.name || !inviteForm.email) {
-                  toast({ title: "Name and email are required", variant: "destructive" });
+                if (!inviteForm.name.trim()) {
+                  toast({ title: "Name is required", description: "Please enter a valid name.", variant: "destructive" });
+                  return;
+                }
+                if (!inviteForm.email.trim() || !inviteForm.email.includes("@")) {
+                  toast({ title: "Valid email is required", description: "Please enter an email address containing @.", variant: "destructive" });
                   return;
                 }
                 sendInviteMutation.mutate({

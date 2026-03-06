@@ -180,7 +180,7 @@ export default function ReportsPage() {
           actions={
             <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
               <DialogTrigger asChild>
-                <Button className="bg-violet-600 hover:bg-violet-700 text-white" data-testid="button-create-report">
+                <Button className="bg-sky-600 hover:bg-sky-700 text-white" data-testid="button-create-report">
                   <Plus className="mr-2 h-4 w-4" />
                   Create Report
                 </Button>
@@ -200,7 +200,7 @@ export default function ReportsPage() {
                       placeholder="e.g., Monthly Expense Report"
                       value={newReport.name}
                       onChange={(e) => setNewReport(prev => ({ ...prev, name: e.target.value }))}
-                      className="bg-slate-900/30 rounded-xl h-11 border-slate-700/50 focus:border-violet-500"
+                      className="bg-slate-900/30 rounded-xl h-11 border-slate-700/50 focus:border-sky-500"
                       data-testid="input-report-name"
                     />
                   </div>
@@ -213,14 +213,14 @@ export default function ReportsPage() {
                           onClick={() => setNewReport(prev => ({ ...prev, type: type.value }))}
                           className={`p-4 rounded-xl border transition-all duration-200 text-left ${
                             newReport.type === type.value
-                              ? "border-violet-500/50 bg-violet-500/10 shadow-lg shadow-violet-500/20"
+                              ? "border-sky-500/50 bg-sky-500/10 shadow-lg shadow-sky-500/20"
                               : "border-slate-700/50 hover:border-slate-600/50 bg-slate-900/20"
                           }`}
                           data-testid={`button-type-${type.value}`}
                         >
                           <type.icon
                             className={`h-5 w-5 mb-2 ${
-                              newReport.type === type.value ? "text-violet-400" : "text-slate-400"
+                              newReport.type === type.value ? "text-sky-400" : "text-slate-400"
                             }`}
                           />
                           <div className="font-medium text-sm">{type.label}</div>
@@ -235,7 +235,7 @@ export default function ReportsPage() {
                       value={newReport.dateRange}
                       onValueChange={(value) => setNewReport(prev => ({ ...prev, dateRange: value }))}
                     >
-                      <SelectTrigger className="bg-slate-900/30 rounded-xl h-11 border-slate-700/50 focus:border-violet-500" data-testid="select-date-range">
+                      <SelectTrigger className="bg-slate-900/30 rounded-xl h-11 border-slate-700/50 focus:border-sky-500" data-testid="select-date-range">
                         <Calendar className="mr-2 h-4 w-4" />
                         <SelectValue />
                       </SelectTrigger>
@@ -254,7 +254,7 @@ export default function ReportsPage() {
                     Cancel
                   </Button>
                   <Button
-                    className="bg-violet-600 hover:bg-violet-700 text-white"
+                    className="bg-sky-600 hover:bg-sky-700 text-white"
                     onClick={handleCreateReport}
                     disabled={createMutation.isPending}
                     data-testid="button-generate-report"
@@ -283,7 +283,7 @@ export default function ReportsPage() {
             title="Total Reports"
             value={reports.length}
             icon={FileText}
-            color="violet"
+            color="cyan"
             subtitle={`${reports.length} generated`}
           />
           <MetricCard
@@ -313,7 +313,7 @@ export default function ReportsPage() {
         <GlassCard>
           <div className="p-6 md:p-8">
             <div className="flex items-center gap-3 mb-6">
-              <div className="p-3 rounded-lg bg-violet-500/10 text-violet-400">
+              <div className="p-3 rounded-lg bg-sky-500/10 text-sky-400">
                 <BarChart3 className="h-5 w-5" />
               </div>
               <div>
@@ -329,7 +329,7 @@ export default function ReportsPage() {
                 className="flex items-center justify-center py-12"
               >
                 <div className="text-center">
-                  <Loader2 className="h-8 w-8 animate-spin text-violet-400 mx-auto mb-3" />
+                  <Loader2 className="h-8 w-8 animate-spin text-sky-400 mx-auto mb-3" />
                   <p className="text-slate-400">Loading reports...</p>
                 </div>
               </motion.div>
@@ -341,7 +341,7 @@ export default function ReportsPage() {
                 action={
                   <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
                     <DialogTrigger asChild>
-                      <Button className="bg-violet-600 hover:bg-violet-700 text-white mt-4">
+                      <Button className="bg-sky-600 hover:bg-sky-700 text-white mt-4">
                         <Plus className="mr-2 h-4 w-4" />
                         Create Report
                       </Button>
@@ -353,9 +353,9 @@ export default function ReportsPage() {
               <motion.div variants={stagger} initial="hidden" animate="visible" className="space-y-3">
                 {reports.map((report, index) => (
                   <AnimatedListItem key={report.id} index={index}>
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-900/30 border border-slate-700/50 hover:border-violet-500/50 transition-all duration-200 group">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-900/30 border border-slate-700/50 hover:border-sky-500/50 transition-all duration-200 group">
                       <div className="flex items-center gap-4 flex-1 min-w-0">
-                        <div className="p-3 rounded-lg bg-violet-500/10 text-violet-400 flex-shrink-0 group-hover:bg-violet-500/20 transition-colors">
+                        <div className="p-3 rounded-lg bg-sky-500/10 text-sky-400 flex-shrink-0 group-hover:bg-sky-500/20 transition-colors">
                           {getTypeIcon(report.type)}
                         </div>
                         <div className="min-w-0 flex-1">

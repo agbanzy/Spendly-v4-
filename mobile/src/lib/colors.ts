@@ -20,10 +20,10 @@ export const darkColors = {
   iconMuted: '#334155',
 
   // Primary / Accent
-  primary: '#4F46E5',
+  primary: '#0EA5E9',
   primaryForeground: '#FFFFFF',
-  accent: '#818CF8',
-  accentBackground: '#312E81',
+  accent: '#38BDF8',
+  accentBackground: '#0C4A6E',
 
   // Inputs
   inputBackground: '#1E293B',
@@ -34,7 +34,7 @@ export const darkColors = {
   // Navigation
   tabBarBackground: '#1E293B',
   tabBarBorder: '#334155',
-  tabBarActive: '#818CF8',
+  tabBarActive: '#38BDF8',
   tabBarInactive: '#64748B',
   headerBackground: '#0F172A',
   headerText: '#FFFFFF',
@@ -65,13 +65,13 @@ export const darkColors = {
   // Chart / transaction colors
   colorGreen: '#34D399',
   colorRed: '#F87171',
-  colorPurple: '#818CF8',
+  colorPurple: '#38BDF8',
   colorAmber: '#FBBF24',
 
   // Severity
   severityCriticalBg: '#7F1D1D',
   severityHighBg: '#78350F',
-  severityMediumBg: '#1E1B4B',
+  severityMediumBg: '#0C4A6E',
 
   // KYC banners
   kycPendingBg: '#92400E',
@@ -79,8 +79,8 @@ export const darkColors = {
   kycDefaultBg: '#1E3A5F',
 
   // Card gradients
-  cardPrimary: '#4F46E5',
-  cardSecondary: '#7C3AED',
+  cardPrimary: '#0EA5E9',
+  cardSecondary: '#0891B2',
   cardOverlay: 'rgba(0, 0, 0, 0.2)',
   cardTextMuted: 'rgba(255, 255, 255, 0.6)',
   cardTextSoft: 'rgba(255, 255, 255, 0.8)',
@@ -119,10 +119,10 @@ export const lightColors: ColorTokens = {
   iconMuted: '#CBD5E1',
 
   // Primary / Accent
-  primary: '#4F46E5',
+  primary: '#0284C7',
   primaryForeground: '#FFFFFF',
-  accent: '#6366F1',
-  accentBackground: '#EEF2FF',
+  accent: '#0EA5E9',
+  accentBackground: '#F0F9FF',
 
   // Inputs
   inputBackground: '#FFFFFF',
@@ -133,7 +133,7 @@ export const lightColors: ColorTokens = {
   // Navigation
   tabBarBackground: '#FFFFFF',
   tabBarBorder: '#E2E8F0',
-  tabBarActive: '#6366F1',
+  tabBarActive: '#0EA5E9',
   tabBarInactive: '#94A3B8',
   headerBackground: '#FFFFFF',
   headerText: '#0F172A',
@@ -164,13 +164,13 @@ export const lightColors: ColorTokens = {
   // Chart / transaction colors
   colorGreen: '#10B981',
   colorRed: '#EF4444',
-  colorPurple: '#6366F1',
+  colorPurple: '#0EA5E9',
   colorAmber: '#F59E0B',
 
   // Severity
   severityCriticalBg: '#FEF2F2',
   severityHighBg: '#FFFBEB',
-  severityMediumBg: '#EEF2FF',
+  severityMediumBg: '#F0F9FF',
 
   // KYC banners
   kycPendingBg: '#FEF3C7',
@@ -178,8 +178,8 @@ export const lightColors: ColorTokens = {
   kycDefaultBg: '#DBEAFE',
 
   // Card gradients
-  cardPrimary: '#4F46E5',
-  cardSecondary: '#7C3AED',
+  cardPrimary: '#0284C7',
+  cardSecondary: '#0891B2',
   cardOverlay: 'rgba(0, 0, 0, 0.1)',
   cardTextMuted: 'rgba(255, 255, 255, 0.6)',
   cardTextSoft: 'rgba(255, 255, 255, 0.8)',

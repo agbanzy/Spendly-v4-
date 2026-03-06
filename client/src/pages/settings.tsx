@@ -214,6 +214,14 @@ export default function Settings() {
   });
 
   const handleSaveCompany = () => {
+    if (formData.companyEmail && !formData.companyEmail.includes("@")) {
+      toast({
+        title: "Invalid email format",
+        description: "Company email must contain @.",
+        variant: "destructive",
+      });
+      return;
+    }
     updateSettingsMutation.mutate({
       companyName: formData.companyName,
       companyAddress: formData.companyAddress,
@@ -263,7 +271,7 @@ export default function Settings() {
     return (
       <PageWrapper>
         <div className="flex items-center justify-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin text-violet-500" />
+          <Loader2 className="h-8 w-8 animate-spin text-sky-500" />
         </div>
       </PageWrapper>
     );
@@ -285,8 +293,8 @@ export default function Settings() {
         <GlassCard>
           <div className="space-y-6">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/20 to-violet-500/10 flex items-center justify-center">
-                <Building className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500/20 to-sky-500/10 flex items-center justify-center">
+                <Building className="h-5 w-5 text-sky-600 dark:text-sky-400" />
               </div>
               <div>
                 <SectionLabel>Company Information</SectionLabel>
@@ -370,7 +378,7 @@ export default function Settings() {
               <Button
                 onClick={handleSaveCompany}
                 disabled={updateSettingsMutation.isPending}
-                className="bg-violet-600 hover:bg-violet-700 text-white"
+                className="bg-sky-600 hover:bg-sky-700 text-white"
                 data-testid="button-save-company"
               >
                 {updateSettingsMutation.isPending ? (
@@ -636,7 +644,7 @@ export default function Settings() {
                         <input
                           type="color"
                           id="primaryColor"
-                          value={formData.primaryColor || "#4f46e5"}
+                          value={formData.primaryColor || "#0284c7"}
                           onChange={(e) =>
                             setFormData({
                               ...formData,
@@ -648,7 +656,7 @@ export default function Settings() {
                         />
                       </div>
                       <Input
-                        value={formData.primaryColor || "#4f46e5"}
+                        value={formData.primaryColor || "#0284c7"}
                         onChange={(e) =>
                           setFormData({
                             ...formData,
@@ -656,7 +664,7 @@ export default function Settings() {
                           })
                         }
                         className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11 font-mono text-xs flex-1"
-                        placeholder="#4f46e5"
+                        placeholder="#0284c7"
                       />
                     </div>
                   </div>
@@ -699,7 +707,7 @@ export default function Settings() {
                 <div className="p-4 rounded-xl bg-slate-500/10 border border-slate-500/20 flex items-center gap-3">
                   <div
                     className="w-10 h-10 rounded-lg ring-2 ring-slate-500/30"
-                    style={{ backgroundColor: formData.primaryColor || "#4f46e5" }}
+                    style={{ backgroundColor: formData.primaryColor || "#0284c7" }}
                   />
                   <div
                     className="w-10 h-10 rounded-lg ring-2 ring-slate-500/30"
@@ -848,7 +856,7 @@ export default function Settings() {
               </Label>
               <textarea
                 id="invoiceFooter"
-                className="w-full min-h-[80px] rounded-xl bg-slate-500/30 border border-slate-500/50 px-3 py-2 text-sm text-foreground placeholder:text-slate-600 dark:placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950"
+                className="w-full min-h-[80px] rounded-xl bg-slate-500/30 border border-slate-500/50 px-3 py-2 text-sm text-foreground placeholder:text-slate-600 dark:placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950"
                 placeholder="Thank you for your business!"
                 value={formData.invoiceFooter || ""}
                 onChange={(e) =>
@@ -940,7 +948,7 @@ export default function Settings() {
 
       {/* Region & Payment Settings */}
       <motion.div variants={fadeUp} initial="hidden" animate="visible">
-        <GlassCard className="border-2 border-violet-500/30">
+        <GlassCard className="border-2 border-sky-500/30">
           <div className="space-y-6">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-cyan-500/10 flex items-center justify-center">
@@ -952,7 +960,7 @@ export default function Settings() {
                   Your country determines payment provider.
                 </p>
               </div>
-              <Badge className="bg-violet-600 text-white">Important</Badge>
+              <Badge className="bg-sky-600 text-white">Important</Badge>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1026,14 +1034,14 @@ export default function Settings() {
                     className={`w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-br ${
                       isPaystack
                         ? "from-cyan-500/20 to-cyan-500/10"
-                        : "from-violet-500/20 to-violet-500/10"
+                        : "from-sky-500/20 to-sky-500/10"
                     }`}
                   >
                     <Landmark
                       className={`h-6 w-6 ${
                         isPaystack
                           ? "text-cyan-600 dark:text-cyan-400"
-                          : "text-violet-600 dark:text-violet-400"
+                          : "text-sky-600 dark:text-sky-400"
                       }`}
                     />
                   </div>
@@ -1052,7 +1060,7 @@ export default function Settings() {
                   className={`${
                     isPaystack
                       ? "bg-cyan-600"
-                      : "bg-violet-600"
+                      : "bg-sky-600"
                   } text-white`}
                 >
                   Active

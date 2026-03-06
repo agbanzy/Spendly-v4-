@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient, getAuthHeaders } from "@/lib/queryClient";
+import { apiRequest, queryClient, getAuthHeaders, sanitizeErrorMessage } from "@/lib/queryClient";
 import { getCurrencySymbol, formatCurrencyAmount, PAYMENT_LIMITS } from "@/lib/constants";
 import {
   Dialog,
@@ -246,7 +246,7 @@ export default function Dashboard() {
       }
     },
     onError: (error: any) => {
-      toast({ title: "Failed to fund wallet", description: error.message, variant: "destructive" });
+      toast({ title: "Failed to fund wallet", description: sanitizeErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -286,7 +286,7 @@ export default function Dashboard() {
       setWithdrawalValidation(null);
     },
     onError: (error: any) => {
-      toast({ title: "Failed to withdraw", description: error.message, variant: "destructive" });
+      toast({ title: "Failed to withdraw", description: sanitizeErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -322,7 +322,7 @@ export default function Dashboard() {
       setAccountValidation(null);
     },
     onError: (error: any) => {
-      toast({ title: "Failed to send money", description: error.message, variant: "destructive" });
+      toast({ title: "Failed to send money", description: sanitizeErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -346,12 +346,14 @@ export default function Dashboard() {
       const firstName = nameParts[0] || "User";
       const lastName = nameParts.slice(1).join(' ') || "";
       
-      const res = await apiRequest("POST", "/api/virtual-accounts/create", {
-        userId: user.id,
+      const res = await apiRequest("POST", "/api/virtual-accounts", {
+        name: displayName,
         email: user.email || userProfile.email || "",
         firstName,
         lastName,
         countryCode: userProfile.country || countryCode,
+        currency: settings?.currency || "USD",
+        type: "collection",
         phone,
       });
       
@@ -361,15 +363,15 @@ export default function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/virtual-accounts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/user-profile", user?.id] });
       
-      if (data.status === 'pending' || data.accountNumber?.startsWith('PENDING')) {
-        toast({ 
-          title: "Account Setup In Progress", 
-          description: data.message || "Your dedicated bank account is being activated. Complete BVN verification to receive your NUBAN.",
+      if (data.status === 'pending') {
+        toast({
+          title: "Account Setup In Progress",
+          description: "Your dedicated bank account is being activated. Bank details will be available shortly.",
         });
       } else {
-        toast({ 
-          title: "Virtual Account Created!", 
-          description: `Your account number: ${data.accountNumber} at ${data.bankName}` 
+        toast({
+          title: "Virtual Account Created!",
+          description: `Your account number: ${data.accountNumber} at ${data.bankName}`
         });
       }
       setIsGeneratingVirtualAccount(false);
@@ -382,10 +384,10 @@ export default function Dashboard() {
         setIsGeneratingVirtualAccount(false);
         return;
       }
-      toast({ 
-        title: "Failed to create virtual account", 
-        description: error.message || "Please try again later",
-        variant: "destructive" 
+      toast({
+        title: "Failed to create virtual account",
+        description: sanitizeErrorMessage(error) || "Please try again later",
+        variant: "destructive"
       });
       setIsGeneratingVirtualAccount(false);
     },
@@ -713,7 +715,7 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="p-3 bg-muted/50 rounded-xl">
                 <p className="text-xs text-muted-foreground mb-1">Bank Name</p>
-                <p className="text-sm font-bold">{primaryVirtualAccount!.bankName || 'Wema Bank'}</p>
+                <p className="text-sm font-bold">{primaryVirtualAccount!.bankName || 'Virtual Bank'}</p>
               </div>
               <div className="p-3 bg-muted/50 rounded-xl">
                 <p className="text-xs text-muted-foreground mb-1">Account Number</p>
@@ -726,7 +728,7 @@ export default function Dashboard() {
               </div>
               <div className="p-3 bg-muted/50 rounded-xl">
                 <p className="text-xs text-muted-foreground mb-1">Currency</p>
-                <p className="text-sm font-bold">{primaryVirtualAccount!.currency || 'NGN'}</p>
+                <p className="text-sm font-bold">{primaryVirtualAccount!.currency || settings?.currency || 'USD'}</p>
               </div>
             </div>
             <p className="text-xs text-muted-foreground mt-3">Transfer funds to this account to add money to your wallet instantly.</p>
@@ -862,11 +864,11 @@ export default function Dashboard() {
                 <div key={tx.id} className="flex items-center justify-between p-4 hover:bg-muted/50 transition-colors" data-testid={`transaction-item-${tx.id}`}>
                   <div className="flex items-center gap-4">
                     <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                      tx.type === 'Deposit' || tx.type === 'Funding'
+                      tx.type?.toLowerCase() === 'deposit' || tx.type?.toLowerCase() === 'funding'
                         ? 'bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 text-emerald-600 dark:text-emerald-400'
                         : 'bg-gradient-to-br from-slate-500/20 to-slate-500/5 text-slate-600 dark:text-slate-400'
                     }`}>
-                      {tx.type === 'Deposit' || tx.type === 'Funding' ? <ArrowDownRight className="h-5 w-5" /> : <ArrowUpRight className="h-5 w-5" />}
+                      {tx.type?.toLowerCase() === 'deposit' || tx.type?.toLowerCase() === 'funding' ? <ArrowDownRight className="h-5 w-5" /> : <ArrowUpRight className="h-5 w-5" />}
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-bold truncate">{tx.description}</p>
@@ -874,12 +876,12 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className={`text-sm font-bold ${tx.type === 'Deposit' || tx.type === 'Funding' ? 'text-emerald-600 dark:text-emerald-400' : ''}`}>
-                      {tx.type === 'Deposit' || tx.type === 'Funding' ? '+' : '-'}{currencySymbol}{Number(tx.amount).toLocaleString()}
+                    <p className={`text-sm font-bold ${tx.type?.toLowerCase() === 'deposit' || tx.type?.toLowerCase() === 'funding' ? 'text-emerald-600 dark:text-emerald-400' : ''}`}>
+                      {tx.type?.toLowerCase() === 'deposit' || tx.type?.toLowerCase() === 'funding' ? '+' : '-'}{currencySymbol}{Number(tx.amount).toLocaleString()}
                     </p>
                     <Badge variant="secondary" className={`text-xs ${
-                      tx.status === 'Completed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                        : tx.status === 'Processing' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' : ''
+                      tx.status?.toLowerCase() === 'completed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                        : tx.status?.toLowerCase() === 'processing' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' : ''
                     }`}>{tx.status}</Badge>
                   </div>
                 </div>
@@ -978,7 +980,7 @@ export default function Dashboard() {
                       <>
                         <div className="flex justify-between items-center">
                           <span className="text-sm text-muted-foreground">Bank Name</span>
-                          <span className="text-sm font-bold">{primaryVirtualAccount.bankName || 'Wema Bank'}</span>
+                          <span className="text-sm font-bold">{primaryVirtualAccount.bankName || 'Virtual Bank'}</span>
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-sm text-muted-foreground">Account Number</span>

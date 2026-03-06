@@ -1,5 +1,6 @@
 import * as crypto from 'crypto';
 import { storage } from './storage';
+import { notificationService } from './services/notification-service';
 
 // TypeScript interfaces
 interface PaystackEvent {
@@ -113,6 +114,14 @@ export class PaystackWebhookHandler {
           await this.handleDedicatedAccountAssignFailed(event, timestamp);
           break;
 
+        case 'refund.processed':
+          await this.handleRefundProcessed(event, timestamp);
+          break;
+
+        case 'refund.failed':
+          await this.handleRefundFailed(event, timestamp);
+          break;
+
         case 'subscription.create':
         case 'subscription.disable':
           // Log-only events
@@ -205,7 +214,7 @@ export class PaystackWebhookHandler {
       }
 
       // Mark webhook as processed
-      await storage.markWebhookProcessed(reference, 'paystack');
+      await storage.markWebhookProcessed(reference, 'paystack', 'charge.success');
 
       // Log successful processing
       this.logEvent('charge.success', event, 'Completed', timestamp);
@@ -264,8 +273,19 @@ export class PaystackWebhookHandler {
         status: 'Completed',
       });
 
+      // Notify the initiator that payout completed
+      const initiatorId = (payout as any).initiatedBy || payout.recipientId;
+      if (initiatorId) {
+        notificationService.notifyPayoutCompleted(initiatorId, {
+          amount: amount / 100,
+          currency: currency || payout.currency,
+          recipientName: payout.recipientName || 'Recipient',
+          reference: transfer_code,
+        }).catch(console.error);
+      }
+
       // Mark webhook as processed
-      await storage.markWebhookProcessed(transfer_code, 'paystack');
+      await storage.markWebhookProcessed(transfer_code, 'paystack', 'transfer.success');
 
       // Log successful processing
       this.logEvent('transfer.success', event, 'Completed', timestamp);
@@ -324,6 +344,17 @@ export class PaystackWebhookHandler {
         status: 'Failed',
       });
 
+      // Notify the initiator that payout failed
+      const failedInitiatorId = (payout as any).initiatedBy || payout.recipientId;
+      if (failedInitiatorId) {
+        notificationService.notifyPayoutFailed(failedInitiatorId, {
+          amount: amount / 100,
+          currency: currency || payout.currency,
+          recipientName: payout.recipientName || 'Recipient',
+          reason: event.data.reason || event.data.message,
+        }).catch(console.error);
+      }
+
       // Reverse wallet debit - credit back the INITIATOR who was debited
       const initiatorId = (payout as any).initiatedBy || payout.recipientId;
       if (initiatorId) {
@@ -350,7 +381,7 @@ export class PaystackWebhookHandler {
       }
 
       // Mark webhook as processed
-      await storage.markWebhookProcessed(transfer_code, 'paystack');
+      await storage.markWebhookProcessed(transfer_code, 'paystack', 'transfer.failed');
 
       // Log processing
       this.logEvent('transfer.failed', event, 'Failed', timestamp);
@@ -409,11 +440,12 @@ export class PaystackWebhookHandler {
         status: 'Reversed',
       });
 
-      // Credit back wallet
-      if (payout.recipientType === 'user' && payout.recipientId) {
+      // Credit back wallet to the INITIATOR (sender) who was debited, not the recipient
+      const initiatorId = (payout as any).initiatedBy || payout.recipientId;
+      if (initiatorId) {
         const wallet = await storage.getWalletByUserId(
-          payout.recipientId,
-          currency || 'USD'
+          initiatorId,
+          payout.currency || currency || 'USD'
         );
 
         if (wallet) {
@@ -434,7 +466,7 @@ export class PaystackWebhookHandler {
       }
 
       // Mark webhook as processed
-      await storage.markWebhookProcessed(transfer_code, 'paystack');
+      await storage.markWebhookProcessed(transfer_code, 'paystack', 'transfer.reversed');
 
       // Log processing
       this.logEvent('transfer.reversed', event, 'Reversed', timestamp);
@@ -628,6 +660,91 @@ export class PaystackWebhookHandler {
       });
       throw error;
     }
+  }
+
+  /**
+   * Handle refund.processed event
+   * Updates transaction record and credits user wallet
+   */
+  private static async handleRefundProcessed(
+    event: PaystackEvent,
+    timestamp: string
+  ): Promise<void> {
+    const { reference, amount, currency, metadata } = event.data;
+    const refundRef = reference || event.data.id?.toString();
+
+    if (!refundRef) {
+      throw new Error('refund.processed: Missing reference in event data');
+    }
+
+    try {
+      const isProcessed = await storage.isWebhookProcessed(`refund_${refundRef}`);
+      if (isProcessed) return;
+
+      // Create a refund transaction record
+      await storage.createTransaction({
+        type: 'Refund',
+        amount: String(amount / 100), // Convert from kobo
+        fee: '0',
+        status: 'Completed',
+        date: new Date().toISOString().split('T')[0],
+        description: `Paystack refund processed - ${refundRef}`,
+        currency: currency || 'NGN',
+        userId: null,
+        reference: refundRef,
+      });
+
+      // If original transaction metadata has userId, credit their wallet
+      const userId = metadata?.userId || metadata?.user_id;
+      if (userId) {
+        const wallet = await storage.getWalletByUserId(userId, currency || 'NGN');
+        if (wallet) {
+          await storage.creditWallet(
+            wallet.id,
+            amount / 100,
+            'refund',
+            `Refund processed - ${refundRef}`,
+            `refund_${refundRef}`,
+            { originalReference: metadata?.originalReference, refundRef }
+          );
+        }
+      }
+
+      await storage.markWebhookProcessed(`refund_${refundRef}`, 'paystack', 'refund.processed');
+      this.logEvent('refund.processed', event, 'Completed', timestamp);
+    } catch (error) {
+      console.error('PAYSTACK WEBHOOK ERROR: Failed to process refund.processed', {
+        refundRef,
+        error: error instanceof Error ? error.message : String(error),
+        timestamp,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Handle refund.failed event
+   * Logs the failure for manual investigation
+   */
+  private static async handleRefundFailed(
+    event: PaystackEvent,
+    timestamp: string
+  ): Promise<void> {
+    const { reference, amount, metadata } = event.data;
+    const refundRef = reference || event.data.id?.toString();
+
+    console.error('PAYSTACK WEBHOOK ALERT: Refund failed', {
+      refundRef,
+      amount: amount / 100,
+      metadata,
+      timestamp,
+    });
+
+    if (refundRef) {
+      await storage.markWebhookProcessed(`refund_failed_${refundRef}`, 'paystack', 'refund.failed');
+    }
+
+    this.logEvent('refund.failed', event, 'Failed', timestamp);
   }
 
   /**

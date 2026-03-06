@@ -183,7 +183,7 @@ export default function AdminUsers() {
             </Button>
           </Link>
           <div>
-            <h1 className="text-3xl font-black tracking-tight flex items-center gap-3" data-testid="text-admin-users-title">
+            <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3" data-testid="text-admin-users-title">
               <UserCog className="h-8 w-8 text-primary" />
               User Management
             </h1>
@@ -202,28 +202,28 @@ export default function AdminUsers() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="glass card-hover">
+        <Card className="glass card-premium">
           <CardContent className="p-4">
-            <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-1">Total Users</p>
-            <p className="text-2xl font-black">{users?.length || 0}</p>
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-[0.06em] mb-1">Total Users</p>
+            <p className="text-2xl font-bold font-mono">{users?.length || 0}</p>
           </CardContent>
         </Card>
-        <Card className="glass card-hover">
+        <Card className="glass card-premium">
           <CardContent className="p-4">
-            <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">Active</p>
-            <p className="text-2xl font-black text-emerald-600">{users?.filter(u => u.status === 'Active').length || 0}</p>
+            <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-[0.06em] mb-1">Active</p>
+            <p className="text-2xl font-bold font-mono text-emerald-600">{users?.filter(u => u.status === 'active').length || 0}</p>
           </CardContent>
         </Card>
-        <Card className="glass card-hover">
+        <Card className="glass card-premium">
           <CardContent className="p-4">
-            <p className="text-xs font-bold text-red-600 dark:text-red-400 uppercase tracking-widest mb-1">Admins</p>
-            <p className="text-2xl font-black text-red-600">{users?.filter(u => u.role === 'Admin' || u.role === 'Owner').length || 0}</p>
+            <p className="text-xs font-bold text-red-600 dark:text-red-400 uppercase tracking-[0.06em] mb-1">Admins</p>
+            <p className="text-2xl font-bold font-mono text-red-600">{users?.filter(u => u.role === 'Admin' || u.role === 'Owner').length || 0}</p>
           </CardContent>
         </Card>
-        <Card className="glass card-hover">
+        <Card className="glass card-premium">
           <CardContent className="p-4">
-            <p className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-1">Inactive</p>
-            <p className="text-2xl font-black text-slate-600">{users?.filter(u => u.status === 'Inactive').length || 0}</p>
+            <p className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-[0.06em] mb-1">Inactive</p>
+            <p className="text-2xl font-bold font-mono text-slate-600">{users?.filter(u => u.status === 'inactive').length || 0}</p>
           </CardContent>
         </Card>
       </div>
@@ -271,7 +271,7 @@ export default function AdminUsers() {
       {/* Users List */}
       <Card>
         <CardHeader className="border-b">
-          <CardTitle className="text-sm font-bold uppercase tracking-widest">
+          <CardTitle className="text-sm font-bold uppercase tracking-[0.06em]">
             All Users ({filteredUsers.length})
           </CardTitle>
         </CardHeader>
@@ -313,8 +313,8 @@ export default function AdminUsers() {
                       <Shield className="h-3 w-3 mr-1" />
                       {user.role}
                     </Badge>
-                    <Badge variant={user.status === 'Active' ? 'default' : 'secondary'}>
-                      {user.status === 'Active' ? (
+                    <Badge variant={user.status === 'active' ? 'default' : 'secondary'}>
+                      {user.status === 'active' ? (
                         <ShieldCheck className="h-3 w-3 mr-1" />
                       ) : (
                         <ShieldX className="h-3 w-3 mr-1" />
@@ -340,10 +340,10 @@ export default function AdminUsers() {
                         <DropdownMenuItem
                           onClick={() => toggleUserStatus.mutate({
                             id: user.id,
-                            status: user.status === 'Active' ? 'Inactive' : 'Active',
+                            status: user.status === 'active' ? 'inactive' : 'active',
                           })}
                         >
-                          {user.status === 'Active' ? (
+                          {user.status === 'active' ? (
                             <>
                               <Lock className="h-4 w-4 mr-2" />
                               Deactivate

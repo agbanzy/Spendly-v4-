@@ -19,6 +19,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useTheme } from '../lib/theme-context';
 import { ColorTokens } from '../lib/colors';
+import { shadows, monoFont } from '../lib/shadows';
 
 interface VirtualCard {
   id: number;
@@ -702,9 +703,10 @@ function createStyles(colors: ColorTokens) {
     },
     card: {
       width: CARD_WIDTH,
-      borderRadius: 20,
-      padding: 24,
+      borderRadius: 24,
+      padding: 28,
       marginBottom: 20,
+      ...shadows.hero,
     },
     cardPrimary: {
       backgroundColor: colors.cardPrimary,
@@ -746,7 +748,7 @@ function createStyles(colors: ColorTokens) {
     cardTypeText: {
       color: colors.primaryForeground,
       fontSize: 16,
-      fontWeight: '600',
+      fontWeight: '700',
       textTransform: 'capitalize',
     },
     statusBadge: {
@@ -768,10 +770,11 @@ function createStyles(colors: ColorTokens) {
       fontWeight: '500',
     },
     cardNumber: {
-      fontSize: 22,
+      fontSize: 24,
       fontWeight: '600',
       color: colors.primaryForeground,
-      letterSpacing: 2,
+      letterSpacing: 3,
+      fontFamily: monoFont,
       marginBottom: 24,
     },
     cardDetails: {
@@ -800,9 +803,10 @@ function createStyles(colors: ColorTokens) {
       color: colors.cardTextMuted,
     },
     balanceAmount: {
-      fontSize: 24,
+      fontSize: 28,
       fontWeight: 'bold',
       color: colors.primaryForeground,
+      fontFamily: monoFont,
       marginTop: 4,
     },
     cardActions: {
@@ -845,7 +849,7 @@ function createStyles(colors: ColorTokens) {
     createButtonText: {
       color: colors.primaryForeground,
       fontSize: 16,
-      fontWeight: '600',
+      fontWeight: '700',
     },
 
     // Modal styles
@@ -859,6 +863,7 @@ function createStyles(colors: ColorTokens) {
       borderTopLeftRadius: 24,
       borderTopRightRadius: 24,
       maxHeight: '85%',
+      ...shadows.dramatic,
     },
     modalHeader: {
       flexDirection: 'row',
@@ -884,12 +889,11 @@ function createStyles(colors: ColorTokens) {
     },
     input: {
       backgroundColor: colors.background,
-      borderRadius: 10,
-      padding: 14,
+      borderRadius: 14,
+      padding: 16,
       fontSize: 15,
       color: colors.inputText,
-      borderWidth: 1,
-      borderColor: colors.inputBorder,
+      ...shadows.subtle,
     },
     modalFooter: {
       flexDirection: 'row',
@@ -908,7 +912,7 @@ function createStyles(colors: ColorTokens) {
     cancelButtonText: {
       color: colors.textSecondary,
       fontSize: 15,
-      fontWeight: '600',
+      fontWeight: '700',
     },
     saveButton: {
       flex: 1,
@@ -923,7 +927,7 @@ function createStyles(colors: ColorTokens) {
     saveButtonText: {
       color: colors.primaryForeground,
       fontSize: 15,
-      fontWeight: '600',
+      fontWeight: '700',
     },
 
     // Fund card info
@@ -934,8 +938,7 @@ function createStyles(colors: ColorTokens) {
       borderRadius: 12,
       padding: 16,
       gap: 12,
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...shadows.card,
     },
     fundCardDetails: {
       flex: 1,
@@ -943,7 +946,7 @@ function createStyles(colors: ColorTokens) {
     fundCardName: {
       color: colors.textPrimary,
       fontSize: 14,
-      fontWeight: '600',
+      fontWeight: '700',
     },
     fundCardNumber: {
       color: colors.textTertiary,
@@ -954,6 +957,7 @@ function createStyles(colors: ColorTokens) {
       color: colors.accent,
       fontSize: 14,
       fontWeight: '700',
+      fontFamily: monoFont,
     },
     walletBalanceRow: {
       flexDirection: 'row',
@@ -973,6 +977,7 @@ function createStyles(colors: ColorTokens) {
       fontSize: 13,
       fontWeight: '700',
       color: colors.accent,
+      fontFamily: monoFont,
       marginLeft: 'auto',
     },
     quickAmountsRow: {
@@ -985,18 +990,17 @@ function createStyles(colors: ColorTokens) {
       paddingHorizontal: 14,
       paddingVertical: 8,
       borderRadius: 8,
-      borderWidth: 1,
-      borderColor: colors.border,
       backgroundColor: colors.background,
+      ...shadows.subtle,
     },
     quickAmountChipActive: {
       backgroundColor: colors.accent,
-      borderColor: colors.accent,
     },
     quickAmountText: {
       fontSize: 13,
-      fontWeight: '600',
+      fontWeight: '700',
       color: colors.textSecondary,
+      fontFamily: monoFont,
     },
     quickAmountTextActive: {
       color: colors.primaryForeground,
@@ -1065,7 +1069,7 @@ function createStyles(colors: ColorTokens) {
     detailActionText: {
       color: colors.primaryForeground,
       fontSize: 14,
-      fontWeight: '600',
+      fontWeight: '700',
     },
 
     // Card type chips
@@ -1076,14 +1080,12 @@ function createStyles(colors: ColorTokens) {
       justifyContent: 'center',
       gap: 8,
       paddingVertical: 12,
-      borderRadius: 10,
+      borderRadius: 14,
       backgroundColor: colors.background,
-      borderWidth: 1,
-      borderColor: colors.inputBorder,
+      ...shadows.subtle,
     },
     cardTypeChipActive: {
       backgroundColor: colors.primary,
-      borderColor: colors.primary,
     },
     cardTypeText_chip: {
       fontSize: 14,

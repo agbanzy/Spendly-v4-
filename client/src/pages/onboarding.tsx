@@ -192,7 +192,7 @@ export default function Onboarding() {
         const res = await fetch(`/api/user-profile/${user.id}`, { headers: authHeaders, credentials: "include" });
         if (res.status === 404) {
           const createRes = await apiRequest("POST", "/api/user-profile", {
-            firebaseUid: user.id,
+            cognitoSub: user.id,
             email: user.email,
             displayName: user.name,
             photoUrl: user.photoURL,
@@ -211,7 +211,7 @@ export default function Onboarding() {
     mutationFn: async (data: FormData) => {
       // Ensure all string fields are actually strings (not booleans)
       const sanitizedData = {
-        firebaseUid: user?.id,
+        cognitoSub: user?.id,
         email: user?.email || '',
         firstName: String(data.firstName || ''),
         lastName: String(data.lastName || ''),
@@ -245,7 +245,9 @@ export default function Onboarding() {
         bvnVerified: bvnVerified,
         stripeVerified: stripeVerificationStatus === 'verified',
       };
-      console.log('Submitting KYC data:', JSON.stringify(sanitizedData, null, 2));
+      if (import.meta.env.DEV) {
+        console.log('Submitting KYC data:', JSON.stringify(sanitizedData, null, 2));
+      }
       const res = await apiRequest("POST", "/api/kyc", sanitizedData);
       return res.json();
     },
@@ -312,7 +314,7 @@ export default function Onboarding() {
             setBanks(data.banks);
           }
         })
-        .catch(console.error);
+        .catch((err: unknown) => { if (import.meta.env.DEV) console.error(err); });
     }
   }, [formData.country]);
 
@@ -391,7 +393,9 @@ export default function Onboarding() {
         });
       }
     } catch (error) {
-      console.error('Failed to check verification status:', error);
+      if (import.meta.env.DEV) {
+        console.error('Failed to check verification status:', error);
+      }
     }
   };
 
@@ -566,7 +570,7 @@ export default function Onboarding() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
           <p className="text-muted-foreground">Loading your profile...</p>
         </div>
       </div>
@@ -581,13 +585,13 @@ export default function Onboarding() {
   const progress = (currentStep / 5) * 100;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-indigo-50 to-white dark:from-slate-900 dark:to-slate-800">
+    <div className="min-h-screen bg-gradient-to-b from-sky-50 to-white dark:from-slate-900 dark:to-slate-800">
       <div className="container max-w-4xl mx-auto px-4 py-8">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600 mb-4">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary mb-4">
             <Shield className="h-8 w-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight" data-testid="text-onboarding-title">
+          <h1 className="text-3xl font-bold font-display tracking-tight" data-testid="text-onboarding-title">
             Complete Your Profile
           </h1>
           <p className="text-muted-foreground mt-2">
@@ -600,13 +604,13 @@ export default function Onboarding() {
             {STEPS.map((step) => (
               <div
                 key={step.id}
-                className={`flex flex-col items-center flex-shrink-0 ${currentStep >= step.id ? 'text-indigo-600' : 'text-muted-foreground'}`}
+                className={`flex flex-col items-center flex-shrink-0 ${currentStep >= step.id ? 'text-primary' : 'text-muted-foreground'}`}
               >
                 <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center mb-2 ${
                   currentStep > step.id
-                    ? 'bg-indigo-600 text-white'
+                    ? 'bg-primary text-white'
                     : currentStep === step.id
-                    ? 'bg-indigo-100 dark:bg-indigo-900 text-indigo-600 border-2 border-indigo-600'
+                    ? 'bg-primary/10 dark:bg-primary/20 text-primary border-2 border-primary'
                     : 'bg-slate-100 dark:bg-slate-700'
                 }`}>
                   {currentStep > step.id ? (
@@ -622,7 +626,7 @@ export default function Onboarding() {
           <Progress value={progress} className="h-2" />
         </div>
 
-        <Card className="shadow-lg">
+        <Card className="shadow-2xl shadow-primary/8">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               {(() => {
@@ -638,34 +642,34 @@ export default function Onboarding() {
               <div className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Card 
-                    className={`cursor-pointer transition-all hover-elevate ${!formData.isBusinessAccount ? 'ring-2 ring-indigo-600' : ''}`}
+                    className={`cursor-pointer transition-all hover-elevate ${!formData.isBusinessAccount ? 'ring-2 ring-primary' : ''}`}
                     onClick={() => updateField('isBusinessAccount', false)}
                     data-testid="card-personal-account"
                   >
                     <CardContent className="p-6 text-center">
-                      <User className="h-12 w-12 mx-auto mb-4 text-indigo-600" />
+                      <User className="h-12 w-12 mx-auto mb-4 text-primary" />
                       <h3 className="font-semibold text-lg">Personal Account</h3>
                       <p className="text-sm text-muted-foreground mt-2">
                         For individuals managing personal expenses
                       </p>
                       {!formData.isBusinessAccount && (
-                        <Badge className="mt-4 bg-indigo-600">Selected</Badge>
+                        <Badge className="mt-4 bg-primary">Selected</Badge>
                       )}
                     </CardContent>
                   </Card>
                   <Card 
-                    className={`cursor-pointer transition-all hover-elevate ${formData.isBusinessAccount ? 'ring-2 ring-indigo-600' : ''}`}
+                    className={`cursor-pointer transition-all hover-elevate ${formData.isBusinessAccount ? 'ring-2 ring-primary' : ''}`}
                     onClick={() => updateField('isBusinessAccount', true)}
                     data-testid="card-business-account"
                   >
                     <CardContent className="p-6 text-center">
-                      <Building2 className="h-12 w-12 mx-auto mb-4 text-indigo-600" />
+                      <Building2 className="h-12 w-12 mx-auto mb-4 text-primary" />
                       <h3 className="font-semibold text-lg">Business Account</h3>
                       <p className="text-sm text-muted-foreground mt-2">
                         For companies and teams managing expenses
                       </p>
                       {formData.isBusinessAccount && (
-                        <Badge className="mt-4 bg-indigo-600">Selected</Badge>
+                        <Badge className="mt-4 bg-primary">Selected</Badge>
                       )}
                     </CardContent>
                   </Card>
@@ -900,7 +904,7 @@ export default function Onboarding() {
                 {/* Verification Method Selection */}
                 <div className="space-y-4">
                   <h4 className="font-medium flex items-center gap-2">
-                    <ShieldCheck className="h-5 w-5 text-indigo-600" />
+                    <ShieldCheck className="h-5 w-5 text-primary" />
                     Choose Verification Method
                   </h4>
                   
@@ -908,12 +912,12 @@ export default function Onboarding() {
                     {/* Stripe Identity - US/Europe */}
                     {STRIPE_COUNTRIES.includes(formData.country) && (
                       <Card 
-                        className={`cursor-pointer hover-elevate ${verificationMethod === 'stripe' ? 'border-indigo-500 ring-2 ring-indigo-200' : ''}`}
+                        className={`cursor-pointer hover-elevate ${verificationMethod === 'stripe' ? 'border-primary ring-2 ring-primary/20' : ''}`}
                         onClick={() => setVerificationMethod('stripe')}
                         data-testid="card-stripe-verification"
                       >
                         <CardContent className="p-4 text-center">
-                          <CreditCard className="h-8 w-8 mx-auto mb-2 text-indigo-600" />
+                          <CreditCard className="h-8 w-8 mx-auto mb-2 text-primary" />
                           <h5 className="font-medium">Stripe Identity</h5>
                           <p className="text-xs text-muted-foreground mt-1">
                             Secure ID & selfie verification
@@ -928,7 +932,7 @@ export default function Onboarding() {
                     {/* Paystack BVN - Africa */}
                     {PAYSTACK_COUNTRIES.includes(formData.country) && (
                       <Card 
-                        className={`cursor-pointer hover-elevate ${verificationMethod === 'paystack' ? 'border-indigo-500 ring-2 ring-indigo-200' : ''}`}
+                        className={`cursor-pointer hover-elevate ${verificationMethod === 'paystack' ? 'border-primary ring-2 ring-primary/20' : ''}`}
                         onClick={() => setVerificationMethod('paystack')}
                         data-testid="card-paystack-verification"
                       >
@@ -947,7 +951,7 @@ export default function Onboarding() {
 
                     {/* Manual Upload - All regions */}
                     <Card 
-                      className={`cursor-pointer hover-elevate ${verificationMethod === 'manual' ? 'border-indigo-500 ring-2 ring-indigo-200' : ''}`}
+                      className={`cursor-pointer hover-elevate ${verificationMethod === 'manual' ? 'border-primary ring-2 ring-primary/20' : ''}`}
                       onClick={() => setVerificationMethod('manual')}
                       data-testid="card-manual-verification"
                     >
@@ -1303,9 +1307,9 @@ export default function Onboarding() {
                   />
                   <label htmlFor="acceptTerms" className="text-sm leading-none cursor-pointer">
                     I confirm that all information provided is accurate and I agree to the{" "}
-                    <a href="/terms" target="_blank" className="text-indigo-600 hover:underline">Terms of Service</a>{" "}
+                    <a href="/terms" target="_blank" className="text-primary hover:underline">Terms of Service</a>{" "}
                     and{" "}
-                    <a href="/privacy" target="_blank" className="text-indigo-600 hover:underline">Privacy Policy</a>
+                    <a href="/privacy" target="_blank" className="text-primary hover:underline">Privacy Policy</a>
                   </label>
                 </div>
               </div>
@@ -1355,7 +1359,7 @@ export default function Onboarding() {
         </Card>
 
         <p className="text-center text-sm text-muted-foreground mt-6">
-          Need help? <a href="mailto:support@spendlymanager.com" className="text-indigo-600 hover:underline">Contact Support</a>
+          Need help? <a href="mailto:support@spendlymanager.com" className="text-primary hover:underline">Contact Support</a>
         </p>
       </div>
     </div>

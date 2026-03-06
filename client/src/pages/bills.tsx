@@ -5,7 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, sanitizeErrorMessage } from "@/lib/queryClient";
 import {
   Dialog,
   DialogContent,
@@ -27,6 +27,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Plus,
   Search,
@@ -201,6 +211,7 @@ const getValidationPattern = (countryCode: string, type: 'phone' | 'meter' | 'sm
 export default function Bills() {
   const { toast } = useToast();
   const [isOpen, setIsOpen] = useState(false);
+  const [confirmPayBill, setConfirmPayBill] = useState<string | null>(null);
   const [editingBill, setEditingBill] = useState<Bill | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("all");
@@ -241,7 +252,7 @@ export default function Bills() {
 
   // Get region-specific utility providers
   const utilityProviders = utilityProvidersByRegion[region];
-  const countryCode = currencyToCountry[currency] || 'US';
+  const countryCode = settings?.countryCode || currencyToCountry[currency] || 'US';
 
   const { data: bills, isLoading } = useQuery<Bill[]>({
     queryKey: ["/api/bills"],
@@ -251,7 +262,8 @@ export default function Bills() {
   const { data: wallets } = useQuery<Wallet[]>({
     queryKey: ["/api/wallets"],
   });
-  const userWallet = wallets?.[0];
+  // Select wallet matching company currency, fallback to first wallet
+  const userWallet = wallets?.find(w => w.currency?.toUpperCase() === currency.toUpperCase()) || wallets?.[0];
   const walletBalance = parseFloat(String(userWallet?.balance || 0));
 
   const createMutation = useMutation({
@@ -303,7 +315,7 @@ export default function Bills() {
       if (userWallet?.id) {
         return apiRequest("POST", `/api/bills/${id}/pay`, { walletId: userWallet.id });
       }
-      return apiRequest("PATCH", `/api/bills/${id}`, { status: "Paid" });
+      return apiRequest("PATCH", `/api/bills/${id}`, { status: "paid" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/bills"] });
@@ -313,7 +325,7 @@ export default function Bills() {
       toast({ title: "Bill paid successfully", description: "Payment has been deducted from your wallet." });
     },
     onError: (error: any) => {
-      toast({ title: "Failed to pay bill", description: error.message, variant: "destructive" });
+      toast({ title: "Failed to pay bill", description: sanitizeErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -343,18 +355,14 @@ export default function Bills() {
       resetUtilityForm();
     },
     onError: (error: any) => {
-      // Extract detailed error message from response
-      let errorMessage = "Please try again or contact support.";
-      if (error?.message) {
-        errorMessage = error.message;
-      }
+      const errorMessage = sanitizeErrorMessage(error);
       // Check for specific balance error
-      const isBalanceError = errorMessage.toLowerCase().includes('insufficient') || 
+      const isBalanceError = errorMessage.toLowerCase().includes('insufficient') ||
                             errorMessage.toLowerCase().includes('balance');
-      toast({ 
-        title: isBalanceError ? "Insufficient Balance" : "Payment failed", 
-        variant: "destructive", 
-        description: errorMessage 
+      toast({
+        title: isBalanceError ? "Insufficient Balance" : "Payment failed",
+        variant: "destructive",
+        description: errorMessage
       });
     },
   });
@@ -572,24 +580,24 @@ export default function Bills() {
   );
 
   const totalBills = bills?.reduce((sum, b) => sum + Number(b.amount), 0) || 0;
-  const paidBills = bills?.filter((b) => b.status === "Paid").reduce((sum, b) => sum + Number(b.amount), 0) || 0;
+  const paidBills = bills?.filter((b) => b.status.toLowerCase() === "paid").reduce((sum, b) => sum + Number(b.amount), 0) || 0;
   const unpaidBills = totalBills - paidBills;
-  const overdueBills = bills?.filter((b) => b.status === "Overdue").length || 0;
+  const overdueBills = bills?.filter((b) => b.status.toLowerCase() === "overdue").length || 0;
 
   const getStatusColor = (status: string) => {
-    switch (status) {
-      case "Paid": return "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400";
-      case "Unpaid": return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
-      case "Overdue": return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
+    switch (status.toLowerCase()) {
+      case "paid": return "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400";
+      case "unpaid": return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
+      case "overdue": return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
       default: return "";
     }
   };
 
   const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "Paid": return <CheckCircle className="h-4 w-4" />;
-      case "Unpaid": return <Clock className="h-4 w-4" />;
-      case "Overdue": return <AlertTriangle className="h-4 w-4" />;
+    switch (status.toLowerCase()) {
+      case "paid": return <CheckCircle className="h-4 w-4" />;
+      case "unpaid": return <Clock className="h-4 w-4" />;
+      case "overdue": return <AlertTriangle className="h-4 w-4" />;
       default: return null;
     }
   };
@@ -744,7 +752,7 @@ export default function Bills() {
                   >
                     <div
                       className={`flex items-center justify-between p-5 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors ${
-                        bill.status === "Overdue"
+                        bill.status.toLowerCase() === "overdue"
                           ? "bg-rose-50/30 dark:bg-rose-900/10"
                           : ""
                       }`}
@@ -784,10 +792,10 @@ export default function Bills() {
 
                         <StatusBadge status={bill.status} />
 
-                        {bill.status === "Unpaid" && (
+                        {bill.status.toLowerCase() === "unpaid" && (
                           <Button
                             size="sm"
-                            onClick={() => payBillMutation.mutate(bill.id)}
+                            onClick={() => setConfirmPayBill(bill.id)}
                             disabled={payBillMutation.isPending}
                             data-testid={`button-pay-${bill.id}`}
                             className="bg-gradient-to-r from-violet-600 to-violet-700 hover:from-violet-700 hover:to-violet-800 text-white shadow-lg hover:shadow-xl transition-all"
@@ -1339,6 +1347,23 @@ export default function Bills() {
         onOpenChange={setIsPinDialogOpen}
         onVerified={handlePinVerified}
       />
+
+      <AlertDialog open={!!confirmPayBill} onOpenChange={(open) => !open && setConfirmPayBill(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Payment</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to pay this bill? This action will deduct funds from your wallet.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { payBillMutation.mutate(confirmPayBill!); setConfirmPayBill(null); }}>
+              Confirm Payment
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageWrapper>
   );
 }

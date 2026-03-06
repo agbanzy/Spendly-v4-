@@ -306,6 +306,15 @@ export default function Expenses() {
   };
 
   const onSubmit = async (data: any) => {
+    const amount = parseFloat(data.amount);
+    if (isNaN(amount) || amount <= 0) {
+      toast({ title: "Invalid amount", description: "Amount must be greater than zero", variant: "destructive" });
+      return;
+    }
+    if (amount > 1_000_000_000) {
+      toast({ title: "Invalid amount", description: "Amount exceeds maximum limit", variant: "destructive" });
+      return;
+    }
     setIsUploading(true);
     try {
       const attachmentUrls: string[] = [];
@@ -325,6 +334,9 @@ export default function Expenses() {
         expenseType,
         attachments: attachmentUrls,
         taggedReviewers: selectedReviewers,
+        vendorId: selectedVendorId || undefined,
+        date: new Date().toISOString().split('T')[0],
+        currency: currency,
       });
       setAttachmentFiles([]);
     } finally {
@@ -432,9 +444,9 @@ export default function Expenses() {
 
   const getTypeColor = (type: string | undefined) => {
     if (type === 'spent') {
-      return "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400";
+      return "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400";
     }
-    return "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400";
+    return "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400";
   };
 
   const getMemberById = (id: string) => {
@@ -451,7 +463,7 @@ export default function Expenses() {
           actions={
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
-                <Button className="bg-gradient-to-r from-violet-600 to-violet-700 hover:from-violet-700 hover:to-violet-800" data-testid="button-add-expense">
+                <Button className="bg-gradient-to-r from-sky-600 to-sky-700 hover:from-sky-700 hover:to-sky-800" data-testid="button-add-expense">
                   <Plus className="h-4 w-4 mr-2" />
                   Add Expense
                 </Button>
@@ -492,13 +504,13 @@ export default function Expenses() {
                         onClick={() => setExpenseType('request')}
                         className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${
                           expenseType === 'request'
-                            ? 'border-violet-500 bg-gradient-to-br from-violet-50 to-violet-100 dark:from-violet-900/20 dark:to-violet-800/20'
-                            : 'border-slate-200 dark:border-slate-700 hover:border-violet-300 dark:hover:border-violet-600'
+                            ? 'border-sky-500 bg-gradient-to-br from-sky-50 to-sky-100 dark:from-sky-900/20 dark:to-sky-800/20'
+                            : 'border-slate-200 dark:border-slate-700 hover:border-sky-300 dark:hover:border-sky-600'
                         }`}
                         data-testid="button-type-request"
                       >
-                        <FileQuestion className={`h-5 w-5 ${expenseType === 'request' ? 'text-violet-600' : 'text-slate-400'}`} />
-                        <span className={`text-sm font-semibold ${expenseType === 'request' ? 'text-violet-700 dark:text-violet-400' : 'text-slate-700 dark:text-slate-300'}`}>
+                        <FileQuestion className={`h-5 w-5 ${expenseType === 'request' ? 'text-sky-600' : 'text-slate-400'}`} />
+                        <span className={`text-sm font-semibold ${expenseType === 'request' ? 'text-sky-700 dark:text-sky-400' : 'text-slate-700 dark:text-slate-300'}`}>
                           Fresh Request
                         </span>
                         <span className="text-xs text-slate-500 dark:text-slate-400 text-center">
@@ -523,6 +535,7 @@ export default function Expenses() {
                       id="amount"
                       type="number"
                       step="0.01"
+                      min="0.01"
                       placeholder="0.00"
                       {...register("amount", { required: true })}
                       className="bg-slate-50 dark:bg-slate-900/30 border-slate-200 dark:border-slate-700 rounded-xl h-11"
@@ -592,9 +605,9 @@ export default function Expenses() {
                           ))}
                         </div>
                       )}
-                      <label className="flex items-center justify-center gap-2 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl p-6 cursor-pointer hover:border-violet-400 dark:hover:border-violet-600 transition-colors group">
-                        <Upload className="h-5 w-5 text-slate-400 group-hover:text-violet-600 transition-colors" />
-                        <span className="text-sm font-medium text-slate-600 dark:text-slate-400 group-hover:text-violet-600 dark:group-hover:text-violet-400 transition-colors">
+                      <label className="flex items-center justify-center gap-2 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl p-6 cursor-pointer hover:border-sky-400 dark:hover:border-sky-600 transition-colors group">
+                        <Upload className="h-5 w-5 text-slate-400 group-hover:text-sky-600 transition-colors" />
+                        <span className="text-sm font-medium text-slate-600 dark:text-slate-400 group-hover:text-sky-600 dark:group-hover:text-sky-400 transition-colors">
                           Click or drag files
                         </span>
                         <Input
@@ -621,7 +634,7 @@ export default function Expenses() {
                     <GlassCard className="p-4 max-h-48 overflow-y-auto">
                       {teamMembers && teamMembers.length > 0 ? (
                         <div className="space-y-2">
-                          {teamMembers.filter(m => m.status === 'Active').map((member) => (
+                          {teamMembers.filter(m => m.status === 'active').map((member) => (
                             <motion.div
                               key={member.id}
                               whileHover={{ backgroundColor: "var(--color-hover)" }}
@@ -634,7 +647,7 @@ export default function Expenses() {
                                 onCheckedChange={() => toggleReviewer(member.id)}
                               />
                               <Avatar className="h-7 w-7">
-                                <AvatarFallback className="text-xs font-semibold bg-gradient-to-br from-violet-400 to-violet-600 text-white">
+                                <AvatarFallback className="text-xs font-semibold bg-gradient-to-br from-sky-400 to-sky-600 text-white">
                                   {member.name.split(' ').map(n => n[0]).join('').toUpperCase()}
                                 </AvatarFallback>
                               </Avatar>
@@ -658,7 +671,7 @@ export default function Expenses() {
 
                   <Button
                     type="submit"
-                    className="w-full bg-gradient-to-r from-violet-600 to-violet-700 hover:from-violet-700 hover:to-violet-800 h-11 rounded-xl font-semibold"
+                    className="w-full bg-gradient-to-r from-sky-600 to-sky-700 hover:from-sky-700 hover:to-sky-800 h-11 rounded-xl font-semibold"
                     disabled={createExpense.isPending || isUploading}
                     data-testid="button-submit-expense"
                   >
@@ -816,7 +829,7 @@ export default function Expenses() {
                       data-testid={`expense-row-${expense.id}`}
                     >
                       <div className="flex items-center gap-4 flex-1 min-w-0">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-400 to-violet-600 flex items-center justify-center font-bold text-white shrink-0 shadow-md">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-400 to-sky-600 flex items-center justify-center font-bold text-white shrink-0 shadow-md">
                           {expense.merchant[0]?.toUpperCase()}
                         </div>
                         <div className="min-w-0 flex-1">
@@ -904,7 +917,7 @@ export default function Expenses() {
                 title="No expenses yet"
                 subtitle="Start by adding your first expense to track company spending"
                 action={
-                  <Button onClick={() => setOpen(true)} className="bg-gradient-to-r from-violet-600 to-violet-700">
+                  <Button onClick={() => setOpen(true)} className="bg-gradient-to-r from-sky-600 to-sky-700">
                     <Plus className="h-4 w-4 mr-2" />
                     Add Expense
                   </Button>
@@ -923,7 +936,7 @@ export default function Expenses() {
             {selectedExpense && (
               <motion.div className="space-y-5" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                 <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-violet-400 to-violet-600 flex items-center justify-center font-bold text-white text-2xl shadow-lg">
+                  <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-sky-400 to-sky-600 flex items-center justify-center font-bold text-white text-2xl shadow-lg">
                     {selectedExpense.merchant[0]?.toUpperCase()}
                   </div>
                   <div className="space-y-2">
@@ -1013,10 +1026,10 @@ export default function Expenses() {
                           <motion.div
                             key={reviewerId}
                             whileHover={{ scale: 1.05 }}
-                            className="flex items-center gap-2 bg-gradient-to-r from-violet-100 to-violet-50 dark:from-violet-900/30 dark:to-violet-800/20 rounded-full px-3 py-1.5"
+                            className="flex items-center gap-2 bg-gradient-to-r from-sky-100 to-sky-50 dark:from-sky-900/30 dark:to-sky-800/20 rounded-full px-3 py-1.5"
                           >
                             <Avatar className="h-5 w-5">
-                              <AvatarFallback className="text-xs font-semibold bg-gradient-to-br from-violet-400 to-violet-600 text-white">
+                              <AvatarFallback className="text-xs font-semibold bg-gradient-to-br from-sky-400 to-sky-600 text-white">
                                 {member?.name.split(' ').map(n => n[0]).join('').toUpperCase() || '?'}
                               </AvatarFallback>
                             </Avatar>
@@ -1031,7 +1044,7 @@ export default function Expenses() {
                 {selectedExpense.receiptUrl && (
                   <div className="bg-slate-50 dark:bg-slate-900/30 rounded-2xl p-4">
                     <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-bold tracking-wider mb-2">Receipt</p>
-                    <a href={selectedExpense.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300 underline text-sm font-medium transition-colors">
+                    <a href={selectedExpense.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 underline text-sm font-medium transition-colors">
                       View Receipt
                     </a>
                   </div>
@@ -1094,6 +1107,7 @@ export default function Expenses() {
                   id="edit-amount"
                   type="number"
                   step="0.01"
+                  min="0.01"
                   placeholder="0.00"
                   {...editForm.register("amount", { required: true })}
                   className="bg-slate-50 dark:bg-slate-900/30 border-slate-200 dark:border-slate-700 rounded-xl h-11"
@@ -1130,7 +1144,7 @@ export default function Expenses() {
                 <Button
                   type="submit"
                   disabled={updateExpense.isPending}
-                  className="bg-gradient-to-r from-violet-600 to-violet-700 hover:from-violet-700 hover:to-violet-800 rounded-xl"
+                  className="bg-gradient-to-r from-sky-600 to-sky-700 hover:from-sky-700 hover:to-sky-800 rounded-xl"
                   data-testid="button-update-expense"
                 >
                   {updateExpense.isPending ? "Updating..." : "Update Expense"}

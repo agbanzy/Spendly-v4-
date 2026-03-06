@@ -64,11 +64,11 @@ export default function AdminLogin() {
   return (
     <div className="min-h-screen flex">
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900" />
+        <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-sky-900/30 to-slate-900" />
         <div className="absolute inset-0 opacity-10 texture-grid" />
 
-        <div className="absolute top-1/4 -left-20 w-80 h-80 bg-purple-500/15 rounded-full blur-3xl animate-float" />
-        <div className="absolute bottom-1/4 -right-20 w-60 h-60 bg-indigo-400/10 rounded-full blur-3xl animate-float-slow" />
+        <div className="absolute top-1/4 -left-20 w-80 h-80 bg-sky-500/15 rounded-full blur-3xl animate-float" />
+        <div className="absolute bottom-1/4 -right-20 w-60 h-60 bg-cyan-400/10 rounded-full blur-3xl animate-float-slow" />
 
         <div className="relative z-10 p-12 flex flex-col justify-between w-full">
           <Link href="/">
@@ -128,7 +128,7 @@ export default function AdminLogin() {
 
           <Card className="shadow-xl shadow-primary/5 border-border/50">
             <CardHeader className="text-center pb-2">
-              <div className="mx-auto w-14 h-14 rounded-2xl bg-gradient-to-br from-primary/10 to-purple-500/10 border border-primary/15 flex items-center justify-center mb-3">
+              <div className="mx-auto w-14 h-14 rounded-2xl bg-gradient-to-br from-primary/10 to-cyan-500/10 border border-primary/15 flex items-center justify-center mb-3">
                 <Shield className="w-7 h-7 text-primary" />
               </div>
               <CardTitle className="text-2xl font-bold tracking-tight">Admin Portal</CardTitle>

@@ -66,19 +66,9 @@ export default function LoginPage() {
         setLocation("/dashboard");
       }
     } catch (error: any) {
-      let errorMessage = "Login failed. Please try again.";
-      if (error?.code === "auth/user-not-found") {
-        errorMessage = "No account found with this email.";
-      } else if (error?.code === "auth/wrong-password") {
-        errorMessage = "Incorrect password.";
-      } else if (error?.code === "auth/invalid-credential") {
-        errorMessage = "Invalid email or password.";
-      } else if (error?.code === "auth/too-many-requests") {
-        errorMessage = "Too many attempts. Please try again later.";
-      }
       toast({
         title: "Error",
-        description: errorMessage,
+        description: error?.message || "Login failed. Please try again.",
         variant: "destructive"
       });
     } finally {

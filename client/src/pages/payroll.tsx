@@ -113,7 +113,7 @@ export default function PayrollPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: async (data: typeof formData) => {
+    mutationFn: async (data: Record<string, any>) => {
       return apiRequest("POST", "/api/payroll", data);
     },
     onSuccess: () => {
@@ -247,7 +247,13 @@ export default function PayrollPage() {
         },
       });
     } else {
-      createMutation.mutate(formData);
+      createMutation.mutate({
+        ...formData,
+        salary,
+        bonus,
+        deductions,
+        netPay: salary + bonus - deductions,
+      });
     }
   };
 
@@ -717,12 +723,14 @@ export default function PayrollPage() {
         </motion.div>
       </motion.div>
 
-      <Dialog open={isRunPayrollOpen} onOpenChange={setIsRunPayrollOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Run Payroll</DialogTitle>
-            <DialogDescription>Process payments for all pending employees.</DialogDescription>
-          </DialogHeader>
+      <AlertDialog open={isRunPayrollOpen} onOpenChange={setIsRunPayrollOpen}>
+        <AlertDialogContent className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Payroll Run</AlertDialogTitle>
+            <AlertDialogDescription>
+              You are about to process payroll for {payrollEntries.filter((e) => e.status === "pending").length} employees totalling {formatCurrency(pendingPayroll)}. This action will deduct funds from your wallet.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
           <div className="py-4 space-y-4">
             <GlassCard className="p-4">
               <div className="flex items-center justify-between mb-3">
@@ -752,11 +760,9 @@ export default function PayrollPage() {
               <span className="text-sm text-amber-800 dark:text-amber-200">Funds will be deducted from your main wallet.</span>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsRunPayrollOpen(false)} size="sm">
-              Cancel
-            </Button>
-            <Button onClick={() => processPayrollMutation.mutate()} disabled={processPayrollMutation.isPending || pendingPayroll === 0} size="sm" data-testid="button-confirm-payroll">
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => processPayrollMutation.mutate()} disabled={processPayrollMutation.isPending || pendingPayroll === 0} data-testid="button-confirm-payroll">
               {processPayrollMutation.isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -768,10 +774,10 @@ export default function PayrollPage() {
                   Process {formatCurrency(pendingPayroll)}
                 </>
               )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={isPayIndividualOpen} onOpenChange={setIsPayIndividualOpen}>
         <DialogContent className="sm:max-w-md">
@@ -964,6 +970,8 @@ export default function PayrollPage() {
                 <Input
                   id="salary"
                   type="number"
+                  min="0.01"
+                  step="0.01"
                   value={formData.salary}
                   onChange={(e) => setFormData({ ...formData, salary: e.target.value })}
                   placeholder="0"
@@ -978,6 +986,8 @@ export default function PayrollPage() {
                 <Input
                   id="bonus"
                   type="number"
+                  min="0"
+                  step="0.01"
                   value={formData.bonus}
                   onChange={(e) => setFormData({ ...formData, bonus: e.target.value })}
                   placeholder="0"

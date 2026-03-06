@@ -1,0 +1,21 @@
+{
+  "version": "50.0.0",
+  "files": {
+    "3ac96d4e5300c3d8757bc065a1bea6f9d63cf9b59758a20c7fd36b4da032f410": {
+      "displayName": "SpendlyStack Template",
+      "source": {
+        "path": "SpendlyStack.template.json",
+        "packaging": "file"
+      },
+      "destinations": {
+        "677343720858-us-east-1-64ba22cd": {
+          "bucketName": "cdk-hnb659fds-assets-677343720858-us-east-1",
+          "objectKey": "3ac96d4e5300c3d8757bc065a1bea6f9d63cf9b59758a20c7fd36b4da032f410.json",
+          "region": "us-east-1",
+          "assumeRoleArn": "arn:${AWS::Partition}:iam::677343720858:role/cdk-hnb659fds-file-publishing-role-677343720858-us-east-1"
+        }
+      }
+    }
+  },
+  "dockerImages": {}
+}

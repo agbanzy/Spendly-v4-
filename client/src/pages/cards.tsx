@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, sanitizeErrorMessage } from "@/lib/queryClient";
 import { getCurrencySymbol, formatCurrencyAmount } from "@/lib/constants";
 import {
   Dialog,
@@ -183,7 +183,7 @@ export default function Cards() {
       setFundAmount("");
     },
     onError: (error: any) => {
-      toast({ title: error.message || "Failed to fund card", variant: "destructive" });
+      toast({ title: sanitizeErrorMessage(error) || "Failed to fund card", variant: "destructive" });
     },
   });
 
@@ -220,6 +220,19 @@ export default function Cards() {
   };
 
   const handleSubmit = () => {
+    if (!formData.name.trim()) {
+      toast({ title: "Card name is required", description: "Please enter a name for the card.", variant: "destructive" });
+      return;
+    }
+    const limitNum = parseFloat(formData.limit);
+    if (!formData.limit || isNaN(limitNum) || limitNum <= 0) {
+      toast({ title: "Invalid spending limit", description: "Spending limit must be greater than zero.", variant: "destructive" });
+      return;
+    }
+    if (limitNum > 1_000_000) {
+      toast({ title: "Invalid spending limit", description: "Spending limit cannot exceed 1,000,000.", variant: "destructive" });
+      return;
+    }
     if (editingCard) {
       updateMutation.mutate({ id: editingCard.id, data: { name: formData.name, limit: formData.limit, type: formData.type as 'Visa' | 'Mastercard', color: formData.color, currency: formData.currency } });
     } else {
@@ -232,7 +245,7 @@ export default function Cards() {
   };
 
   const totalBalance = cards?.reduce((sum, c) => sum + parseFloat(String(c.balance) || '0'), 0) || 0;
-  const activeCards = cards?.filter((c) => c.status === "Active").length || 0;
+  const activeCards = cards?.filter((c) => c.status === "active").length || 0;
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -372,7 +385,7 @@ export default function Cards() {
                         <div className="absolute -bottom-20 -left-20 w-60 h-60 rounded-full bg-white/10 blur-3xl" />
                       </div>
 
-                      {card.status === "Frozen" && (
+                      {card.status === "frozen" && (
                         <div className="absolute inset-0 bg-white/15 backdrop-blur-sm z-20" />
                       )}
 
@@ -382,7 +395,7 @@ export default function Cards() {
                             <p className="text-xs font-semibold opacity-75 uppercase tracking-widest mb-2">
                               {card.name}
                             </p>
-                            {card.status === "Active" && (
+                            {card.status === "active" && (
                               <div className="flex items-center gap-1.5">
                                 <div className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
                                 <span className="text-xs font-medium text-emerald-200">Active</span>
@@ -424,7 +437,7 @@ export default function Cards() {
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                   onClick={() => {
-                                    if (card.status === "Active") {
+                                    if (card.status === "active") {
                                       freezeMutation.mutate(card.id);
                                     } else {
                                       unfreezeMutation.mutate(card.id);
@@ -432,7 +445,7 @@ export default function Cards() {
                                   }}
                                   disabled={freezeMutation.isPending || unfreezeMutation.isPending}
                                 >
-                                  {card.status === "Active" ? (
+                                  {card.status === "active" ? (
                                     <>
                                       <PauseCircle className="h-4 w-4 mr-2" />
                                       {freezeMutation.isPending ? "Freezing..." : "Freeze Card"}
@@ -590,6 +603,8 @@ export default function Cards() {
                 <Input
                   id="limit"
                   type="number"
+                  min="0.01"
+                  step="0.01"
                   value={formData.limit}
                   onChange={(e) =>
                     setFormData({ ...formData, limit: e.target.value })
@@ -731,6 +746,8 @@ export default function Cards() {
                     <Input
                       id="fundAmount"
                       type="number"
+                      min="0.01"
+                      step="0.01"
                       value={fundAmount}
                       onChange={(e) => setFundAmount(e.target.value)}
                       placeholder="0.00"

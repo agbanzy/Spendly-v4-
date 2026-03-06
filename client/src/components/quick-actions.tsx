@@ -39,7 +39,7 @@ export function QuickActions() {
         setLocation("/bills");
         setIsOpen(false);
       },
-      color: "bg-purple-500 hover:bg-purple-600"
+      color: "bg-sky-500 hover:bg-sky-600"
     }
   ];
 
@@ -75,7 +75,7 @@ export function QuickActions() {
           className={`w-14 h-14 rounded-full shadow-xl transition-all duration-200 ${
             isOpen 
               ? "bg-gray-600 hover:bg-gray-700 rotate-45" 
-              : "bg-indigo-600 hover:bg-indigo-700"
+              : "bg-primary hover:bg-primary/90 shadow-lg shadow-primary/30"
           }`}
           data-testid="button-quick-actions"
         >

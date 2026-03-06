@@ -6,8 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Mail, ArrowLeft, Loader2, CheckCircle2, ShieldCheck, KeyRound, RefreshCw, ArrowRight, Sparkles } from "lucide-react";
-import { sendPasswordResetEmail } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { forgotPassword } from "@/lib/cognito";
 import { apiRequest } from "@/lib/queryClient";
 
 type ResetStep = "email" | "sending" | "sent";
@@ -52,33 +51,27 @@ export default function ForgotPasswordPage() {
       const data = await res.json();
       setUserName(data.userName || "");
 
-      await sendPasswordResetEmail(auth, email);
+      await forgotPassword(email);
 
       setStep("sent");
       setCooldown(60);
       toast({
-        title: "Reset email sent",
-        description: "Check your inbox for password reset instructions."
+        title: "Reset code sent",
+        description: "Check your inbox for the verification code to reset your password."
       });
     } catch (error: any) {
       setStep("email");
 
-      if (error?.status === 404) {
-        try {
-          const errData = await error.json?.();
-          setErrorMessage(errData?.error || "No account found with this email address.");
-        } catch {
-          setErrorMessage("No account found with this email address. Please check the email or sign up for a new account.");
-        }
-      } else if (error?.code === "auth/user-not-found") {
+      const name = error?.name || '';
+      if (error?.status === 404 || name === 'UserNotFoundException') {
         setErrorMessage("No account found with this email address.");
-      } else if (error?.code === "auth/invalid-email") {
+      } else if (name === 'InvalidParameterException') {
         setErrorMessage("Please enter a valid email address.");
-      } else if (error?.code === "auth/too-many-requests") {
+      } else if (name === 'LimitExceededException' || name === 'TooManyRequestsException') {
         setErrorMessage("Too many attempts. Please try again later.");
         setCooldown(120);
       } else {
-        setErrorMessage("Something went wrong. Please try again.");
+        setErrorMessage(error?.message || "Something went wrong. Please try again.");
       }
     } finally {
       setIsLoading(false);
@@ -89,18 +82,19 @@ export default function ForgotPasswordPage() {
     if (cooldown > 0) return;
     setIsLoading(true);
     try {
-      await sendPasswordResetEmail(auth, email);
+      await forgotPassword(email);
       setCooldown(60);
       toast({
-        title: "Email resent",
-        description: "A new password reset email has been sent."
+        title: "Code resent",
+        description: "A new verification code has been sent to your email."
       });
     } catch (error: any) {
-      if (error?.code === "auth/too-many-requests") {
+      const name = error?.name || '';
+      if (name === 'LimitExceededException' || name === 'TooManyRequestsException') {
         toast({ title: "Too many attempts", description: "Please wait before trying again.", variant: "destructive" });
         setCooldown(120);
       } else {
-        toast({ title: "Failed to resend", description: "Please try again later.", variant: "destructive" });
+        toast({ title: "Failed to resend", description: error?.message || "Please try again later.", variant: "destructive" });
       }
     } finally {
       setIsLoading(false);
@@ -110,7 +104,7 @@ export default function ForgotPasswordPage() {
   return (
     <div className="min-h-screen flex">
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-primary via-violet-600 to-purple-700" />
+        <div className="absolute inset-0 bg-gradient-to-br from-sky-600 via-blue-600 to-cyan-600" />
         <div className="absolute inset-0 opacity-10 texture-grid" />
 
         <div className="absolute top-1/4 -left-20 w-80 h-80 bg-white/10 rounded-full blur-3xl animate-float" />
@@ -120,7 +114,7 @@ export default function ForgotPasswordPage() {
           <Link href="/">
             <div className="flex items-center gap-3 text-white cursor-pointer group">
               <div className="relative">
-                <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl shadow-lg" />
+                <img src="/spendly-logo.png" alt="Spendly" className="h-12 w-12 rounded-xl shadow-lg" />
                 <div className="absolute -inset-1 bg-white/20 rounded-xl blur-sm opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
               <span className="font-bold text-2xl tracking-tight">Spendly</span>
@@ -132,7 +126,7 @@ export default function ForgotPasswordPage() {
               <Sparkles className="h-3.5 w-3.5" />
               Secure account recovery
             </div>
-            <h1 className="text-4xl md:text-5xl font-extrabold text-white leading-tight tracking-tight">
+            <h1 className="text-4xl md:text-5xl font-extrabold font-display text-white leading-tight tracking-tight">
               Reset your<br />password
             </h1>
             <p className="text-lg text-white/70 max-w-md leading-relaxed">
@@ -177,12 +171,12 @@ export default function ForgotPasswordPage() {
         <div className="w-full max-w-md relative z-10">
           <Link href="/">
             <div className="lg:hidden flex items-center gap-2.5 justify-center mb-8 cursor-pointer">
-              <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl shadow-md" />
+              <img src="/spendly-logo.png" alt="Spendly" className="h-12 w-12 rounded-xl shadow-md" />
               <span className="font-bold text-2xl tracking-tight">Spendly</span>
             </div>
           </Link>
 
-          <Card className="shadow-xl shadow-primary/5 border-border/50">
+          <Card className="shadow-2xl shadow-primary/8 border-border/50">
             <CardHeader className="text-center pb-2">
               <CardTitle className="text-2xl font-bold tracking-tight" data-testid="text-forgot-password-title">
                 {step === "sent" ? "Check your email" : "Forgot password?"}
@@ -274,7 +268,7 @@ export default function ForgotPasswordPage() {
 
                   <Button
                     type="submit"
-                    className="w-full h-11 text-sm font-medium shadow-md shadow-primary/20 gap-2"
+                    className="w-full h-12 text-sm font-medium shadow-md shadow-primary/20 gap-2"
                     disabled={isLoading || cooldown > 0}
                     data-testid="button-reset-password"
                   >

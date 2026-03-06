@@ -34,10 +34,11 @@ export default function AdminDatabase() {
 
   const purgeMutation = useMutation({
     mutationFn: async () => {
-      return apiRequest("POST", "/api/admin/purge-database", {
+      const res = await apiRequest("POST", "/api/admin/purge-database", {
         confirmPurge: "CONFIRM_PURGE",
         tablesToPreserve: ["admin_settings", "organization_settings", "system_settings", "role_permissions"],
       });
+      return res.json();
     },
     onSuccess: (data: any) => {
       toast({
@@ -67,7 +68,7 @@ export default function AdminDatabase() {
           </Button>
         </Link>
         <div>
-          <h1 className="text-2xl font-black tracking-tight flex items-center gap-3" data-testid="text-title">
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-3" data-testid="text-title">
             <Database className="h-7 w-7 text-rose-600" />
             Database Management
           </h1>

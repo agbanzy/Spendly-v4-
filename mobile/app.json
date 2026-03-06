@@ -26,14 +26,18 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#4F46E5"
       },
-      "package": "com.spendly.app"
+      "package": "com.spendly.app",
+      "permissions": [
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "extra": {
       "eas": {
-        "projectId": "your-project-id"
+        "projectId": "5bfb69f9-1bc9-4f13-8e2a-c479a648ecfd"
       }
     },
     "plugins": [
@@ -52,6 +56,7 @@
           "color": "#4F46E5"
         }
       ]
-    ]
+    ],
+    "owner": "agbanzy"
   }
 }

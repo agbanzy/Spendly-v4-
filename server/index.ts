@@ -1,9 +1,46 @@
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
+import cors from "cors";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { apiLimiter } from "./middleware/rateLimiter";
 import { startRecurringScheduler } from "./recurringScheduler";
+
+// ==================== STARTUP GUARDS ====================
+
+// Validate required environment variables
+const requiredEnvVars = ['DATABASE_URL'];
+const productionRequiredVars = ['COGNITO_USER_POOL_ID', 'COGNITO_CLIENT_ID', 'APP_URL'];
+
+for (const v of requiredEnvVars) {
+  if (!process.env[v]) {
+    console.error(`FATAL: Missing required environment variable: ${v}`);
+    process.exit(1);
+  }
+}
+if (process.env.NODE_ENV === 'production') {
+  for (const v of productionRequiredVars) {
+    if (!process.env[v]) {
+      console.error(`FATAL: Missing production environment variable: ${v}`);
+      process.exit(1);
+    }
+  }
+
+  // Block startup if test API keys are used in production
+  const keysToCheck = [
+    { name: 'STRIPE_SECRET_KEY', value: process.env.STRIPE_SECRET_KEY },
+    { name: 'PAYSTACK_SECRET_KEY', value: process.env.PAYSTACK_SECRET_KEY },
+  ];
+  for (const key of keysToCheck) {
+    if (key.value && (key.value.includes('_test_') || key.value.includes('sk_test'))) {
+      console.error(`FATAL: ${key.name} appears to be a test key in production!`);
+      process.exit(1);
+    }
+  }
+}
+
+// ==================== APP SETUP ====================
 
 const app = express();
 app.set('trust proxy', 1);
@@ -24,6 +61,25 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+// CORS configuration
+const allowedOrigins = process.env.NODE_ENV === 'production'
+  ? (process.env.APP_URL ? [process.env.APP_URL] : [])
+  : ['http://localhost:3000', 'http://localhost:5000', 'http://localhost:5001', 'http://localhost:8081'];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+    // In development, allow all origins
+    if (process.env.NODE_ENV !== 'production') return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+}));
 
 // Apply rate limiting to all API routes
 app.use('/api', apiLimiter);
@@ -55,7 +111,8 @@ app.use((req, res, next) => {
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        const bodyStr = JSON.stringify(capturedJsonResponse);
+        logLine += ` :: ${bodyStr.length > 200 ? bodyStr.substring(0, 200) + '...[truncated]' : bodyStr}`;
       }
 
       log(logLine);

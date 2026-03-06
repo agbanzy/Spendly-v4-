@@ -12,13 +12,22 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Share,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useTheme } from '../lib/theme-context';
 import { useCompany } from '../lib/company-context';
 import { ColorTokens } from '../lib/colors';
+import { shadows, monoFont } from '../lib/shadows';
+
+const CURRENCY_OPTIONS = ['USD', 'EUR', 'GBP', 'NGN', 'GHS', 'KES', 'ZAR', 'CAD', 'AUD', 'CHF'];
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$', EUR: '€', GBP: '£', NGN: '₦', KES: 'KSh', GHS: '₵',
+  ZAR: 'R', CAD: 'C$', AUD: 'A$', CHF: 'CHF', EGP: 'E£', RWF: 'RF',
+};
 
 interface InvoiceItem {
   description: string;
@@ -35,6 +44,11 @@ interface Invoice {
   dueDate: string;
   createdAt: string;
   items?: InvoiceItem[];
+  subtotal?: number;
+  taxRate?: number;
+  taxAmount?: number;
+  currency?: string;
+  notes?: string;
 }
 
 const emptyItem = { description: '', amount: '' };
@@ -43,6 +57,9 @@ const emptyForm = {
   clientName: '',
   clientEmail: '',
   dueDate: '',
+  taxRate: '0',
+  currency: 'USD',
+  notes: '',
   items: [{ ...emptyItem }],
 };
 
@@ -97,6 +114,9 @@ export default function InvoicesScreen() {
     setRefreshing(false);
   };
 
+  const [viewInvoice, setViewInvoice] = React.useState<Invoice | null>(null);
+  const [currencyPickerVisible, setCurrencyPickerVisible] = React.useState(false);
+
   const openCreateModal = () => {
     setEditingInvoice(null);
     setForm({ ...emptyForm, items: [{ ...emptyItem }] });
@@ -109,6 +129,9 @@ export default function InvoicesScreen() {
       clientName: invoice.clientName,
       clientEmail: invoice.clientEmail || '',
       dueDate: invoice.dueDate ? invoice.dueDate.split('T')[0] : '',
+      taxRate: String(invoice.taxRate || 0),
+      currency: invoice.currency || 'USD',
+      notes: invoice.notes || '',
       items:
         invoice.items && invoice.items.length > 0
           ? invoice.items.map((item) => ({
@@ -162,7 +185,10 @@ export default function InvoicesScreen() {
       amount: parseFloat(item.amount),
     }));
 
-    const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
+    const subtotal = items.reduce((sum, item) => sum + item.amount, 0);
+    const taxRate = parseFloat(form.taxRate) || 0;
+    const taxAmount = subtotal * (taxRate / 100);
+    const totalAmount = subtotal + taxAmount;
 
     if (form.clientEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.clientEmail.trim())) {
       Alert.alert('Validation', 'Please enter a valid email address.');
@@ -179,6 +205,11 @@ export default function InvoicesScreen() {
       dueDate: form.dueDate || undefined,
       items,
       amount: totalAmount,
+      subtotal,
+      taxRate,
+      taxAmount,
+      currency: form.currency,
+      notes: form.notes.trim() || undefined,
     };
 
     if (editingInvoice) {
@@ -199,11 +230,18 @@ export default function InvoicesScreen() {
     );
   };
 
+  const handleSharePaymentLink = (invoice: Invoice) => {
+    const baseUrl = 'https://spendlymanager.com';
+    const paymentUrl = `${baseUrl}/pay/${invoice.id}`;
+    Share.share({
+      message: `Invoice ${invoice.invoiceNumber} for ${formatCurrency(invoice.amount, invoice.currency || 'USD')}\n\nPay here: ${paymentUrl}`,
+      title: `Invoice ${invoice.invoiceNumber}`,
+    }).catch(() => {});
+  };
+
   const formatCurrency = (amount: number, currency: string = 'USD') => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency,
-    }).format(amount);
+    const sym = CURRENCY_SYMBOLS[currency] || currency;
+    return `${sym}${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   const getStatusStyle = (status: string) => {
@@ -322,11 +360,23 @@ export default function InvoicesScreen() {
                 </Text>
               </View>
               <View style={styles.invoiceRight}>
-                <Text style={styles.invoiceAmount}>{formatCurrency(invoice.amount)}</Text>
+                <Text style={styles.invoiceAmount}>{formatCurrency(invoice.amount, invoice.currency || 'USD')}</Text>
                 <View style={[styles.statusBadge, getStatusStyle(invoice.status)]}>
                   <Text style={styles.statusText}>{invoice.status}</Text>
                 </View>
                 <View style={styles.actionRow}>
+                  <TouchableOpacity
+                    onPress={() => setViewInvoice(invoice)}
+                    testID={`button-view-invoice-${invoice.id}`}
+                  >
+                    <Ionicons name="eye-outline" size={18} color={colors.accent} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => handleSharePaymentLink(invoice)}
+                    testID={`button-share-invoice-${invoice.id}`}
+                  >
+                    <Ionicons name="share-outline" size={18} color={colors.accent} />
+                  </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => openEditModal(invoice)}
                     testID={`button-edit-invoice-${invoice.id}`}
@@ -407,6 +457,44 @@ export default function InvoicesScreen() {
                 testID="input-due-date"
               />
 
+              <View style={styles.taxCurrencyRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.inputLabel}>Tax Rate (%)</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="0"
+                    placeholderTextColor={colors.placeholderText}
+                    keyboardType="decimal-pad"
+                    value={form.taxRate}
+                    onChangeText={(val) => setForm({ ...form, taxRate: val })}
+                    testID="input-tax-rate"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.inputLabel}>Currency</Text>
+                  <TouchableOpacity
+                    style={styles.currencySelector}
+                    onPress={() => setCurrencyPickerVisible(true)}
+                    testID="button-currency-picker"
+                  >
+                    <Text style={styles.currencySelectorText}>{form.currency}</Text>
+                    <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <Text style={styles.inputLabel}>Notes</Text>
+              <TextInput
+                style={[styles.input, { minHeight: 60, textAlignVertical: 'top' }]}
+                placeholder="Payment terms, notes..."
+                placeholderTextColor={colors.placeholderText}
+                multiline
+                numberOfLines={3}
+                value={form.notes}
+                onChangeText={(val) => setForm({ ...form, notes: val })}
+                testID="input-notes"
+              />
+
               <View style={styles.itemsHeader}>
                 <Text style={styles.itemsSectionTitle}>Line Items</Text>
                 <TouchableOpacity onPress={addItem} testID="button-add-item">
@@ -450,10 +538,29 @@ export default function InvoicesScreen() {
                 </View>
               ))}
 
-              <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Total</Text>
-                <Text style={styles.totalValue}>{formatCurrency(formTotal)}</Text>
-              </View>
+              {(() => {
+                const taxRate = parseFloat(form.taxRate) || 0;
+                const taxAmt = formTotal * (taxRate / 100);
+                const grandTotal = formTotal + taxAmt;
+                return (
+                  <View style={styles.totalSection}>
+                    <View style={styles.totalRow}>
+                      <Text style={styles.totalLabel}>Subtotal</Text>
+                      <Text style={styles.totalSubvalue}>{formatCurrency(formTotal, form.currency)}</Text>
+                    </View>
+                    {taxRate > 0 && (
+                      <View style={styles.totalRow}>
+                        <Text style={styles.totalLabel}>Tax ({taxRate}%)</Text>
+                        <Text style={styles.totalSubvalue}>{formatCurrency(taxAmt, form.currency)}</Text>
+                      </View>
+                    )}
+                    <View style={[styles.totalRow, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, marginTop: 4 }]}>
+                      <Text style={[styles.totalLabel, { fontWeight: '700', fontSize: 16 }]}>Total</Text>
+                      <Text style={styles.totalValue}>{formatCurrency(grandTotal, form.currency)}</Text>
+                    </View>
+                  </View>
+                );
+              })()}
             </ScrollView>
 
             <View style={styles.modalFooter}>
@@ -477,6 +584,124 @@ export default function InvoicesScreen() {
             </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* View Invoice Detail Modal */}
+      <Modal visible={!!viewInvoice} animationType="slide" transparent testID="view-invoice-modal">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Invoice Details</Text>
+              <TouchableOpacity onPress={() => setViewInvoice(null)}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            {viewInvoice && (
+              <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+                <View style={styles.viewInvoiceHeader}>
+                  <Text style={styles.viewInvoiceNumber}>{viewInvoice.invoiceNumber}</Text>
+                  <View style={[styles.statusBadge, getStatusStyle(viewInvoice.status)]}>
+                    <Text style={styles.statusText}>{viewInvoice.status}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.viewDetailRow}>
+                  <Text style={styles.viewDetailLabel}>Client</Text>
+                  <Text style={styles.viewDetailValue}>{viewInvoice.clientName}</Text>
+                </View>
+                {viewInvoice.clientEmail ? (
+                  <View style={styles.viewDetailRow}>
+                    <Text style={styles.viewDetailLabel}>Email</Text>
+                    <Text style={styles.viewDetailValue}>{viewInvoice.clientEmail}</Text>
+                  </View>
+                ) : null}
+                <View style={styles.viewDetailRow}>
+                  <Text style={styles.viewDetailLabel}>Due Date</Text>
+                  <Text style={styles.viewDetailValue}>{new Date(viewInvoice.dueDate).toLocaleDateString()}</Text>
+                </View>
+                <View style={styles.viewDetailRow}>
+                  <Text style={styles.viewDetailLabel}>Currency</Text>
+                  <Text style={styles.viewDetailValue}>{viewInvoice.currency || 'USD'}</Text>
+                </View>
+
+                <Text style={[styles.inputLabel, { marginTop: 16, marginBottom: 8 }]}>Line Items</Text>
+                {viewInvoice.items?.map((item, idx) => (
+                  <View key={idx} style={styles.viewItemRow}>
+                    <Text style={styles.viewItemDesc}>{item.description}</Text>
+                    <Text style={styles.viewItemAmount}>{formatCurrency(item.amount, viewInvoice.currency || 'USD')}</Text>
+                  </View>
+                ))}
+
+                <View style={styles.totalSection}>
+                  <View style={styles.totalRow}>
+                    <Text style={styles.totalLabel}>Subtotal</Text>
+                    <Text style={styles.totalSubvalue}>
+                      {formatCurrency(viewInvoice.subtotal || viewInvoice.amount, viewInvoice.currency || 'USD')}
+                    </Text>
+                  </View>
+                  {Number(viewInvoice.taxRate) > 0 && (
+                    <View style={styles.totalRow}>
+                      <Text style={styles.totalLabel}>Tax ({viewInvoice.taxRate}%)</Text>
+                      <Text style={styles.totalSubvalue}>
+                        {formatCurrency(Number(viewInvoice.taxAmount) || 0, viewInvoice.currency || 'USD')}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={[styles.totalRow, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, marginTop: 4 }]}>
+                    <Text style={[styles.totalLabel, { fontWeight: '700', fontSize: 16 }]}>Total</Text>
+                    <Text style={styles.totalValue}>{formatCurrency(viewInvoice.amount, viewInvoice.currency || 'USD')}</Text>
+                  </View>
+                </View>
+
+                {viewInvoice.notes ? (
+                  <View style={styles.notesSection}>
+                    <Text style={styles.inputLabel}>Notes</Text>
+                    <Text style={styles.notesText}>{viewInvoice.notes}</Text>
+                  </View>
+                ) : null}
+
+                <TouchableOpacity
+                  style={styles.shareButton}
+                  onPress={() => handleSharePaymentLink(viewInvoice)}
+                >
+                  <Ionicons name="share-outline" size={18} color={colors.primaryForeground} />
+                  <Text style={styles.shareButtonText}>Share Payment Link</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Currency Picker Modal */}
+      <Modal visible={currencyPickerVisible} animationType="slide" transparent onRequestClose={() => setCurrencyPickerVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.pickerContent}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Select Currency</Text>
+              <TouchableOpacity onPress={() => setCurrencyPickerVisible(false)}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView>
+              {CURRENCY_OPTIONS.map((cur) => (
+                <TouchableOpacity
+                  key={cur}
+                  style={[styles.pickerItem, form.currency === cur && styles.pickerItemActive]}
+                  onPress={() => {
+                    setForm({ ...form, currency: cur });
+                    setCurrencyPickerVisible(false);
+                  }}
+                >
+                  <Text style={[styles.pickerItemText, form.currency === cur && styles.pickerItemTextActive]}>
+                    {CURRENCY_SYMBOLS[cur] || ''} {cur}
+                  </Text>
+                  {form.currency === cur && <Ionicons name="checkmark" size={20} color={colors.accent} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -529,12 +754,11 @@ function createStyles(colors: ColorTokens) {
     statCard: {
       flex: 1,
       backgroundColor: colors.surface,
-      borderRadius: 12,
+      borderRadius: 20,
       padding: 14,
       alignItems: 'center',
       gap: 6,
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...shadows.card,
     },
     statLabel: {
       fontSize: 11,
@@ -544,6 +768,7 @@ function createStyles(colors: ColorTokens) {
       fontSize: 13,
       fontWeight: '700',
       color: colors.textPrimary,
+      fontFamily: monoFont,
     },
     section: {
       paddingHorizontal: 20,
@@ -556,18 +781,19 @@ function createStyles(colors: ColorTokens) {
       marginBottom: 16,
     },
     sectionTitle: {
-      fontSize: 18,
-      fontWeight: '600',
+      fontSize: 20,
+      fontWeight: '700',
       color: colors.textPrimary,
     },
     addButton: {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: colors.primary,
-      borderRadius: 8,
+      borderRadius: 12,
       paddingHorizontal: 12,
       paddingVertical: 6,
       gap: 4,
+      ...shadows.card,
     },
     addButtonText: {
       fontSize: 13,
@@ -578,11 +804,10 @@ function createStyles(colors: ColorTokens) {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: colors.surface,
-      borderRadius: 12,
-      padding: 16,
+      borderRadius: 20,
+      padding: 20,
       marginBottom: 8,
-      borderWidth: 1,
-      borderColor: colors.border,
+      ...shadows.subtle,
     },
     invoiceIcon: {
       width: 40,
@@ -618,6 +843,7 @@ function createStyles(colors: ColorTokens) {
       fontSize: 14,
       color: colors.textPrimary,
       fontWeight: '600',
+      fontFamily: monoFont,
     },
     statusBadge: {
       paddingHorizontal: 8,
@@ -667,9 +893,10 @@ function createStyles(colors: ColorTokens) {
       backgroundColor: colors.primary,
       paddingHorizontal: 20,
       paddingVertical: 10,
-      borderRadius: 10,
+      borderRadius: 14,
       marginTop: 20,
       gap: 6,
+      ...shadows.card,
     },
     emptyAddButtonText: {
       color: colors.primaryForeground,
@@ -713,12 +940,11 @@ function createStyles(colors: ColorTokens) {
     },
     input: {
       backgroundColor: colors.background,
-      borderRadius: 10,
+      borderRadius: 14,
       padding: 14,
       fontSize: 15,
       color: colors.inputText,
-      borderWidth: 1,
-      borderColor: colors.inputBorder,
+      ...shadows.subtle,
     },
     itemsHeader: {
       flexDirection: 'row',
@@ -729,7 +955,7 @@ function createStyles(colors: ColorTokens) {
     },
     itemsSectionTitle: {
       fontSize: 15,
-      fontWeight: '600',
+      fontWeight: '700',
       color: colors.textPrimary,
     },
     addItemButton: {
@@ -766,24 +992,161 @@ function createStyles(colors: ColorTokens) {
     removeItemButton: {
       padding: 4,
     },
-    totalRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
+    totalSection: {
       marginTop: 16,
       paddingTop: 16,
       borderTopWidth: 1,
       borderTopColor: colors.border,
     },
+    totalRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 4,
+    },
     totalLabel: {
-      fontSize: 16,
-      fontWeight: '600',
+      fontSize: 14,
       color: colors.textSecondary,
+    },
+    totalSubvalue: {
+      fontSize: 14,
+      color: colors.textPrimary,
+      fontFamily: monoFont,
     },
     totalValue: {
       fontSize: 20,
       fontWeight: '700',
       color: colors.textPrimary,
+      fontFamily: monoFont,
+    },
+    taxCurrencyRow: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    currencySelector: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: colors.background,
+      borderRadius: 14,
+      padding: 14,
+      ...shadows.subtle,
+    },
+    currencySelectorText: {
+      fontSize: 15,
+      color: colors.inputText,
+      fontWeight: '500',
+    },
+    notesSection: {
+      marginTop: 16,
+    },
+    notesText: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      lineHeight: 20,
+      marginTop: 4,
+    },
+    viewInvoiceHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    viewInvoiceNumber: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.accent,
+      fontFamily: monoFont,
+    },
+    viewDetailRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingVertical: 8,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    viewDetailLabel: {
+      fontSize: 14,
+      color: colors.textSecondary,
+    },
+    viewDetailValue: {
+      fontSize: 14,
+      color: colors.textPrimary,
+      fontWeight: '500',
+    },
+    viewItemRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingVertical: 8,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    viewItemDesc: {
+      fontSize: 14,
+      color: colors.textPrimary,
+      flex: 1,
+    },
+    viewItemAmount: {
+      fontSize: 14,
+      color: colors.textPrimary,
+      fontWeight: '500',
+      fontFamily: monoFont,
+    },
+    shareButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primary,
+      borderRadius: 16,
+      paddingVertical: 14,
+      gap: 8,
+      marginTop: 24,
+      marginBottom: 20,
+      ...shadows.card,
+    },
+    shareButtonText: {
+      color: colors.primaryForeground,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    pickerContent: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      padding: 24,
+      paddingBottom: 40,
+      maxHeight: '60%',
+      ...shadows.medium,
+    },
+    pickerHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    pickerTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: colors.textPrimary,
+    },
+    pickerItem: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: 16,
+      borderRadius: 16,
+      marginBottom: 4,
+    },
+    pickerItemActive: {
+      backgroundColor: colors.accentBackground,
+    },
+    pickerItemText: {
+      fontSize: 16,
+      color: colors.textPrimary,
+    },
+    pickerItemTextActive: {
+      color: colors.accent,
+      fontWeight: '600',
     },
     modalFooter: {
       flexDirection: 'row',
@@ -795,7 +1158,7 @@ function createStyles(colors: ColorTokens) {
     cancelButton: {
       flex: 1,
       backgroundColor: colors.border,
-      borderRadius: 12,
+      borderRadius: 16,
       paddingVertical: 14,
       alignItems: 'center',
     },
@@ -807,9 +1170,10 @@ function createStyles(colors: ColorTokens) {
     saveButton: {
       flex: 1,
       backgroundColor: colors.primary,
-      borderRadius: 12,
+      borderRadius: 16,
       paddingVertical: 14,
       alignItems: 'center',
+      ...shadows.card,
     },
     saveButtonDisabled: {
       opacity: 0.6,

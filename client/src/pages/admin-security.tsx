@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -49,6 +49,16 @@ export default function AdminSecurity() {
     auditLogRetention: '90',
   });
 
+  const { data: fetchedSettings } = useQuery<Record<string, any>>({
+    queryKey: ["/api/admin/security"],
+  });
+
+  useEffect(() => {
+    if (fetchedSettings) {
+      setSettings((prev) => ({ ...prev, ...fetchedSettings }));
+    }
+  }, [fetchedSettings]);
+
   const handleSettingChange = (key: string, value: any) => {
     setSettings(prev => ({ ...prev, [key]: value }));
   };
@@ -58,6 +68,7 @@ export default function AdminSecurity() {
       return apiRequest("PUT", "/api/admin/security", settings);
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/security"] });
       toast({ title: "Security settings saved" });
     },
     onError: () => {
@@ -76,7 +87,7 @@ export default function AdminSecurity() {
             </Button>
           </Link>
           <div>
-            <h1 className="text-3xl font-black tracking-tight flex items-center gap-3" data-testid="text-security-title">
+            <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3" data-testid="text-security-title">
               <Lock className="h-8 w-8 text-primary" />
               Security & Access
             </h1>

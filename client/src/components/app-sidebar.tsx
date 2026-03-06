@@ -244,7 +244,7 @@ function CompanySwitcher() {
             className="flex items-center gap-3 w-full px-1 py-1.5 rounded-lg hover:bg-muted/50 transition-colors"
             data-testid="button-company-switcher"
           >
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary/20 to-purple-500/20 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary/20 to-cyan-500/20 flex items-center justify-center text-xs font-bold text-primary shrink-0">
               {currentCompany.logo ? (
                 <img src={currentCompany.logo} alt="" className="h-8 w-8 rounded-lg object-cover" />
               ) : (
@@ -266,7 +266,7 @@ function CompanySwitcher() {
               className="flex items-center gap-3 py-2"
               data-testid={`company-option-${company.id}`}
             >
-              <div className="h-7 w-7 rounded-md bg-gradient-to-br from-primary/15 to-purple-500/15 flex items-center justify-center text-[10px] font-bold text-primary shrink-0">
+              <div className="h-7 w-7 rounded-md bg-gradient-to-br from-primary/15 to-cyan-500/15 flex items-center justify-center text-[10px] font-bold text-primary shrink-0">
                 {company.logo ? (
                   <img src={company.logo} alt="" className="h-7 w-7 rounded-md object-cover" />
                 ) : (
@@ -351,7 +351,7 @@ export function AppSidebar() {
           <div className="flex items-center gap-3 cursor-pointer group">
             <div className="relative">
               <img src="/spendly-logo.png" alt="Spendly" className="w-9 h-9 rounded-xl shadow-md transition-shadow group-hover:shadow-lg" />
-              <div className="absolute -inset-0.5 bg-gradient-to-br from-primary/20 to-purple-500/20 rounded-xl blur opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div className="absolute -inset-0.5 bg-gradient-to-br from-primary/20 to-cyan-500/20 rounded-xl blur opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
             <div>
               <span className="text-lg font-bold tracking-tight text-foreground">Spendly</span>
@@ -387,7 +387,7 @@ export function AppSidebar() {
         <div className="flex items-center gap-3 p-2 rounded-xl hover:bg-muted/50 transition-colors group">
           <Avatar className="h-9 w-9 ring-2 ring-primary/10 transition-all group-hover:ring-primary/20">
             {user?.photoURL && <AvatarImage src={user.photoURL} alt={user.name} />}
-            <AvatarFallback className="bg-gradient-to-br from-primary/20 to-purple-500/20 text-primary font-semibold text-xs">
+            <AvatarFallback className="bg-gradient-to-br from-primary/20 to-cyan-500/20 text-primary font-semibold text-xs">
               {initials}
             </AvatarFallback>
           </Avatar>

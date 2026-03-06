@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, sanitizeErrorMessage } from "@/lib/queryClient";
 import { getCurrencySymbol, formatCurrencyAmount } from "@/lib/constants";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -57,16 +57,30 @@ export default function VirtualAccounts() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isDepositOpen, setIsDepositOpen] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<VirtualAccount | null>(null);
-  const [createForm, setCreateForm] = useState({
-    name: "",
-    currency: "NGN",
-    type: "collection",
-    countryCode: "NG",
-  });
-
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
   });
+
+  const defaultCountry = settings?.countryCode || "US";
+  const defaultCurrency = settings?.currency || "USD";
+
+  const [createForm, setCreateForm] = useState({
+    name: "",
+    currency: defaultCurrency,
+    type: "collection",
+    countryCode: defaultCountry,
+  });
+
+  // Sync form defaults when settings load
+  useEffect(() => {
+    if (settings) {
+      setCreateForm(prev => ({
+        ...prev,
+        currency: prev.currency === "NGN" && settings.currency ? settings.currency : prev.currency,
+        countryCode: prev.countryCode === "NG" && settings.countryCode ? settings.countryCode : prev.countryCode,
+      }));
+    }
+  }, [settings]);
 
   const { data: accounts, isLoading } = useQuery<VirtualAccount[]>({
     queryKey: ["/api/virtual-accounts"],
@@ -94,10 +108,10 @@ export default function VirtualAccounts() {
       queryClient.invalidateQueries({ queryKey: ["/api/virtual-accounts"] });
       toast({ title: "Virtual account created", description: "Your dedicated account is being provisioned." });
       setIsCreateOpen(false);
-      setCreateForm({ name: "", currency: "NGN", type: "collection", countryCode: "NG" });
+      setCreateForm({ name: "", currency: settings?.currency || "USD", type: "collection", countryCode: settings?.countryCode || "US" });
     },
     onError: (error: any) => {
-      toast({ title: "Failed to create account", description: error.message, variant: "destructive" });
+      toast({ title: "Failed to create account", description: sanitizeErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -127,6 +141,8 @@ export default function VirtualAccounts() {
     { value: "USD", label: "US Dollar (USD)", country: "US" },
     { value: "EUR", label: "Euro (EUR)", country: "EU" },
     { value: "GBP", label: "British Pound (GBP)", country: "GB" },
+    { value: "KES", label: "Kenyan Shilling (KES)", country: "KE" },
+    { value: "ZAR", label: "South African Rand (ZAR)", country: "ZA" },
   ];
 
   const getStatusIcon = (status: string) => {
@@ -371,7 +387,7 @@ export default function VirtualAccounts() {
             )}
 
             {createForm.countryCode !== "NG" && createForm.countryCode !== "GH" && (
-              <div className="p-3 bg-indigo-50 dark:bg-indigo-950 rounded-xl text-indigo-800 dark:text-indigo-200 text-sm flex items-start gap-2">
+              <div className="p-3 bg-sky-50 dark:bg-sky-950 rounded-xl text-sky-800 dark:text-sky-200 text-sm flex items-start gap-2">
                 <Landmark className="h-4 w-4 mt-0.5 shrink-0" />
                 <span>A Stripe Treasury financial account will be created for {createForm.currency} transactions.</span>
               </div>
@@ -405,7 +421,7 @@ export default function VirtualAccounts() {
           {selectedAccount && (
             <div className="space-y-4 py-2">
               <div className="p-4 bg-muted/50 rounded-xl space-y-3">
-                <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Bank Transfer Details</p>
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-[0.06em]">Bank Transfer Details</p>
                 <div className="space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-muted-foreground">Bank Name</span>

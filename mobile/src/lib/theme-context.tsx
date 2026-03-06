@@ -48,7 +48,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     // Show a branded loading screen instead of blank null
     return (
       <View style={splashStyles.container}>
-        <ActivityIndicator size="large" color="#6366F1" />
+        <ActivityIndicator size="large" color="#0EA5E9" />
       </View>
     );
   }

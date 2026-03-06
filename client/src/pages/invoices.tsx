@@ -6,11 +6,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { getCurrencySymbol, formatCurrencyAmount } from "@/lib/constants";
+import { getCurrencySymbol, formatCurrencyAmount, CURRENCY_SYMBOLS } from "@/lib/constants";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   PageWrapper,
   PageHeader,
@@ -75,6 +77,8 @@ export default function InvoicesPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isViewOpen, setIsViewOpen] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmMarkPaidId, setConfirmMarkPaidId] = useState<string | null>(null);
 
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
@@ -92,7 +96,9 @@ export default function InvoicesPage() {
     clientEmail: "",
     invoiceDate: new Date().toISOString().split('T')[0],
     dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    notes: ""
+    notes: "",
+    taxRate: "0",
+    invoiceCurrency: currency,
   });
   const [lineItems, setLineItems] = useState<LineItem[]>([emptyLineItem()]);
   
@@ -112,8 +118,14 @@ export default function InvoicesPage() {
     ));
   };
   
-  const calculateLineTotal = (item: LineItem) => item.quantity * item.unitPrice;
-  const calculateSubtotal = () => lineItems.reduce((sum, item) => sum + calculateLineTotal(item), 0);
+  const calculateLineTotal = (item: LineItem) => Math.round(item.quantity * item.unitPrice * 100) / 100;
+  const calculateSubtotal = () => Math.round(lineItems.reduce((sum, item) => sum + calculateLineTotal(item), 0) * 100) / 100;
+  const calculateTaxAmount = () => {
+    const subtotal = calculateSubtotal();
+    const rate = parseFloat(invoiceForm.taxRate) || 0;
+    return Math.round(subtotal * (rate / 100) * 100) / 100;
+  };
+  const calculateTotal = () => Math.round((calculateSubtotal() + calculateTaxAmount()) * 100) / 100;
   
   const resetForm = () => {
     setInvoiceForm({
@@ -121,7 +133,9 @@ export default function InvoicesPage() {
       clientEmail: "",
       invoiceDate: new Date().toISOString().split('T')[0],
       dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      notes: ""
+      notes: "",
+      taxRate: "0",
+      invoiceCurrency: currency,
     });
     setLineItems([emptyLineItem()]);
   };
@@ -137,7 +151,7 @@ export default function InvoicesPage() {
   });
 
   const createInvoiceMutation = useMutation({
-    mutationFn: async (invoiceData: { client: string; clientEmail: string; amount: number; dueDate: string; items: { description: string; quantity: number; rate: number }[] }) => {
+    mutationFn: async (invoiceData: any) => {
       return apiRequest("POST", "/api/invoices", invoiceData);
     },
     onSuccess: () => {
@@ -158,7 +172,7 @@ export default function InvoicesPage() {
   });
 
   const deleteInvoiceMutation = useMutation({
-    mutationFn: async (invoiceId: number) => {
+    mutationFn: async (invoiceId: string) => {
       return apiRequest("DELETE", `/api/invoices/${invoiceId}`);
     },
     onSuccess: () => {
@@ -178,7 +192,7 @@ export default function InvoicesPage() {
   });
 
   const markAsPaidMutation = useMutation({
-    mutationFn: async (invoiceId: number) => {
+    mutationFn: async (invoiceId: string) => {
       return apiRequest("PATCH", `/api/invoices/${invoiceId}`, { status: "paid" });
     },
     onSuccess: () => {
@@ -198,7 +212,7 @@ export default function InvoicesPage() {
   });
 
   const sendInvoiceMutation = useMutation({
-    mutationFn: async (invoiceId: number) => {
+    mutationFn: async (invoiceId: string) => {
       return apiRequest("POST", `/api/invoices/${invoiceId}/send`);
     },
     onSuccess: (_data, invoiceId) => {
@@ -237,10 +251,29 @@ export default function InvoicesPage() {
       return;
     }
     
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (invoiceForm.clientEmail && !emailRegex.test(invoiceForm.clientEmail)) {
+      toast({
+        title: "Validation Error",
+        description: "Please enter a valid client email address.",
+        variant: "destructive"
+      });
+      return;
+    }
+
     if (lineItems.some(item => !item.description || item.unitPrice <= 0)) {
       toast({
         title: "Error",
         description: "Please fill in all line item details.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (lineItems.some(item => item.quantity <= 0)) {
+      toast({
+        title: "Validation Error",
+        description: "All line item quantities must be greater than 0.",
         variant: "destructive"
       });
       return;
@@ -252,7 +285,12 @@ export default function InvoicesPage() {
       await createInvoiceMutation.mutateAsync({
         client: invoiceForm.clientName,
         clientEmail: invoiceForm.clientEmail,
-        amount: calculateSubtotal(),
+        amount: calculateTotal(),
+        subtotal: calculateSubtotal(),
+        taxRate: parseFloat(invoiceForm.taxRate) || 0,
+        taxAmount: calculateTaxAmount(),
+        currency: invoiceForm.invoiceCurrency || currency,
+        notes: invoiceForm.notes || undefined,
         dueDate: invoiceForm.dueDate,
         items: lineItems.map(item => ({
           description: item.description,
@@ -318,7 +356,7 @@ export default function InvoicesPage() {
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
             <DialogTrigger asChild>
               <Button
-                className="bg-violet-600 hover:bg-violet-700 text-white shadow-lg hover:shadow-xl transition-all"
+                className="bg-sky-600 hover:bg-sky-700 text-white shadow-lg hover:shadow-xl transition-all"
                 data-testid="button-create-invoice"
               >
                 <Plus className="mr-2 h-4 w-4" />
@@ -344,7 +382,7 @@ export default function InvoicesPage() {
                         placeholder="e.g., TechCorp Inc."
                         value={invoiceForm.clientName}
                         onChange={(e) => setInvoiceForm({ ...invoiceForm, clientName: e.target.value })}
-                        className="border-slate-200 dark:border-slate-700 focus:ring-violet-500"
+                        className="border-slate-200 dark:border-slate-700 focus:ring-sky-500"
                         data-testid="input-client-name"
                       />
                     </div>
@@ -355,7 +393,7 @@ export default function InvoicesPage() {
                         placeholder="billing@company.com"
                         value={invoiceForm.clientEmail}
                         onChange={(e) => setInvoiceForm({ ...invoiceForm, clientEmail: e.target.value })}
-                        className="border-slate-200 dark:border-slate-700 focus:ring-violet-500"
+                        className="border-slate-200 dark:border-slate-700 focus:ring-sky-500"
                         data-testid="input-client-email"
                       />
                     </div>
@@ -372,7 +410,7 @@ export default function InvoicesPage() {
                         type="date"
                         value={invoiceForm.invoiceDate}
                         onChange={(e) => setInvoiceForm({ ...invoiceForm, invoiceDate: e.target.value })}
-                        className="border-slate-200 dark:border-slate-700 focus:ring-violet-500"
+                        className="border-slate-200 dark:border-slate-700 focus:ring-sky-500"
                       />
                     </div>
                     <div className="space-y-2">
@@ -381,7 +419,7 @@ export default function InvoicesPage() {
                         type="date"
                         value={invoiceForm.dueDate}
                         onChange={(e) => setInvoiceForm({ ...invoiceForm, dueDate: e.target.value })}
-                        className="border-slate-200 dark:border-slate-700 focus:ring-violet-500"
+                        className="border-slate-200 dark:border-slate-700 focus:ring-sky-500"
                       />
                     </div>
                   </div>
@@ -396,7 +434,7 @@ export default function InvoicesPage() {
                       variant="outline"
                       size="sm"
                       onClick={addLineItem}
-                      className="border-violet-200 hover:bg-violet-50 dark:border-violet-800 dark:hover:bg-violet-950"
+                      className="border-sky-200 hover:bg-sky-50 dark:border-sky-800 dark:hover:bg-sky-950"
                       data-testid="button-add-line-item"
                     >
                       <Plus className="h-4 w-4 mr-1" />
@@ -468,7 +506,7 @@ export default function InvoicesPage() {
                           </div>
                           <div className="space-y-2">
                             <Label className="text-xs font-medium text-slate-700 dark:text-slate-300">Total</Label>
-                            <div className="h-10 px-3 py-2 rounded-md bg-slate-100 dark:bg-slate-800 text-sm font-semibold flex items-center justify-end text-violet-600 dark:text-violet-400">
+                            <div className="h-10 px-3 py-2 rounded-md bg-slate-100 dark:bg-slate-800 text-sm font-semibold flex items-center justify-end text-sky-600 dark:text-sky-400">
                               {currencySymbol}{calculateLineTotal(item).toFixed(2)}
                             </div>
                           </div>
@@ -477,15 +515,57 @@ export default function InvoicesPage() {
                     ))}
                   </div>
 
-                  {/* Subtotal */}
-                  <div className="flex justify-end pt-4 border-t border-slate-200 dark:border-slate-700">
-                    <div className="text-right space-y-1">
-                      <p className="text-xs font-medium text-slate-600 dark:text-slate-400 uppercase tracking-wider">
-                        Subtotal
-                      </p>
-                      <p className="text-2xl font-bold bg-gradient-to-r from-violet-600 to-emerald-600 bg-clip-text text-transparent">
-                        {currencySymbol}{calculateSubtotal().toFixed(2)}
-                      </p>
+                  {/* Tax & Currency */}
+                  <div className="pt-4 border-t border-slate-200 dark:border-slate-700 space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">Tax Rate (%)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          placeholder="0"
+                          value={invoiceForm.taxRate}
+                          onChange={(e) => setInvoiceForm({ ...invoiceForm, taxRate: e.target.value })}
+                          className="border-slate-200 dark:border-slate-700 focus:ring-sky-500"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">Currency</Label>
+                        <Select value={invoiceForm.invoiceCurrency} onValueChange={(value) => setInvoiceForm({ ...invoiceForm, invoiceCurrency: value })}>
+                          <SelectTrigger className="border-slate-200 dark:border-slate-700">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Object.keys(CURRENCY_SYMBOLS).map(code => (
+                              <SelectItem key={code} value={code}>{code} ({CURRENCY_SYMBOLS[code]})</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {/* Invoice Summary */}
+                    <div className="flex justify-end">
+                      <div className="text-right space-y-2 w-64">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-600 dark:text-slate-400">Subtotal</span>
+                          <span className="font-medium">{currencySymbol}{calculateSubtotal().toFixed(2)}</span>
+                        </div>
+                        {parseFloat(invoiceForm.taxRate) > 0 && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-slate-600 dark:text-slate-400">Tax ({invoiceForm.taxRate}%)</span>
+                            <span className="font-medium">{currencySymbol}{calculateTaxAmount().toFixed(2)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between text-base font-bold border-t border-slate-200 dark:border-slate-700 pt-2">
+                          <span>Total</span>
+                          <span className="bg-gradient-to-r from-sky-600 to-emerald-600 bg-clip-text text-transparent">
+                            {currencySymbol}{calculateTotal().toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -499,7 +579,7 @@ export default function InvoicesPage() {
                       placeholder="Add payment terms, thank you message, or additional notes..."
                       value={invoiceForm.notes}
                       onChange={(e) => setInvoiceForm({ ...invoiceForm, notes: e.target.value })}
-                      className="min-h-24 border-slate-200 dark:border-slate-700 focus:ring-violet-500"
+                      className="min-h-24 border-slate-200 dark:border-slate-700 focus:ring-sky-500"
                     />
                   </div>
                 </div>
@@ -512,7 +592,7 @@ export default function InvoicesPage() {
                 <Button
                   onClick={handleCreateInvoice}
                   disabled={isCreating}
-                  className="bg-violet-600 hover:bg-violet-700 text-white"
+                  className="bg-sky-600 hover:bg-sky-700 text-white"
                   data-testid="button-send-invoice"
                 >
                   {isCreating ? (
@@ -578,7 +658,7 @@ export default function InvoicesPage() {
                   placeholder="Search invoices..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 border-slate-200 dark:border-slate-700 focus:ring-violet-500"
+                  className="pl-10 border-slate-200 dark:border-slate-700 focus:ring-sky-500"
                   data-testid="input-search-invoices"
                 />
               </div>
@@ -593,8 +673,8 @@ export default function InvoicesPage() {
                       <GlassCard className="p-4 hover:shadow-md transition-all">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                           <div className="flex items-center gap-4 flex-1">
-                            <div className="p-2 rounded-lg bg-violet-100 dark:bg-violet-900/40">
-                              <FileText className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+                            <div className="p-2 rounded-lg bg-sky-100 dark:bg-sky-900/40">
+                              <FileText className="h-5 w-5 text-sky-600 dark:text-sky-400" />
                             </div>
                             <div className="min-w-0">
                               <p className="font-semibold text-slate-900 dark:text-slate-100">
@@ -628,7 +708,7 @@ export default function InvoicesPage() {
 
                           <div className="flex items-center gap-4 justify-between sm:justify-end">
                             <div className="text-right">
-                              <p className="text-lg font-bold text-violet-600 dark:text-violet-400">
+                              <p className="text-lg font-bold text-sky-600 dark:text-sky-400">
                                 {formatCurrency(invoice.amount)}
                               </p>
                             </div>
@@ -654,29 +734,32 @@ export default function InvoicesPage() {
                                 {invoice.status !== "paid" && (
                                   <DropdownMenuItem
                                     onClick={() => sendInvoiceMutation.mutate(invoice.id)}
+                                    disabled={sendInvoiceMutation.isPending}
                                     data-testid={`button-send-invoice-${invoice.id}`}
                                   >
                                     <Mail className="mr-2 h-4 w-4" />
-                                    Send Invoice
+                                    {sendInvoiceMutation.isPending ? "Sending..." : "Send Invoice"}
                                   </DropdownMenuItem>
                                 )}
                                 {invoice.status !== "paid" && (
                                   <DropdownMenuItem
-                                    onClick={() => markAsPaidMutation.mutate(invoice.id)}
+                                    onClick={() => setConfirmMarkPaidId(invoice.id)}
+                                    disabled={markAsPaidMutation.isPending}
                                     data-testid={`button-mark-paid-invoice-${invoice.id}`}
                                   >
                                     <CheckCircle className="mr-2 h-4 w-4" />
-                                    Mark as Paid
+                                    {markAsPaidMutation.isPending ? "Updating..." : "Mark as Paid"}
                                   </DropdownMenuItem>
                                 )}
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
                                   className="text-destructive focus:text-destructive"
-                                  onClick={() => deleteInvoiceMutation.mutate(invoice.id)}
+                                  onClick={() => setConfirmDeleteId(invoice.id)}
+                                  disabled={deleteInvoiceMutation.isPending}
                                   data-testid={`button-delete-invoice-${invoice.id}`}
                                 >
                                   <Trash2 className="mr-2 h-4 w-4" />
-                                  Delete
+                                  {deleteInvoiceMutation.isPending ? "Deleting..." : "Delete"}
                                 </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
@@ -707,8 +790,8 @@ export default function InvoicesPage() {
                           <GlassCard className="p-4 hover:shadow-md transition-all">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                               <div className="flex items-center gap-4 flex-1">
-                                <div className="p-2 rounded-lg bg-violet-100 dark:bg-violet-900/40">
-                                  <FileText className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+                                <div className="p-2 rounded-lg bg-sky-100 dark:bg-sky-900/40">
+                                  <FileText className="h-5 w-5 text-sky-600 dark:text-sky-400" />
                                 </div>
                                 <div className="min-w-0">
                                   <p className="font-semibold text-slate-900 dark:text-slate-100">
@@ -721,7 +804,7 @@ export default function InvoicesPage() {
                               </div>
 
                               <div className="flex items-center gap-4 justify-between sm:justify-end">
-                                <p className="text-lg font-bold text-violet-600 dark:text-violet-400">
+                                <p className="text-lg font-bold text-sky-600 dark:text-sky-400">
                                   {formatCurrency(invoice.amount)}
                                 </p>
                                 {getStatusBadge(invoice.status)}
@@ -746,29 +829,32 @@ export default function InvoicesPage() {
                                     {status !== "paid" && (
                                       <DropdownMenuItem
                                         onClick={() => sendInvoiceMutation.mutate(invoice.id)}
+                                        disabled={sendInvoiceMutation.isPending}
                                         data-testid={`button-send-invoice-${status}-${invoice.id}`}
                                       >
                                         <Mail className="mr-2 h-4 w-4" />
-                                        Send Invoice
+                                        {sendInvoiceMutation.isPending ? "Sending..." : "Send Invoice"}
                                       </DropdownMenuItem>
                                     )}
                                     {status !== "paid" && (
                                       <DropdownMenuItem
                                         onClick={() => markAsPaidMutation.mutate(invoice.id)}
+                                        disabled={markAsPaidMutation.isPending}
                                         data-testid={`button-mark-paid-invoice-${status}-${invoice.id}`}
                                       >
                                         <CheckCircle className="mr-2 h-4 w-4" />
-                                        Mark as Paid
+                                        {markAsPaidMutation.isPending ? "Updating..." : "Mark as Paid"}
                                       </DropdownMenuItem>
                                     )}
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem
                                       className="text-destructive focus:text-destructive"
                                       onClick={() => deleteInvoiceMutation.mutate(invoice.id)}
+                                      disabled={deleteInvoiceMutation.isPending}
                                       data-testid={`button-delete-invoice-${status}-${invoice.id}`}
                                     >
                                       <Trash2 className="mr-2 h-4 w-4" />
-                                      Delete
+                                      {deleteInvoiceMutation.isPending ? "Deleting..." : "Delete"}
                                     </DropdownMenuItem>
                                   </DropdownMenuContent>
                                 </DropdownMenu>
@@ -797,8 +883,8 @@ export default function InvoicesPage() {
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-2xl flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-violet-100 dark:bg-violet-900/40">
-                <FileText className="h-5 w-5 text-violet-600" />
+              <div className="p-2 rounded-lg bg-sky-100 dark:bg-sky-900/40">
+                <FileText className="h-5 w-5 text-sky-600" />
               </div>
               Invoice Details
             </DialogTitle>
@@ -838,7 +924,7 @@ export default function InvoicesPage() {
                     <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
                       Amount Due
                     </p>
-                    <p className="text-2xl font-bold bg-gradient-to-r from-violet-600 to-emerald-600 bg-clip-text text-transparent mt-1">
+                    <p className="text-2xl font-bold bg-gradient-to-r from-sky-600 to-emerald-600 bg-clip-text text-transparent mt-1">
                       {formatCurrency(selectedInvoice.amount)}
                     </p>
                   </div>
@@ -905,12 +991,29 @@ export default function InvoicesPage() {
                       </tbody>
                       <tfoot className="bg-slate-100 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-700">
                         <tr>
+                          <td colSpan={3} className="p-4 text-right text-sm text-slate-600 dark:text-slate-400">
+                            Subtotal:
+                          </td>
+                          <td className="p-4 text-right font-semibold text-slate-900 dark:text-slate-100">
+                            {currencySymbol}{Number((selectedInvoice as any).subtotal || selectedInvoice.amount).toFixed(2)}
+                          </td>
+                        </tr>
+                        {Number((selectedInvoice as any).taxRate) > 0 && (
+                          <tr>
+                            <td colSpan={3} className="p-4 text-right text-sm text-slate-600 dark:text-slate-400">
+                              Tax ({(selectedInvoice as any).taxRate}%):
+                            </td>
+                            <td className="p-4 text-right font-semibold text-slate-900 dark:text-slate-100">
+                              {currencySymbol}{Number((selectedInvoice as any).taxAmount || 0).toFixed(2)}
+                            </td>
+                          </tr>
+                        )}
+                        <tr>
                           <td colSpan={3} className="p-4 text-right font-semibold text-slate-900 dark:text-slate-100">
                             Total:
                           </td>
-                          <td className="p-4 text-right font-bold text-violet-600 dark:text-violet-400 text-lg">
-                            {currencySymbol}
-                            {Number(selectedInvoice.amount).toFixed(2)}
+                          <td className="p-4 text-right font-bold text-sky-600 dark:text-sky-400 text-lg">
+                            {currencySymbol}{Number(selectedInvoice.amount).toFixed(2)}
                           </td>
                         </tr>
                       </tfoot>
@@ -1007,6 +1110,18 @@ export default function InvoicesPage() {
                 </div>
               )}
 
+              {/* Notes */}
+              {(selectedInvoice as any).notes && (
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Notes</h3>
+                  <GlassCard className="p-4">
+                    <p className="text-sm text-slate-600 dark:text-slate-400 whitespace-pre-wrap">
+                      {(selectedInvoice as any).notes}
+                    </p>
+                  </GlassCard>
+                </div>
+              )}
+
               {/* Paid Status */}
               {selectedInvoice.status === "paid" && (
                 <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-900/40 rounded-lg flex items-center gap-3">
@@ -1026,7 +1141,7 @@ export default function InvoicesPage() {
             {selectedInvoice && selectedInvoice.status !== "paid" && (
               <Button
                 onClick={() => handleSendInvoice(selectedInvoice)}
-                className="bg-violet-600 hover:bg-violet-700 text-white"
+                className="bg-sky-600 hover:bg-sky-700 text-white"
               >
                 <Mail className="h-4 w-4 mr-2" />
                 Send Invoice
@@ -1035,6 +1150,41 @@ export default function InvoicesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Confirm Mark as Paid */}
+      <AlertDialog open={!!confirmMarkPaidId} onOpenChange={(open) => !open && setConfirmMarkPaidId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Mark Invoice as Paid?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will update the invoice status to paid. This action cannot be easily undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (confirmMarkPaidId) { markAsPaidMutation.mutate(confirmMarkPaidId); setConfirmMarkPaidId(null); } }}>
+              Confirm
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirm Delete Invoice */}
+      <AlertDialog open={!!confirmDeleteId} onOpenChange={(open) => !open && setConfirmDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Invoice?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this invoice. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => { if (confirmDeleteId) { deleteInvoiceMutation.mutate(confirmDeleteId); setConfirmDeleteId(null); } }}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageWrapper>
   );
 }

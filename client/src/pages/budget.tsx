@@ -137,16 +137,24 @@ export default function BudgetPage() {
   };
 
   const handleSubmit = () => {
+    if (!formData.name.trim()) {
+      toast({ title: "Validation Error", description: "Budget name is required.", variant: "destructive" });
+      return;
+    }
+    if (!formData.limit || parseFloat(formData.limit) <= 0) {
+      toast({ title: "Validation Error", description: "Budget limit must be greater than 0.", variant: "destructive" });
+      return;
+    }
     if (editingBudget) {
-      updateMutation.mutate({ id: editingBudget.id, data: { ...formData, limit: parseFloat(formData.limit) } });
+      updateMutation.mutate({ id: editingBudget.id, data: { ...formData, limit: formData.limit } });
     } else {
       createMutation.mutate(formData);
     }
   };
 
-  const totalBudget = budgets?.reduce((sum, b) => sum + b.limit, 0) || 0;
-  const totalSpent = budgets?.reduce((sum, b) => sum + b.spent, 0) || 0;
-  const overBudget = budgets?.filter((b) => b.spent > b.limit).length || 0;
+  const totalBudget = budgets?.reduce((sum, b) => sum + parseFloat(b.limit), 0) || 0;
+  const totalSpent = budgets?.reduce((sum, b) => sum + parseFloat(b.spent), 0) || 0;
+  const overBudget = budgets?.filter((b) => parseFloat(b.spent) > parseFloat(b.limit)).length || 0;
 
   const getCategoryGradient = (category: string) => {
     const gradients: Record<string, string> = {
@@ -280,7 +288,7 @@ export default function BudgetPage() {
             animate="visible"
           >
             {budgets.map((budget, index) => {
-              const percentage = (budget.spent / budget.limit) * 100;
+              const percentage = (parseFloat(budget.spent) / parseFloat(budget.limit)) * 100;
               const isOverBudget = percentage >= 100;
               const isWarning = percentage >= 80 && percentage < 100;
 
@@ -307,35 +315,36 @@ export default function BudgetPage() {
                           <h4 className="text-lg font-bold text-foreground">{budget.name}</h4>
                           <div className="flex items-center gap-2 mt-2 flex-wrap">
                             <StatusBadge
+                              status="active"
                               variant="secondary"
                               className="text-xs font-medium bg-background/50 backdrop-blur"
-                            >
-                              {budget.category}
-                            </StatusBadge>
+                              label={budget.category}
+                            />
                             <StatusBadge
+                              status="active"
                               variant="secondary"
                               className="text-xs font-medium bg-background/50 backdrop-blur capitalize"
-                            >
-                              {budget.period}
-                            </StatusBadge>
+                              label={budget.period}
+                            />
                           </div>
                         </div>
 
                         <div className="flex items-center gap-2">
                           {isOverBudget && (
-                            <StatusBadge variant="destructive" className="text-xs flex-shrink-0">
-                              <AlertTriangle className="h-3 w-3 mr-1" />
-                              Over
-                            </StatusBadge>
+                            <StatusBadge
+                              status="failed"
+                              variant="destructive"
+                              className="text-xs flex-shrink-0"
+                              label="Over"
+                            />
                           )}
                           {isWarning && !isOverBudget && (
                             <StatusBadge
+                              status="warning"
                               variant="warning"
                               className="text-xs flex-shrink-0 bg-amber-500/20 text-amber-700 dark:text-amber-400"
-                            >
-                              <TrendingUp className="h-3 w-3 mr-1" />
-                              Warning
-                            </StatusBadge>
+                              label="Warning"
+                            />
                           )}
 
                           <DropdownMenu>
@@ -372,7 +381,7 @@ export default function BudgetPage() {
                             size={80}
                             strokeWidth={6}
                             color={
-                              isOverBudget ? "rgb(225, 29, 72)" : isWarning ? "rgb(217, 119, 6)" : "rgb(139, 92, 246)"
+                              isOverBudget ? "rgb(225, 29, 72)" : isWarning ? "rgb(217, 119, 6)" : "rgb(14, 165, 233)"
                             }
                           />
                         </div>
@@ -380,7 +389,7 @@ export default function BudgetPage() {
                         <div className="flex-1 min-w-0">
                           <div className="space-y-2">
                             <div>
-                              <p className="text-2xl font-black text-foreground" data-testid={`spent-${budget.id}`}>
+                              <p className="text-2xl font-bold font-mono text-foreground" data-testid={`spent-${budget.id}`}>
                                 {formatCurrency(budget.spent)}
                               </p>
                               <p className="text-xs text-muted-foreground">
@@ -391,7 +400,7 @@ export default function BudgetPage() {
                               <span className="text-muted-foreground">{Math.round(percentage)}% used</span>
                               {isOverBudget && (
                                 <span className="text-rose-600 dark:text-rose-400">
-                                  +{formatCurrency(budget.spent - budget.limit)}
+                                  +{formatCurrency(parseFloat(budget.spent) - parseFloat(budget.limit))}
                                 </span>
                               )}
                             </div>
