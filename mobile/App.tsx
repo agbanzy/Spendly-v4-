@@ -31,7 +31,7 @@ const queryClient = new QueryClient({
 
 const asyncStoragePersister = createAsyncStoragePersister({
   storage: AsyncStorage,
-  key: 'SPENDLY_QUERY_CACHE',
+  key: 'FINANCIAR_QUERY_CACHE',
 });
 
 function ThemedStatusBar() {

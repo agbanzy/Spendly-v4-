@@ -388,7 +388,7 @@ export default function OnboardingScreen({ onComplete, navigation }: OnboardingS
     >
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.topSection}>
-          <Text style={styles.logo}>Spendly</Text>
+          <Text style={styles.logo}>Financiar</Text>
           <Text style={styles.welcomeText}>Let's set up your account</Text>
           {renderProgressBar()}
         </View>

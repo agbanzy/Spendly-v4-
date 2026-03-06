@@ -7,9 +7,9 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: spendly
-  ECS_CLUSTER: spendly
-  ECS_SERVICE: SpendlyStack-SpendlyServicexxxxxxxx  # Update after first CDK deploy
+  ECR_REPOSITORY: financiar
+  ECS_CLUSTER: financiar
+  ECS_SERVICE: FinanciarStack-FinanciarServicexxxxxxxx  # Update after first CDK deploy
 
 permissions:
   id-token: write

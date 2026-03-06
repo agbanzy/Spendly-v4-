@@ -88,11 +88,34 @@ const categories = [
   "Other",
 ];
 
+const categoryKeywords: Record<string, string[]> = {
+  Software: ["aws", "github", "slack", "notion", "figma", "adobe", "microsoft", "google cloud", "heroku", "vercel", "netlify", "jira", "atlassian", "zoom"],
+  Travel: ["uber", "lyft", "airbnb", "hotel", "airline", "flight", "taxi", "booking", "expedia", "delta", "united"],
+  Office: ["staples", "office depot", "ikea", "amazon", "costco", "target", "walmart"],
+  Marketing: ["facebook ads", "google ads", "mailchimp", "hubspot", "meta", "twitter", "linkedin"],
+  Food: ["doordash", "grubhub", "uber eats", "starbucks", "mcdonald", "restaurant", "cafe", "lunch", "dinner"],
+  Equipment: ["apple", "dell", "lenovo", "best buy", "newegg", "b&h"],
+  Utilities: ["electric", "water", "internet", "comcast", "at&t", "verizon", "power"],
+  Legal: ["law firm", "attorney", "legal", "counsel"],
+};
+
+const suggestCategory = (merchant: string): string | null => {
+  const lower = merchant.toLowerCase();
+  for (const [category, keywords] of Object.entries(categoryKeywords)) {
+    if (keywords.some(kw => lower.includes(kw))) {
+      return category;
+    }
+  }
+  return null;
+};
+
 export default function Expenses() {
   const [open, setOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
+  const [receiptPreviewUrl, setReceiptPreviewUrl] = useState<string | null>(null);
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -560,6 +583,19 @@ export default function Expenses() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {watch("merchant") && suggestCategory(watch("merchant")) && suggestCategory(watch("merchant")) !== watch("category") && (
+                      <motion.button
+                        type="button"
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-400 text-xs font-medium hover:bg-sky-100 dark:hover:bg-sky-900/30 transition-colors w-full"
+                        onClick={() => setValue("category", suggestCategory(watch("merchant"))!)}
+                        data-testid="button-suggested-category"
+                      >
+                        <AlertCircle className="h-3.5 w-3.5" />
+                        Suggested: <strong>{suggestCategory(watch("merchant"))}</strong> — click to apply
+                      </motion.button>
+                    )}
                   </div>
 
                   <FormField label="Note (Optional)">
@@ -985,30 +1021,45 @@ export default function Expenses() {
                   </div>
                 )}
 
-                {/* Attachments Display */}
+                {/* Attachments Display with Image Preview */}
                 {selectedExpense.attachments && selectedExpense.attachments.length > 0 && (
                   <div>
                     <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-bold tracking-wider mb-3">
                       Attachments ({selectedExpense.attachments.length})
                     </p>
                     <div className="grid grid-cols-2 gap-3">
-                      {selectedExpense.attachments.map((url, index) => (
-                        <motion.a
-                          key={index}
-                          href={url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          whileHover={{ scale: 1.05 }}
-                          className="border border-slate-200 dark:border-slate-700 rounded-xl p-3 flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-                        >
-                          {url.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
-                            <Image className="h-4 w-4 text-cyan-500 shrink-0" />
-                          ) : (
-                            <FileText className="h-4 w-4 text-amber-500 shrink-0" />
-                          )}
-                          <span className="text-xs truncate text-slate-600 dark:text-slate-400">Attachment {index + 1}</span>
-                        </motion.a>
-                      ))}
+                      {selectedExpense.attachments.map((url, index) => {
+                        const isImage = url.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+                        return (
+                          <motion.a
+                            key={index}
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            whileHover={{ scale: 1.03 }}
+                            className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden hover:border-sky-400 dark:hover:border-sky-600 transition-colors group"
+                          >
+                            {isImage ? (
+                              <div className="relative">
+                                <img
+                                  src={url}
+                                  alt={`Receipt ${index + 1}`}
+                                  className="w-full h-32 object-cover"
+                                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                />
+                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                                  <Eye className="h-5 w-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="p-3 flex items-center gap-2">
+                                <FileText className="h-4 w-4 text-amber-500 shrink-0" />
+                                <span className="text-xs truncate text-slate-600 dark:text-slate-400">Attachment {index + 1}</span>
+                              </div>
+                            )}
+                          </motion.a>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -1044,9 +1095,22 @@ export default function Expenses() {
                 {selectedExpense.receiptUrl && (
                   <div className="bg-slate-50 dark:bg-slate-900/30 rounded-2xl p-4">
                     <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-bold tracking-wider mb-2">Receipt</p>
-                    <a href={selectedExpense.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 underline text-sm font-medium transition-colors">
-                      View Receipt
-                    </a>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => {
+                          setReceiptPreviewUrl(selectedExpense.receiptUrl!);
+                          setReceiptPreviewOpen(true);
+                        }}
+                        className="flex items-center gap-2 text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 text-sm font-medium transition-colors"
+                        data-testid="button-preview-receipt"
+                      >
+                        <Image className="h-4 w-4" />
+                        Preview Receipt
+                      </button>
+                      <a href={selectedExpense.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-sm transition-colors">
+                        Open in new tab
+                      </a>
+                    </div>
                   </div>
                 )}
 
@@ -1178,6 +1242,41 @@ export default function Expenses() {
           </DialogContent>
         </Dialog>
       </motion.div>
+
+      {/* Receipt Image Preview Dialog */}
+      <Dialog open={receiptPreviewOpen} onOpenChange={setReceiptPreviewOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Image className="h-5 w-5 text-sky-600" />
+              Receipt Preview
+            </DialogTitle>
+          </DialogHeader>
+          {receiptPreviewUrl && (
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-full max-h-[60vh] overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30">
+                <img
+                  src={receiptPreviewUrl}
+                  alt="Receipt"
+                  className="w-full h-auto object-contain"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                    (e.target as HTMLImageElement).parentElement!.innerHTML = '<div class="flex flex-col items-center justify-center py-12 text-slate-400"><p class="text-sm">Unable to preview this receipt.</p><p class="text-xs mt-1">The file may not be an image format.</p></div>';
+                  }}
+                />
+              </div>
+              <a
+                href={receiptPreviewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300 font-medium underline"
+              >
+                Open full size in new tab
+              </a>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </PageWrapper>
   );
 }

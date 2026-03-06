@@ -1,8 +1,8 @@
-# Spendly Mobile App
+# Financiar Mobile App
 
-The official mobile app for Spendly - Global Expense Management Platform.
+The official mobile app for Financiar - Global Expense Management Platform.
 
-**Website:** [spendlymanager.com](https://spendlymanager.com)
+**Website:** [thefinanciar.com](https://thefinanciar.com)
 
 ## Features
 
@@ -148,16 +148,16 @@ mobile/
 
 ## API Configuration
 
-The app connects to the Spendly backend at:
-- **Production:** https://spendlymanager.com
+The app connects to the Financiar backend at:
+- **Production:** https://thefinanciar.com
 
 Update `EXPO_PUBLIC_API_URL` in `.env` to point to a different server.
 
 ## App Store Links (Coming Soon)
 
-- **iOS App Store:** https://apps.apple.com/app/spendly-expense-manager
-- **Google Play Store:** https://play.google.com/store/apps/details?id=com.spendly.app
+- **iOS App Store:** https://apps.apple.com/app/financiar-expense-manager
+- **Google Play Store:** https://play.google.com/store/apps/details?id=com.financiar.app
 
 ## Support
 
-For issues and feature requests, contact support@spendlymanager.com
+For issues and feature requests, contact support@thefinanciar.com

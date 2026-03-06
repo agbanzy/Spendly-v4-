@@ -1,5 +1,5 @@
 -- =====================================================
--- Spendly v4 Data Backfill Scripts
+-- Financiar Data Backfill Scripts
 -- Run AFTER drizzle-kit push completes the schema migration
 -- =====================================================
 

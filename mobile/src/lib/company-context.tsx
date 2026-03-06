@@ -60,7 +60,7 @@ interface CreateCompanyData {
   currency?: string;
 }
 
-const ACTIVE_COMPANY_KEY = 'spendly_active_company_id';
+const ACTIVE_COMPANY_KEY = 'financiar_active_company_id';
 
 // ==================== CONTEXT ====================
 

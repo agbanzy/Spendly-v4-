@@ -160,8 +160,8 @@ CREATE TABLE "company_members" (
 --> statement-breakpoint
 CREATE TABLE "company_settings" (
 	"id" integer PRIMARY KEY DEFAULT 1 NOT NULL,
-	"company_name" text DEFAULT 'Spendly' NOT NULL,
-	"company_email" text DEFAULT 'finance@spendlymanager.com' NOT NULL,
+	"company_name" text DEFAULT 'Financiar' NOT NULL,
+	"company_email" text DEFAULT 'finance@thefinanciar.com' NOT NULL,
 	"company_phone" text DEFAULT '+1 (555) 123-4567' NOT NULL,
 	"company_address" text DEFAULT '123 Business Ave, San Francisco, CA 94105' NOT NULL,
 	"currency" text DEFAULT 'USD' NOT NULL,

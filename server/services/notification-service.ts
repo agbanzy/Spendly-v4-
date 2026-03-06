@@ -243,12 +243,12 @@ class NotificationService {
   }
 
   private getAppUrl(): string {
-    return process.env.APP_URL || 'https://spendlymanager.com';
+    return process.env.APP_URL || 'https://thefinanciar.com';
   }
 
   async sendEmail(config: EmailConfig): Promise<void> {
-    const fromEmail = process.env.AWS_SES_FROM_EMAIL || 'noreply@spendlymanager.com';
-    const fromName = process.env.AWS_SES_FROM_NAME || 'Spendly';
+    const fromEmail = process.env.AWS_SES_FROM_EMAIL || 'noreply@thefinanciar.com';
+    const fromName = process.env.AWS_SES_FROM_NAME || 'Financiar';
     const formattedFrom = `${fromName} <${fromEmail}>`;
     const appUrl = this.getAppUrl();
     const plainText = config.text || config.html.replace(/<[^>]*>/g, '');
@@ -262,9 +262,9 @@ class NotificationService {
           `From: ${formattedFrom}`,
           `To: ${config.to}`,
           `Subject: =?UTF-8?B?${Buffer.from(config.subject).toString('base64')}?=`,
-          `List-Unsubscribe: <mailto:unsubscribe@spendlymanager.com>, <${appUrl}/settings>`,
-          `Reply-To: support@spendlymanager.com`,
-          `X-Mailer: Spendly/1.0`,
+          `List-Unsubscribe: <mailto:unsubscribe@thefinanciar.com>, <${appUrl}/settings>`,
+          `Reply-To: support@thefinanciar.com`,
+          `X-Mailer: Financiar/1.0`,
           `Precedence: bulk`,
           `Content-Type: multipart/alternative; boundary="${boundary}"`,
           ``,
@@ -310,7 +310,7 @@ class NotificationService {
           MessageAttributes: {
             'AWS.SNS.SMS.SenderID': {
               DataType: 'String',
-              StringValue: process.env.AWS_SNS_SENDER_ID || 'Spendly',
+              StringValue: process.env.AWS_SNS_SENDER_ID || 'Financiar',
             },
             'AWS.SNS.SMS.SMSType': {
               DataType: 'String',
@@ -421,20 +421,20 @@ class NotificationService {
     </div>
     <div style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb;">
       <p style="color: #9ca3af; font-size: 12px; margin: 0 0 8px 0;">
-        You are receiving this because you have an account with Spendly.
+        You are receiving this because you have an account with Financiar.
       </p>
       <p style="color: #9ca3af; font-size: 12px; margin: 0 0 8px 0;">
         <a href="${appUrl}/settings" style="color: #6366f1; text-decoration: underline;">Manage notification preferences</a>
       </p>
       <p style="color: #9ca3af; font-size: 11px; margin: 0;">
-        Spendly Inc., 1 Market Street, San Francisco, CA 94105
+        Financiar Inc., 1 Market Street, San Francisco, CA 94105
       </p>
     </div>
   </div>
 </body>
 </html>`;
 
-    const plainFooter = `\n\n---\nYou are receiving this because you have an account with Spendly.\nManage notification preferences: ${appUrl}/settings\nSpendly Inc., 1 Market Street, San Francisco, CA 94105`;
+    const plainFooter = `\n\n---\nYou are receiving this because you have an account with Financiar.\nManage notification preferences: ${appUrl}/settings\nFinanciar Inc., 1 Market Street, San Francisco, CA 94105`;
 
     return {
       html,
@@ -541,7 +541,7 @@ class NotificationService {
       userId,
       type: 'kyc_approved',
       title: 'Verification Approved',
-      message: 'Your identity verification has been approved. You now have full access to all Spendly features.',
+      message: 'Your identity verification has been approved. You now have full access to all Financiar features.',
       data: { actionUrl: '/dashboard' },
       channels: ['in_app', 'email', 'push'],
     });
@@ -591,9 +591,9 @@ class NotificationService {
 
     const bodyHtml = `
       <p style="font-size: 16px; color: #1f2937;">Hi <strong>${safeName}</strong>,</p>
-      <p style="font-size: 16px; color: #4b5563;">You have been invited to join <strong>${safeCompanyName}</strong> on Spendly as a <strong>${safeRole}</strong>${safeDepartment ? ` in the ${safeDepartment} department` : ''}.</p>
+      <p style="font-size: 16px; color: #4b5563;">You have been invited to join <strong>${safeCompanyName}</strong> on Financiar as a <strong>${safeRole}</strong>${safeDepartment ? ` in the ${safeDepartment} department` : ''}.</p>
       ${config.invitedBy ? `<p style="font-size: 14px; color: #6b7280;">Invited by: ${this.escapeHtml(config.invitedBy)}</p>` : ''}
-      <p style="font-size: 16px; color: #4b5563;">With Spendly you can:</p>
+      <p style="font-size: 16px; color: #4b5563;">With Financiar you can:</p>
       <ul style="font-size: 15px; color: #555;">
         <li>Submit and track expenses</li>
         <li>Manage budgets and approvals</li>
@@ -610,7 +610,7 @@ class NotificationService {
 
     const plainText = `Hi ${config.name},
 
-You have been invited to join ${config.companyName || 'your team'} on Spendly as a ${config.role}${config.department ? ` in the ${config.department} department` : ''}.
+You have been invited to join ${config.companyName || 'your team'} on Financiar as a ${config.role}${config.department ? ` in the ${config.department} department` : ''}.
 ${config.invitedBy ? `Invited by: ${config.invitedBy}` : ''}
 
 Accept your invitation: ${inviteUrl}
@@ -619,10 +619,10 @@ ${config.inviteToken ? 'This invitation expires in 7 days.' : ''}
 
 If you have any questions, please contact your team administrator.
 
-- The Spendly Team`;
+- The Financiar Team`;
 
     const { html, text } = this.buildEmailTemplate({
-      preheader: `You have been invited to join ${config.companyName || 'Spendly'} as a ${config.role}`,
+      preheader: `You have been invited to join ${config.companyName || 'Financiar'} as a ${config.role}`,
       headerTitle: 'Team Invitation',
       bodyHtml,
       plainText,
@@ -631,7 +631,7 @@ If you have any questions, please contact your team administrator.
     try {
       await this.sendEmail({
         to: config.email,
-        subject: `You are invited to join ${config.companyName || 'Spendly'}`,
+        subject: `You are invited to join ${config.companyName || 'Financiar'}`,
         html,
         text,
       });
@@ -650,7 +650,7 @@ If you have any questions, please contact your team administrator.
     const bodyHtml = `
       <p style="font-size: 18px; color: #1f2937;">Hi <strong>${safeName}</strong>,</p>
       <p style="color: #4b5563; line-height: 1.6; font-size: 16px;">Thank you for creating your account.</p>
-      <p style="color: #4b5563; line-height: 1.6; font-size: 16px;">Here is what you can do with Spendly:</p>
+      <p style="color: #4b5563; line-height: 1.6; font-size: 16px;">Here is what you can do with Financiar:</p>
       <ul style="color: #4b5563; line-height: 1.8; font-size: 15px;">
         <li>Track and manage expenses</li>
         <li>Set budgets and monitor spending</li>
@@ -668,7 +668,7 @@ If you have any questions, please contact your team administrator.
 
 Thank you for creating your account.
 
-Here is what you can do with Spendly:
+Here is what you can do with Financiar:
 - Track and manage expenses
 - Set budgets and monitor spending
 - Create and send professional invoices
@@ -678,8 +678,8 @@ Here is what you can do with Spendly:
 Visit ${appUrl}/dashboard to get started.`;
 
     const { html, text } = this.buildEmailTemplate({
-      preheader: 'Your Spendly account has been created successfully',
-      headerTitle: 'Welcome to Spendly',
+      preheader: 'Your Financiar account has been created successfully',
+      headerTitle: 'Welcome to Financiar',
       bodyHtml,
       plainText,
     });
@@ -687,7 +687,7 @@ Visit ${appUrl}/dashboard to get started.`;
     try {
       await this.sendEmail({
         to: config.email,
-        subject: 'Your Spendly account is ready',
+        subject: 'Your Financiar account is ready',
         html,
         text,
       });
@@ -720,7 +720,7 @@ Security Notice: If you did not make this change, please contact our support tea
 For your security, we recommend using a strong, unique password.`;
 
     const { html, text } = this.buildEmailTemplate({
-      preheader: 'Your Spendly password has been changed',
+      preheader: 'Your Financiar password has been changed',
       headerTitle: 'Password Reset Successful',
       bodyHtml,
       plainText,
@@ -729,7 +729,7 @@ For your security, we recommend using a strong, unique password.`;
     try {
       await this.sendEmail({
         to: config.email,
-        subject: 'Your Spendly Password Has Been Reset',
+        subject: 'Your Financiar Password Has Been Reset',
         html,
         text,
       });
@@ -746,18 +746,18 @@ For your security, we recommend using a strong, unique password.`;
 
     const bodyHtml = `
       <p style="font-size: 16px; color: #1f2937;">Hi <strong>${safeName}</strong>,</p>
-      <p style="color: #4b5563; line-height: 1.6;">Please verify your email address to complete your Spendly account setup.</p>
+      <p style="color: #4b5563; line-height: 1.6;">Please verify your email address to complete your Financiar account setup.</p>
       <div style="text-align: center; margin: 32px 0;">
         <a href="${config.verificationLink}" style="display: inline-block; background-color: #4F46E5; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">Verify Email Address</a>
       </div>
-      <p style="color: #6b7280; font-size: 14px;">This link will expire in 24 hours. If you did not create a Spendly account, you can safely ignore this email.</p>
+      <p style="color: #6b7280; font-size: 14px;">This link will expire in 24 hours. If you did not create a Financiar account, you can safely ignore this email.</p>
     `;
 
     const plainText = `Hi ${config.name},
 
 Please verify your email by visiting: ${config.verificationLink}
 
-This link expires in 24 hours. If you did not create a Spendly account, you can safely ignore this email.`;
+This link expires in 24 hours. If you did not create a Financiar account, you can safely ignore this email.`;
 
     const { html, text } = this.buildEmailTemplate({
       preheader: 'Verify your email to complete account setup',
@@ -769,7 +769,7 @@ This link expires in 24 hours. If you did not create a Spendly account, you can 
     try {
       await this.sendEmail({
         to: config.email,
-        subject: 'Verify Your Spendly Email Address',
+        subject: 'Verify Your Financiar Email Address',
         html,
         text,
       });
@@ -1113,7 +1113,7 @@ The funds have been transferred to your registered bank account.`;
 
     const bodyHtml = `
       <p style="font-size: 16px; color: #1f2937;">Hi <strong>${safeName}</strong>,</p>
-      <p style="color: #4b5563; line-height: 1.6;">We detected a new login to your Spendly account.</p>
+      <p style="color: #4b5563; line-height: 1.6;">We detected a new login to your Financiar account.</p>
       <div style="background-color: #f9fafb; border-radius: 8px; padding: 20px; margin: 24px 0;">
         <p style="margin: 8px 0; color: #374151;"><strong>Time:</strong> ${this.escapeHtml(config.loginTime)}</p>
         ${config.device ? `<p style="margin: 8px 0; color: #374151;"><strong>Device:</strong> ${this.escapeHtml(config.device)}</p>` : ''}
@@ -1127,14 +1127,14 @@ The funds have been transferred to your registered bank account.`;
 
     const plainText = `Hi ${config.name},
 
-We detected a new login to your Spendly account.
+We detected a new login to your Financiar account.
 
 Time: ${config.loginTime}${config.device ? `\nDevice: ${config.device}` : ''}${config.ipAddress ? `\nIP Address: ${config.ipAddress}` : ''}${config.location ? `\nLocation: ${config.location}` : ''}
 
 If you did not log in, please change your password immediately and contact support.`;
 
     const { html, text } = this.buildEmailTemplate({
-      preheader: `New login detected on your Spendly account at ${config.loginTime}`,
+      preheader: `New login detected on your Financiar account at ${config.loginTime}`,
       headerTitle: 'New Login Detected',
       bodyHtml,
       plainText,
@@ -1143,7 +1143,7 @@ If you did not log in, please change your password immediately and contact suppo
     try {
       await this.sendEmail({
         to: config.email,
-        subject: 'New Login to Your Spendly Account',
+        subject: 'New Login to Your Financiar Account',
         html,
         text,
       });
@@ -1167,7 +1167,7 @@ If you did not log in, please change your password immediately and contact suppo
     const sign = config.type === 'credit' ? '+' : '-';
     const balanceText = config.balance !== undefined ? ` Bal: ${config.currency}${config.balance.toLocaleString()}` : '';
     
-    const message = `Spendly: ${typeLabel} ${sign}${config.currency}${config.amount.toLocaleString()} - ${config.description}.${balanceText}`;
+    const message = `Financiar: ${typeLabel} ${sign}${config.currency}${config.amount.toLocaleString()} - ${config.description}.${balanceText}`;
 
     try {
       await this.sendSms({

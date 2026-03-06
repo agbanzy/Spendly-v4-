@@ -350,11 +350,11 @@ export function AppSidebar() {
         <Link href="/dashboard">
           <div className="flex items-center gap-3 cursor-pointer group">
             <div className="relative">
-              <img src="/spendly-logo.png" alt="Spendly" className="w-9 h-9 rounded-xl shadow-md transition-shadow group-hover:shadow-lg" />
+              <img src="/financiar-logo.svg" alt="Financiar" className="w-9 h-9 rounded-xl shadow-md transition-shadow group-hover:shadow-lg" />
               <div className="absolute -inset-0.5 bg-gradient-to-br from-primary/20 to-cyan-500/20 rounded-xl blur opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
             <div>
-              <span className="text-lg font-bold tracking-tight text-foreground">Spendly</span>
+              <span className="text-lg font-bold tracking-tight text-foreground">Financiar</span>
               <div className="flex items-center gap-1.5">
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Finance HQ</p>

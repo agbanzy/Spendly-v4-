@@ -339,7 +339,7 @@ export default function PayrollPage() {
       </head>
       <body>
         <div class="header">
-          <h1>SPENDLY</h1>
+          <h1>FINANCIAR</h1>
           <p>Payslip for ${new Date(selectedEntry.payDate).toLocaleDateString("en-US", { month: "long", year: "numeric" })}</p>
         </div>
         <div class="employee-info">
@@ -723,6 +723,37 @@ export default function PayrollPage() {
         </motion.div>
       </motion.div>
 
+      {/* Payroll History Summary */}
+      <motion.div variants={fadeUp} className="mt-6">
+        <GlassCard className="p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <TrendingUp className="h-5 w-5 text-violet-600" />
+            <SectionLabel>Monthly Disbursement Summary</SectionLabel>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="p-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+              <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium uppercase tracking-wider">Paid This Month</p>
+              <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 mt-1">{formatCurrency(paidThisMonth)}</p>
+              <p className="text-xs text-emerald-600 dark:text-emerald-500 mt-1">
+                {payrollEntries.filter((e) => e.status === "paid").length} employee{payrollEntries.filter((e) => e.status === "paid").length !== 1 ? "s" : ""}
+              </p>
+            </div>
+            <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+              <p className="text-xs text-amber-700 dark:text-amber-400 font-medium uppercase tracking-wider">Pending Payments</p>
+              <p className="text-2xl font-bold text-amber-700 dark:text-amber-300 mt-1">{formatCurrency(pendingPayroll)}</p>
+              <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">
+                {payrollEntries.filter((e) => e.status === "pending").length} employee{payrollEntries.filter((e) => e.status === "pending").length !== 1 ? "s" : ""} awaiting
+              </p>
+            </div>
+            <div className="p-4 rounded-lg bg-violet-50 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800">
+              <p className="text-xs text-violet-700 dark:text-violet-400 font-medium uppercase tracking-wider">Est. Total Tax (~25%)</p>
+              <p className="text-2xl font-bold text-violet-700 dark:text-violet-300 mt-1">{formatCurrency(totalPayroll * 0.25)}</p>
+              <p className="text-xs text-violet-600 dark:text-violet-500 mt-1">Based on total payroll</p>
+            </div>
+          </div>
+        </GlassCard>
+      </motion.div>
+
       <AlertDialog open={isRunPayrollOpen} onOpenChange={setIsRunPayrollOpen}>
         <AlertDialogContent className="sm:max-w-md">
           <AlertDialogHeader>
@@ -809,6 +840,10 @@ export default function PayrollPage() {
                   <span className="text-slate-600 dark:text-slate-400 text-sm">Deductions</span>
                   <span className="font-semibold text-rose-600 dark:text-rose-400">-{formatCurrency(Number(selectedEntry.deductions))}</span>
                 </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600 dark:text-slate-400 text-sm">Est. Tax (~25%)</span>
+                  <span className="font-semibold text-amber-600 dark:text-amber-400">-{formatCurrency(Number(selectedEntry.netPay) * 0.25)}</span>
+                </div>
                 <div className="flex justify-between items-center border-t border-slate-200 dark:border-slate-700 pt-3">
                   <span className="font-bold text-gray-900 dark:text-white">Net Pay</span>
                   <span className="text-lg font-bold text-violet-600 dark:text-violet-400">{formatCurrency(Number(selectedEntry.netPay))}</span>
@@ -853,7 +888,7 @@ export default function PayrollPage() {
           {selectedEntry && (
             <div className="space-y-4">
               <div className="text-center pb-4 border-b border-slate-200 dark:border-slate-700">
-                <h2 className="text-xl font-bold text-violet-600 dark:text-violet-400">SPENDLY</h2>
+                <h2 className="text-xl font-bold text-violet-600 dark:text-violet-400">FINANCIAR</h2>
                 <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
                   Payslip for {new Date(selectedEntry.payDate).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
                 </p>
@@ -899,6 +934,10 @@ export default function PayrollPage() {
                 <div className="flex justify-between py-3 border-b border-slate-200 dark:border-slate-700">
                   <span className="text-slate-600 dark:text-slate-400 text-sm">Deductions</span>
                   <span className="font-medium text-rose-600 dark:text-rose-400">-{formatCurrency(Number(selectedEntry.deductions))}</span>
+                </div>
+                <div className="flex justify-between py-3 border-b border-slate-200 dark:border-slate-700">
+                  <span className="text-slate-600 dark:text-slate-400 text-sm">Est. Tax (~25%)</span>
+                  <span className="font-medium text-amber-600 dark:text-amber-400">-{formatCurrency(Number(selectedEntry.netPay) * 0.25)}</span>
                 </div>
                 <div className="flex justify-between py-3 font-bold text-gray-900 dark:text-white">
                   <span>Net Pay</span>
@@ -1069,11 +1108,17 @@ export default function PayrollPage() {
               </div>
             </div>
 
-            <GlassCard className="p-3">
+            <GlassCard className="p-3 space-y-2">
               <div className="flex justify-between items-center">
                 <span className="text-slate-600 dark:text-slate-400 text-sm">Net Pay</span>
                 <span className="font-bold text-violet-600 dark:text-violet-400">
                   {formatCurrency((parseFloat(formData.salary) || 0) + (parseFloat(formData.bonus) || 0) - (parseFloat(formData.deductions) || 0))}
+                </span>
+              </div>
+              <div className="flex justify-between items-center border-t border-slate-200 dark:border-slate-700 pt-2">
+                <span className="text-slate-600 dark:text-slate-400 text-xs">Est. Tax (~25%)</span>
+                <span className="font-medium text-amber-600 dark:text-amber-400 text-sm">
+                  {formatCurrency(((parseFloat(formData.salary) || 0) + (parseFloat(formData.bonus) || 0) - (parseFloat(formData.deductions) || 0)) * 0.25)}
                 </span>
               </div>
             </GlassCard>

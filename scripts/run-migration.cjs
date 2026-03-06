@@ -452,7 +452,7 @@ async function runVerification(client) {
 
 async function main() {
   const mode = process.argv[2] || 'all';
-  console.log(`\nSpendly v4 Database Migration Runner`);
+  console.log(`\nFinanciar Database Migration Runner`);
   console.log(`Mode: ${mode}`);
   console.log(`Database: ${DATABASE_URL.replace(/:[^:@]+@/, ':***@')}\n`);
 

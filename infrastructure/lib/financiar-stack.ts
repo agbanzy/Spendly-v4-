@@ -10,17 +10,17 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
-interface SpendlyStackProps extends cdk.StackProps {
+interface FinanciarStackProps extends cdk.StackProps {
   /** ARN of an ACM certificate for HTTPS. If not provided, only HTTP listener is created. */
   certificateArn?: string;
 }
 
-export class SpendlyStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: SpendlyStackProps) {
+export class FinanciarStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: FinanciarStackProps) {
     super(scope, id, props);
 
     // ==================== VPC ====================
-    const vpc = new ec2.Vpc(this, 'SpendlyVpc', {
+    const vpc = new ec2.Vpc(this, 'FinanciarVpc', {
       maxAzs: 2,
       natGateways: 1,
       subnetConfiguration: [
@@ -30,9 +30,9 @@ export class SpendlyStack extends cdk.Stack {
     });
 
     // ==================== SECRETS ====================
-    const appSecrets = new secretsmanager.Secret(this, 'SpendlySecrets', {
-      secretName: 'spendly/app-secrets',
-      description: 'Spendly application secrets',
+    const appSecrets = new secretsmanager.Secret(this, 'FinanciarSecrets', {
+      secretName: 'financiar/app-secrets',
+      description: 'Financiar application secrets',
       generateSecretString: {
         secretStringTemplate: JSON.stringify({
           DATABASE_URL: '',
@@ -50,11 +50,11 @@ export class SpendlyStack extends cdk.Stack {
     // ==================== RDS PostgreSQL ====================
     const dbSecurityGroup = new ec2.SecurityGroup(this, 'DbSecurityGroup', {
       vpc,
-      description: 'Security group for Spendly RDS',
+      description: 'Security group for Financiar RDS',
       allowAllOutbound: false,
     });
 
-    const database = new rds.DatabaseInstance(this, 'SpendlyDb', {
+    const database = new rds.DatabaseInstance(this, 'FinanciarDb', {
       engine: rds.DatabaseInstanceEngine.postgres({
         version: rds.PostgresEngineVersion.VER_16_4,
       }),
@@ -62,9 +62,9 @@ export class SpendlyStack extends cdk.Stack {
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       securityGroups: [dbSecurityGroup],
-      databaseName: 'spendly',
-      credentials: rds.Credentials.fromGeneratedSecret('spendly_admin', {
-        secretName: 'spendly/db-credentials',
+      databaseName: 'financiar',
+      credentials: rds.Credentials.fromGeneratedSecret('financiar_admin', {
+        secretName: 'financiar/db-credentials',
       }),
       storageEncrypted: true,
       multiAz: false,
@@ -76,8 +76,8 @@ export class SpendlyStack extends cdk.Stack {
     });
 
     // ==================== ECR Repository ====================
-    const ecrRepo = new ecr.Repository(this, 'SpendlyRepo', {
-      repositoryName: 'spendly',
+    const ecrRepo = new ecr.Repository(this, 'FinanciarRepo', {
+      repositoryName: 'financiar',
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       lifecycleRules: [
         { maxImageCount: 10, description: 'Keep last 10 images' },
@@ -85,16 +85,16 @@ export class SpendlyStack extends cdk.Stack {
     });
 
     // ==================== ECS Cluster ====================
-    const cluster = new ecs.Cluster(this, 'SpendlyCluster', {
+    const cluster = new ecs.Cluster(this, 'FinanciarCluster', {
       vpc,
-      clusterName: 'spendly',
+      clusterName: 'financiar',
       containerInsights: true,
     });
 
     // ==================== ECS Task Definition ====================
-    const taskRole = new iam.Role(this, 'SpendlyTaskRole', {
+    const taskRole = new iam.Role(this, 'FinanciarTaskRole', {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
-      description: 'Spendly ECS task role',
+      description: 'Financiar ECS task role',
     });
 
     // Grant SES, SNS, Secrets Manager access
@@ -109,36 +109,36 @@ export class SpendlyStack extends cdk.Stack {
     appSecrets.grantRead(taskRole);
     database.secret?.grantRead(taskRole);
 
-    const taskDefinition = new ecs.FargateTaskDefinition(this, 'SpendlyTask', {
+    const taskDefinition = new ecs.FargateTaskDefinition(this, 'FinanciarTask', {
       memoryLimitMiB: 1024,
       cpu: 512,
       taskRole,
     });
 
-    const logGroup = new logs.LogGroup(this, 'SpendlyLogs', {
-      logGroupName: '/ecs/spendly',
+    const logGroup = new logs.LogGroup(this, 'FinanciarLogs', {
+      logGroupName: '/ecs/financiar',
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
-    const container = taskDefinition.addContainer('spendly', {
+    const container = taskDefinition.addContainer('financiar', {
       image: ecs.ContainerImage.fromEcrRepository(ecrRepo, 'latest'),
       logging: ecs.LogDrivers.awsLogs({
-        streamPrefix: 'spendly',
+        streamPrefix: 'financiar',
         logGroup,
       }),
       environment: {
         NODE_ENV: 'production',
         PORT: '5000',
-        APP_URL: 'https://app.spendlymanager.com',
+        APP_URL: 'https://app.thefinanciar.com',
         AWS_REGION: this.region,
-        AWS_SES_FROM_EMAIL: 'noreply@spendlymanager.com',
-        AWS_SES_FROM_NAME: 'Spendly',
-        AWS_SNS_SENDER_ID: 'Spendly',
+        AWS_SES_FROM_EMAIL: 'noreply@thefinanciar.com',
+        AWS_SES_FROM_NAME: 'Financiar',
+        AWS_SNS_SENDER_ID: 'Financiar',
       },
       secrets: {
         // NOTE: After CDK deploy, manually set the full DATABASE_URL in Secrets Manager:
-        // postgresql://spendly_admin:<password>@<rds-endpoint>:5432/spendly
+        // postgresql://financiar_admin:<password>@<rds-endpoint>:5432/financiar
         DATABASE_URL: ecs.Secret.fromSecretsManager(appSecrets, 'DATABASE_URL'),
         SESSION_SECRET: ecs.Secret.fromSecretsManager(appSecrets, 'SESSION_SECRET'),
         STRIPE_SECRET_KEY: ecs.Secret.fromSecretsManager(appSecrets, 'STRIPE_SECRET_KEY'),
@@ -161,12 +161,12 @@ export class SpendlyStack extends cdk.Stack {
     // ==================== ALB ====================
     const albSecurityGroup = new ec2.SecurityGroup(this, 'AlbSecurityGroup', {
       vpc,
-      description: 'Security group for Spendly ALB',
+      description: 'Security group for Financiar ALB',
     });
     albSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'Allow HTTP');
     albSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'Allow HTTPS');
 
-    const alb = new elbv2.ApplicationLoadBalancer(this, 'SpendlyAlb', {
+    const alb = new elbv2.ApplicationLoadBalancer(this, 'FinanciarAlb', {
       vpc,
       internetFacing: true,
       securityGroup: albSecurityGroup,
@@ -175,7 +175,7 @@ export class SpendlyStack extends cdk.Stack {
     // ==================== ECS Service ====================
     const serviceSecurityGroup = new ec2.SecurityGroup(this, 'ServiceSecurityGroup', {
       vpc,
-      description: 'Security group for Spendly ECS service',
+      description: 'Security group for Financiar ECS service',
     });
 
     // ALB -> ECS on port 5000
@@ -184,7 +184,7 @@ export class SpendlyStack extends cdk.Stack {
     // ECS -> RDS on port 5432
     dbSecurityGroup.addIngressRule(serviceSecurityGroup, ec2.Port.tcp(5432), 'Allow from ECS');
 
-    const service = new ecs.FargateService(this, 'SpendlyService', {
+    const service = new ecs.FargateService(this, 'FinanciarService', {
       cluster,
       taskDefinition,
       desiredCount: 0, // Start at 0; scale up after pushing Docker image to ECR
@@ -209,7 +209,7 @@ export class SpendlyStack extends cdk.Stack {
     });
 
     // ==================== ALB Target Group & Listeners ====================
-    const targetGroup = new elbv2.ApplicationTargetGroup(this, 'SpendlyTargetGroup', {
+    const targetGroup = new elbv2.ApplicationTargetGroup(this, 'FinanciarTargetGroup', {
       vpc,
       port: 5000,
       protocol: elbv2.ApplicationProtocol.HTTP,
@@ -225,9 +225,9 @@ export class SpendlyStack extends cdk.Stack {
     });
 
     // HTTPS listener (if certificate ARN provided)
-    const certArn = (props as SpendlyStackProps)?.certificateArn;
+    const certArn = (props as FinanciarStackProps)?.certificateArn;
     if (certArn) {
-      const certificate = acm.Certificate.fromCertificateArn(this, 'SpendlyCert', certArn);
+      const certificate = acm.Certificate.fromCertificateArn(this, 'FinanciarCert', certArn);
 
       alb.addListener('HttpsListener', {
         port: 443,

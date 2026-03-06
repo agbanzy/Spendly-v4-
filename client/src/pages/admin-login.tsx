@@ -74,10 +74,10 @@ export default function AdminLogin() {
           <Link href="/">
             <div className="flex items-center gap-3 text-white cursor-pointer group">
               <div className="relative">
-                <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl shadow-lg" />
+                <img src="/financiar-logo.svg" alt="Financiar" className="h-10 w-10 rounded-xl shadow-lg" />
                 <div className="absolute -inset-1 bg-white/20 rounded-xl blur-sm opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
-              <span className="font-bold text-2xl tracking-tight">Spendly</span>
+              <span className="font-bold text-2xl tracking-tight">Financiar</span>
             </div>
           </Link>
 
@@ -90,7 +90,7 @@ export default function AdminLogin() {
               Admin<br />Portal
             </h1>
             <p className="text-lg text-white/70 max-w-md leading-relaxed">
-              Access the Spendly admin dashboard to manage users, monitor transactions, and configure platform settings.
+              Access the Financiar admin dashboard to manage users, monitor transactions, and configure platform settings.
             </p>
 
             <div className="grid grid-cols-2 gap-4 pt-4">
@@ -121,8 +121,8 @@ export default function AdminLogin() {
         <div className="w-full max-w-md relative z-10">
           <Link href="/">
             <div className="lg:hidden flex items-center gap-2.5 justify-center mb-8 cursor-pointer">
-              <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl shadow-md" />
-              <span className="font-bold text-2xl tracking-tight">Spendly</span>
+              <img src="/financiar-logo.svg" alt="Financiar" className="h-10 w-10 rounded-xl shadow-md" />
+              <span className="font-bold text-2xl tracking-tight">Financiar</span>
             </div>
           </Link>
 
@@ -145,7 +145,7 @@ export default function AdminLogin() {
                     <Input
                       id="username"
                       type="text"
-                      placeholder="admin@spendly.com"
+                      placeholder="admin@thefinanciar.com"
                       value={username}
                       onChange={(e) => { setUsername(e.target.value); setErrorMessage(""); }}
                       className="pl-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors"

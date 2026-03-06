@@ -1,5 +1,5 @@
 -- =====================================================
--- Spendly v4 Database Schema Refactoring Migration
+-- Financiar Database Schema Refactoring Migration
 -- Generated: 2026-03-03
 -- Phases: 1-6 (Indexes, Date fixes, Settings, FKs, Departments, Cleanup)
 --

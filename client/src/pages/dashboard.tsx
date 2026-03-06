@@ -489,7 +489,7 @@ export default function Dashboard() {
               </div>
               <div>
                 <p className="font-semibold text-indigo-900 dark:text-indigo-100">
-                  Welcome to Spendly! Complete Your Setup
+                  Welcome to Financiar! Complete Your Setup
                 </p>
                 <p className="text-sm text-indigo-700 dark:text-indigo-300">
                   Set up your profile and verify your identity to unlock all features including payments and transfers.
@@ -707,7 +707,7 @@ export default function Dashboard() {
                 </div>
                 <div>
                   <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Your Virtual Account</p>
-                  <p className="text-sm font-medium">{primaryVirtualAccount!.name || 'Spendly Account'}</p>
+                  <p className="text-sm font-medium">{primaryVirtualAccount!.name || 'Financiar Account'}</p>
                 </div>
               </div>
               <Badge variant="outline" className="text-xs">{primaryVirtualAccount!.status === 'active' ? 'Active' : 'Inactive'}</Badge>
@@ -993,7 +993,7 @@ export default function Dashboard() {
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-sm text-muted-foreground">Account Name</span>
-                          <span className="text-sm font-bold">{primaryVirtualAccount.name || 'Spendly Account'}</span>
+                          <span className="text-sm font-bold">{primaryVirtualAccount.name || 'Financiar Account'}</span>
                         </div>
                       </>
                     )}

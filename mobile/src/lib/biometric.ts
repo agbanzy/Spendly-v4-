@@ -20,7 +20,7 @@ export async function getBiometricType(): Promise<string> {
 
 export async function authenticateWithBiometric(): Promise<boolean> {
   const result = await LocalAuthentication.authenticateAsync({
-    promptMessage: 'Authenticate to access Spendly',
+    promptMessage: 'Authenticate to access Financiar',
     fallbackLabel: 'Use Password',
     disableDeviceFallback: false,
   });

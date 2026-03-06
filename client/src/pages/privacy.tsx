@@ -10,8 +10,8 @@ export default function PrivacyPage() {
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <Link href="/">
             <div className="flex items-center gap-2 cursor-pointer" data-testid="link-privacy-home">
-              <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl" />
-              <span className="font-bold text-xl">Spendly</span>
+              <img src="/financiar-logo.svg" alt="Financiar" className="h-10 w-10 rounded-xl" />
+              <span className="font-bold text-xl">Financiar</span>
             </div>
           </Link>
           <Link href="/">
@@ -33,7 +33,7 @@ export default function PrivacyPage() {
             <section className="mb-8">
               <h2 className="text-xl font-semibold mb-4">1. Introduction</h2>
               <p className="text-muted-foreground mb-4">
-                At Spendly, we take your privacy seriously. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our financial management platform.
+                At Financiar, we take your privacy seriously. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our financial management platform.
               </p>
             </section>
 
@@ -134,7 +134,7 @@ export default function PrivacyPage() {
             <section className="mb-8">
               <h2 className="text-xl font-semibold mb-4">11. Contact Us</h2>
               <p className="text-muted-foreground mb-4">
-                If you have questions about this Privacy Policy or our data practices, please contact us at privacy@spendlymanager.com.
+                If you have questions about this Privacy Policy or our data practices, please contact us at privacy@thefinanciar.com.
               </p>
             </section>
           </CardContent>

@@ -35,7 +35,7 @@ describe('sanitizeUrl', () => {
   });
 
   it('allows https URLs', () => {
-    expect(sanitizeUrl('https://app.spendly.com/dashboard')).toBe('https://app.spendly.com/dashboard');
+    expect(sanitizeUrl('https://app.financiar.com/dashboard')).toBe('https://app.financiar.com/dashboard');
   });
 
   it('allows http URLs', () => {

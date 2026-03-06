@@ -81,21 +81,17 @@ export default function LoginPage() {
       {/* Left panel — immersive brand area */}
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
         {/* Background */}
-        <div className="absolute inset-0 bg-gradient-to-br from-primary via-violet-600 to-purple-700" />
-        <div className="absolute inset-0 opacity-10 texture-grid" />
-
-        {/* Floating orbs */}
-        <div className="absolute top-1/4 -left-20 w-80 h-80 bg-white/10 rounded-full blur-3xl animate-float" />
-        <div className="absolute bottom-1/4 -right-20 w-60 h-60 bg-emerald-400/10 rounded-full blur-3xl animate-float-slow" />
+        <div className="absolute inset-0 bg-gradient-to-br from-[#6B2346] via-[#8B3A5E] to-[#4A1830]" />
+        <div className="absolute inset-0 opacity-[0.03] texture-grid" />
 
         <div className="relative z-10 p-12 flex flex-col justify-between w-full">
           <Link href="/">
             <div className="flex items-center gap-3 text-white cursor-pointer group">
               <div className="relative">
-                <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl shadow-lg" />
+                <img src="/financiar-logo.svg" alt="Financiar" className="h-10 w-10 rounded-xl shadow-lg" />
                 <div className="absolute -inset-1 bg-white/20 rounded-xl blur-sm opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
-              <span className="font-bold text-2xl tracking-tight">Spendly</span>
+              <span className="font-bold text-2xl tracking-tight">Financiar</span>
             </div>
           </Link>
 
@@ -129,8 +125,8 @@ export default function LoginPage() {
         <div className="w-full max-w-md relative z-10">
           <Link href="/">
             <div className="lg:hidden flex items-center gap-2.5 justify-center mb-8 cursor-pointer">
-              <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl shadow-md" />
-              <span className="font-bold text-2xl tracking-tight">Spendly</span>
+              <img src="/financiar-logo.svg" alt="Financiar" className="h-10 w-10 rounded-xl shadow-md" />
+              <span className="font-bold text-2xl tracking-tight">Financiar</span>
             </div>
           </Link>
 

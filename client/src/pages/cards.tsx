@@ -53,8 +53,13 @@ import {
   PauseCircle,
   Wifi,
   AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  ArrowUpRight,
+  ArrowDownRight,
+  Clock,
 } from "lucide-react";
-import type { VirtualCard, CompanySettings } from "@shared/schema";
+import type { VirtualCard, CompanySettings, Transaction } from "@shared/schema";
 
 const cardGradients: Record<string, string> = {
   indigo: "bg-gradient-to-br from-violet-500 via-violet-600 to-indigo-700",
@@ -68,6 +73,7 @@ const cardGradients: Record<string, string> = {
 export default function Cards() {
   const { toast } = useToast();
   const [showNumbers, setShowNumbers] = useState<Record<string, boolean>>({});
+  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
   const [isOpen, setIsOpen] = useState(false);
   const [isFundOpen, setIsFundOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<VirtualCard | null>(null);
@@ -98,6 +104,10 @@ export default function Cards() {
   
   const { data: cards, isLoading } = useQuery<VirtualCard[]>({
     queryKey: ["/api/cards"],
+  });
+
+  const { data: transactions } = useQuery<Transaction[]>({
+    queryKey: ["/api/transactions"],
   });
 
   const createMutation = useMutation({
@@ -242,6 +252,17 @@ export default function Cards() {
 
   const toggleShowNumber = (cardId: string) => {
     setShowNumbers((prev) => ({ ...prev, [cardId]: !prev[cardId] }));
+  };
+
+  const toggleExpandCard = (cardId: string) => {
+    setExpandedCards((prev) => ({ ...prev, [cardId]: !prev[cardId] }));
+  };
+
+  const getCardTransactions = (cardId: string) => {
+    return transactions?.filter(tx =>
+      tx.description.toLowerCase().includes("card") &&
+      (tx.description.includes(cardId.slice(-4)) || tx.metadata?.cardId === cardId)
+    ).slice(0, 5) || [];
   };
 
   const totalBalance = cards?.reduce((sum, c) => sum + parseFloat(String(c.balance) || '0'), 0) || 0;
@@ -499,6 +520,14 @@ export default function Cards() {
                                 )}
                               </p>
                             </div>
+                            <div className="text-center">
+                              <p className="text-xs opacity-60 uppercase tracking-wider">
+                                Exp
+                              </p>
+                              <p className="text-sm font-semibold font-mono">
+                                {card.expiryDate || "12/28"}
+                              </p>
+                            </div>
                             <div className="text-right">
                               <p className="text-xs opacity-60 uppercase tracking-wider">
                                 Limit
@@ -515,6 +544,64 @@ export default function Cards() {
                       </div>
                     </div>
                   </motion.div>
+
+                  {/* Transaction History Toggle */}
+                  <div className="mt-3">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => toggleExpandCard(card.id)}
+                    >
+                      {expandedCards[card.id] ? (
+                        <><ChevronUp className="h-3 w-3 mr-1" />Hide Transactions</>
+                      ) : (
+                        <><ChevronDown className="h-3 w-3 mr-1" />Transaction History</>
+                      )}
+                    </Button>
+
+                    {expandedCards[card.id] && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        className="mt-2 space-y-2 rounded-xl border border-border/50 p-3 bg-muted/20"
+                      >
+                        {getCardTransactions(card.id).length > 0 ? (
+                          getCardTransactions(card.id).map((tx) => (
+                            <div key={tx.id} className="flex items-center justify-between py-2 px-2 rounded-lg hover:bg-muted/40 transition-colors">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+                                  Number(tx.amount) > 0 ? "bg-emerald-100 dark:bg-emerald-950" : "bg-rose-100 dark:bg-rose-950"
+                                }`}>
+                                  {Number(tx.amount) > 0 ? (
+                                    <ArrowDownRight className="h-3 w-3 text-emerald-600" />
+                                  ) : (
+                                    <ArrowUpRight className="h-3 w-3 text-rose-600" />
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-xs font-medium truncate">{tx.description}</p>
+                                  <p className="text-[10px] text-muted-foreground">
+                                    {new Date(tx.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                                  </p>
+                                </div>
+                              </div>
+                              <span className={`text-xs font-bold flex-shrink-0 ${
+                                Number(tx.amount) > 0 ? "text-emerald-600" : "text-rose-600"
+                              }`}>
+                                {Number(tx.amount) > 0 ? "+" : "-"}{formatCurrency(Math.abs(Number(tx.amount)), card.currency)}
+                              </span>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-center py-4 text-xs text-muted-foreground">
+                            <Clock className="h-4 w-4 mx-auto mb-1 opacity-50" />
+                            No recent transactions for this card
+                          </div>
+                        )}
+                      </motion.div>
+                    )}
+                  </div>
                 </motion.div>
               ))}
             </motion.div>

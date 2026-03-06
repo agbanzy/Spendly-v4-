@@ -231,7 +231,7 @@ export default function InvoicesScreen() {
   };
 
   const handleSharePaymentLink = (invoice: Invoice) => {
-    const baseUrl = 'https://spendlymanager.com';
+    const baseUrl = 'https://thefinanciar.com';
     const paymentUrl = `${baseUrl}/pay/${invoice.id}`;
     Share.share({
       message: `Invoice ${invoice.invoiceNumber} for ${formatCurrency(invoice.amount, invoice.currency || 'USD')}\n\nPay here: ${paymentUrl}`,

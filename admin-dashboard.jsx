@@ -22,7 +22,7 @@ const generateUsers = () => {
   return Array.from({ length: 15 }, (_, i) => ({
     id: `USR-${String(i + 1).padStart(5, '0')}`,
     name: `${['John', 'Sarah', 'Michael', 'Emma', 'David', 'Lisa', 'James', 'Rachel', 'Daniel', 'Olivia', 'Robert', 'Sophie', 'William', 'Alice', 'Charles'][i % 15]} ${['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez', 'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson'][Math.floor(i / 3)]}`,
-    email: `user${i + 1}@spendly.com`,
+    email: `user${i + 1}@thefinanciar.com`,
     role: roles[i % roles.length],
     company: companies[i % companies.length],
     kycStatus: kycStatuses[Math.floor(Math.random() * kycStatuses.length)],
@@ -1304,11 +1304,11 @@ const SystemSettingsPage = () => {
         <div className="space-y-6">
           <div>
             <label className="block text-sm font-medium text-gray-900 mb-2">Organization Name</label>
-            <input type="text" defaultValue="Spendly Inc." className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500" />
+            <input type="text" defaultValue="Financiar Inc." className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-900 mb-2">Organization Email</label>
-            <input type="email" defaultValue="admin@spendly.com" className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500" />
+            <input type="email" defaultValue="admin@thefinanciar.com" className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500" />
           </div>
         </div>
       </div>
@@ -1443,7 +1443,7 @@ export default function AdminDashboard() {
       {/* Sidebar */}
       <div className={`${sidebarOpen ? 'w-64' : 'w-20'} bg-gray-900 text-white transition-all duration-300 flex flex-col border-r border-gray-800`}>
         <div className="p-6 flex items-center justify-between">
-          {sidebarOpen && <h1 className="text-xl font-bold">Spendly Admin</h1>}
+          {sidebarOpen && <h1 className="text-xl font-bold">Financiar Admin</h1>}
           <button onClick={() => setSidebarOpen(!sidebarOpen)} className="text-gray-400 hover:text-white">
             {sidebarOpen ? <ChevronLeft className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
           </button>

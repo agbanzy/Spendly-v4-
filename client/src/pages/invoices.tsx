@@ -24,6 +24,7 @@ import {
   fadeUp,
   stagger
 } from "@/components/ui-extended";
+import { Switch } from "@/components/ui/switch";
 import {
   FileText,
   Plus,
@@ -43,7 +44,9 @@ import {
   Banknote,
   Trash2,
   TrendingUp,
-  MoreVertical
+  MoreVertical,
+  Link,
+  Repeat,
 } from "lucide-react";
 import type { Invoice, CompanySettings } from "@shared/schema";
 
@@ -99,6 +102,8 @@ export default function InvoicesPage() {
     notes: "",
     taxRate: "0",
     invoiceCurrency: currency,
+    isRecurring: false,
+    recurringInterval: "monthly",
   });
   const [lineItems, setLineItems] = useState<LineItem[]>([emptyLineItem()]);
   
@@ -136,8 +141,19 @@ export default function InvoicesPage() {
       notes: "",
       taxRate: "0",
       invoiceCurrency: currency,
+      isRecurring: false,
+      recurringInterval: "monthly",
     });
     setLineItems([emptyLineItem()]);
+  };
+
+  const copyPaymentLink = (invoiceId: string) => {
+    const url = `${window.location.origin}/pay/${invoiceId}`;
+    navigator.clipboard.writeText(url);
+    toast({
+      title: "Payment link copied",
+      description: "Shareable payment link copied to clipboard."
+    });
   };
 
   const { data: invoices = [], isLoading } = useQuery<Invoice[]>({
@@ -583,6 +599,45 @@ export default function InvoicesPage() {
                     />
                   </div>
                 </div>
+
+                {/* Recurring Invoice */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Recurring Invoice</h3>
+                  <div className="flex items-center justify-between p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30">
+                    <div className="flex items-center gap-3">
+                      <Repeat className="h-5 w-5 text-sky-500" />
+                      <div>
+                        <p className="text-sm font-medium text-slate-900 dark:text-slate-100">Make this a recurring invoice</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Automatically generate this invoice on a schedule</p>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={invoiceForm.isRecurring}
+                      onCheckedChange={(checked) => setInvoiceForm({ ...invoiceForm, isRecurring: checked })}
+                      data-testid="switch-recurring"
+                    />
+                  </div>
+                  {invoiceForm.isRecurring && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Recurring Interval</Label>
+                      <Select
+                        value={invoiceForm.recurringInterval}
+                        onValueChange={(value) => setInvoiceForm({ ...invoiceForm, recurringInterval: value })}
+                      >
+                        <SelectTrigger className="border-slate-200 dark:border-slate-700" data-testid="select-recurring-interval">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="weekly">Weekly</SelectItem>
+                          <SelectItem value="biweekly">Bi-weekly</SelectItem>
+                          <SelectItem value="monthly">Monthly</SelectItem>
+                          <SelectItem value="quarterly">Quarterly</SelectItem>
+                          <SelectItem value="yearly">Yearly</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <DialogFooter className="gap-2">
@@ -739,6 +794,15 @@ export default function InvoicesPage() {
                                   >
                                     <Mail className="mr-2 h-4 w-4" />
                                     {sendInvoiceMutation.isPending ? "Sending..." : "Send Invoice"}
+                                  </DropdownMenuItem>
+                                )}
+                                {(invoice.status === "pending" || invoice.status === "overdue") && (
+                                  <DropdownMenuItem
+                                    onClick={() => copyPaymentLink(invoice.id)}
+                                    data-testid={`button-copy-link-${invoice.id}`}
+                                  >
+                                    <Link className="mr-2 h-4 w-4" />
+                                    Copy Payment Link
                                   </DropdownMenuItem>
                                 )}
                                 {invoice.status !== "paid" && (

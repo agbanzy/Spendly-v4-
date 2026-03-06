@@ -48,7 +48,7 @@ function getNotificationColor(type: string): string {
   if (type.includes('approved') || type.includes('received') || type.includes('paid') || type === 'payout_processed') return '#22c55e';
   if (type.includes('rejected') || type.includes('failed') || type.includes('overdue') || type.includes('exceeded')) return '#ef4444';
   if (type.includes('warning') || type.includes('due')) return '#f59e0b';
-  return '#0EA5E9';
+  return '#8B3A5E';
 }
 
 function formatTimeAgo(dateStr: string): string {

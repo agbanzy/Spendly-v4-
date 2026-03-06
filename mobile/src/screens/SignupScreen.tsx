@@ -112,7 +112,7 @@ export default function SignupScreen({ navigation }: SignupScreenProps) {
         <View style={styles.content}>
           <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
           <View style={styles.header}>
-            <Text style={styles.logo}>Spendly</Text>
+            <Text style={styles.logo}>Financiar</Text>
             <Text style={styles.subtitle}>Create your account</Text>
             <Text style={styles.trialText}>Start your free 14-day trial</Text>
           </View>

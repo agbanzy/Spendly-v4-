@@ -53,14 +53,14 @@ function AuthLoading() {
     <div className="h-screen w-full flex items-center justify-center bg-background texture-mesh">
       <div className="flex flex-col items-center gap-4 animate-scale-in">
         <div className="relative">
-          <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-sky-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-primary/25 animate-pulse-glow">
-            <img src="/spendly-logo.png" alt="Spendly" className="h-8 w-8 rounded-lg" />
+          <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-[#6B2346] to-[#8B3A5E] flex items-center justify-center shadow-lg shadow-primary/25 animate-pulse-glow">
+            <img src="/financiar-logo.svg" alt="Financiar" className="h-8 w-8 rounded-lg" />
           </div>
           <div className="absolute -inset-2 bg-primary/10 rounded-3xl blur-xl" />
         </div>
         <div className="flex items-center gap-2 text-muted-foreground text-sm">
           <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-          Loading Spendly...
+          Loading Financiar...
         </div>
       </div>
     </div>
@@ -271,7 +271,7 @@ function AppContent() {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider defaultTheme="light" storageKey="spendly-theme">
+      <ThemeProvider defaultTheme="light" storageKey="financiar-theme">
         <QueryClientProvider client={queryClient}>
           <TooltipProvider>
             <AuthProvider>

@@ -336,7 +336,7 @@ export default function DashboardScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.vaTitle}>Your Virtual Account</Text>
-              <Text style={styles.vaName}>{primaryVirtualAccount.name || 'Spendly Account'}</Text>
+              <Text style={styles.vaName}>{primaryVirtualAccount.name || 'Financiar Account'}</Text>
             </View>
             <View style={[styles.vaStatusBadge, primaryVirtualAccount.status === 'active' ? styles.statusActive : styles.statusInactive]}>
               <Text style={styles.vaStatusText}>{primaryVirtualAccount.status}</Text>

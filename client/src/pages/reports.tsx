@@ -23,7 +23,8 @@ import {
   Trash2,
   BarChart3,
   TrendingUp,
-  AlertCircle
+  AlertCircle,
+  FileDown,
 } from "lucide-react";
 
 interface Report {
@@ -146,6 +147,40 @@ export default function ReportsPage() {
       toast({
         title: "Error",
         description: "Failed to download report.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleDownloadPdf = async (report: Report) => {
+    try {
+      toast({
+        title: "Generating PDF...",
+        description: `Preparing ${report.name} as PDF`
+      });
+
+      const authHeaders = await getAuthHeaders();
+      const response = await fetch(`/api/reports/${report.id}/download?format=pdf`, { headers: authHeaders, credentials: "include" });
+      if (!response.ok) throw new Error('PDF download failed');
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${report.name.replace(/\s+/g, '_')}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      toast({
+        title: "PDF Downloaded",
+        description: `${report.name} has been downloaded as PDF.`
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to download PDF. CSV download is available as an alternative.",
         variant: "destructive"
       });
     }
@@ -309,6 +344,46 @@ export default function ReportsPage() {
           />
         </motion.div>
 
+        {/* Report Type Distribution */}
+        {reports.length > 0 && (
+          <motion.div variants={fadeUp}>
+            <GlassCard>
+              <div className="p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 rounded-lg bg-sky-500/10 text-sky-400">
+                    <BarChart3 className="h-4 w-4" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-slate-300">Reports by Type</h3>
+                </div>
+                <div className="space-y-3">
+                  {reportTypes.map((type) => {
+                    const count = reports.filter(r => r.type === type.label || r.type === type.value).length;
+                    const maxCount = Math.max(...reportTypes.map(t => reports.filter(r => r.type === t.label || r.type === t.value).length), 1);
+                    const barWidth = (count / maxCount) * 100;
+                    return (
+                      <div key={type.value} className="flex items-center gap-3">
+                        <type.icon className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                        <span className="text-xs text-slate-400 w-28 flex-shrink-0 truncate">{type.label}</span>
+                        <div className="flex-1 h-6 rounded-md bg-slate-800/50 overflow-hidden relative">
+                          <motion.div
+                            className="h-full rounded-md bg-gradient-to-r from-sky-500/60 to-sky-400/40"
+                            initial={{ width: 0 }}
+                            animate={{ width: `${barWidth}%` }}
+                            transition={{ duration: 0.6, ease: "easeOut" }}
+                          />
+                          <span className="absolute inset-0 flex items-center px-2 text-xs font-semibold text-slate-200">
+                            {count}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </GlassCard>
+          </motion.div>
+        )}
+
         {/* Reports List */}
         <GlassCard>
           <div className="p-6 md:p-8">
@@ -375,16 +450,28 @@ export default function ReportsPage() {
                         <StatusBadge status={report.status} />
                         <div className="flex items-center gap-1 border-l border-slate-700/50 pl-3">
                           {report.status === "completed" && (
-                            <motion.button
-                              whileHover={{ scale: 1.1 }}
-                              whileTap={{ scale: 0.95 }}
-                              onClick={() => handleDownload(report)}
-                              className="p-2 rounded-lg hover:bg-emerald-500/10 text-emerald-400 hover:text-emerald-300 transition-colors"
-                              data-testid={`button-download-${index}`}
-                              title="Download report"
-                            >
-                              <Download className="h-4 w-4" />
-                            </motion.button>
+                            <>
+                              <motion.button
+                                whileHover={{ scale: 1.1 }}
+                                whileTap={{ scale: 0.95 }}
+                                onClick={() => handleDownload(report)}
+                                className="p-2 rounded-lg hover:bg-emerald-500/10 text-emerald-400 hover:text-emerald-300 transition-colors"
+                                data-testid={`button-download-${index}`}
+                                title="Download CSV"
+                              >
+                                <Download className="h-4 w-4" />
+                              </motion.button>
+                              <motion.button
+                                whileHover={{ scale: 1.1 }}
+                                whileTap={{ scale: 0.95 }}
+                                onClick={() => handleDownloadPdf(report)}
+                                className="p-2 rounded-lg hover:bg-sky-500/10 text-sky-400 hover:text-sky-300 transition-colors"
+                                data-testid={`button-download-pdf-${index}`}
+                                title="Download PDF"
+                              >
+                                <FileDown className="h-4 w-4" />
+                              </motion.button>
+                            </>
                           )}
                           <motion.button
                             whileHover={{ scale: 1.1 }}

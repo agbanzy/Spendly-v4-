@@ -122,7 +122,7 @@ export default function SignupPage() {
         phoneNumber: formData.phoneNumber || undefined,
         country: formData.country || undefined,
       });
-      toast({ title: "Account created!", description: "Welcome to Spendly. Let's get you set up." });
+      toast({ title: "Account created!", description: "Welcome to Financiar. Let's get you set up." });
       if (inviteToken) {
         setLocation(`/invite/${inviteToken}`);
       } else {
@@ -147,20 +147,17 @@ export default function SignupPage() {
     <div className="min-h-screen flex">
       {/* Left panel */}
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-sky-600 via-blue-600 to-cyan-600" />
-        <div className="absolute inset-0 opacity-10 texture-grid" />
-
-        <div className="absolute top-1/3 -left-20 w-80 h-80 bg-white/10 rounded-full blur-3xl animate-float" />
-        <div className="absolute bottom-1/3 -right-20 w-60 h-60 bg-emerald-400/10 rounded-full blur-3xl animate-float-slow" />
+        <div className="absolute inset-0 bg-gradient-to-br from-[#6B2346] via-[#8B3A5E] to-[#4A1830]" />
+        <div className="absolute inset-0 opacity-[0.03] texture-grid" />
 
         <div className="relative z-10 p-12 flex flex-col justify-between w-full">
           <Link href="/">
             <div className="flex items-center gap-3 text-white cursor-pointer group">
               <div className="relative">
-                <img src="/spendly-logo.png" alt="Spendly" className="h-12 w-12 rounded-xl shadow-lg" />
+                <img src="/financiar-logo.svg" alt="Financiar" className="h-12 w-12 rounded-xl shadow-lg" />
                 <div className="absolute -inset-1 bg-white/20 rounded-xl blur-sm opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
-              <span className="font-bold text-2xl tracking-tight">Spendly</span>
+              <span className="font-bold text-2xl tracking-tight">Financiar</span>
             </div>
           </Link>
 
@@ -170,10 +167,10 @@ export default function SignupPage() {
               Join 10,000+ teams worldwide
             </div>
             <h1 className="text-4xl md:text-5xl font-extrabold font-display text-white leading-tight tracking-tight">
-              Get started<br />with Spendly
+              Get started<br />with Financiar
             </h1>
             <p className="text-lg text-white/70 max-w-md leading-relaxed">
-              Join thousands of companies managing their finances smarter with Spendly.
+              Join thousands of companies managing their finances smarter with Financiar.
             </p>
 
             <div className="grid grid-cols-2 gap-4 pt-4">
@@ -203,8 +200,8 @@ export default function SignupPage() {
         <div className="w-full max-w-md py-8 relative z-10">
           <Link href="/">
             <div className="lg:hidden flex items-center gap-2.5 justify-center mb-8 cursor-pointer">
-              <img src="/spendly-logo.png" alt="Spendly" className="h-12 w-12 rounded-xl shadow-md" />
-              <span className="font-bold text-2xl tracking-tight">Spendly</span>
+              <img src="/financiar-logo.svg" alt="Financiar" className="h-12 w-12 rounded-xl shadow-md" />
+              <span className="font-bold text-2xl tracking-tight">Financiar</span>
             </div>
           </Link>
 

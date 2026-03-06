@@ -369,17 +369,17 @@ export default function SettingsScreen() {
           {renderSettingsItem({
             icon: 'help-circle-outline',
             label: 'Help Center',
-            onPress: () => openUrl('https://spendlymanager.com/help'),
+            onPress: () => openUrl('https://thefinanciar.com/help'),
           })}
           {renderSettingsItem({
             icon: 'document-text-outline',
             label: 'Terms of Service',
-            onPress: () => openUrl('https://spendlymanager.com/terms'),
+            onPress: () => openUrl('https://thefinanciar.com/terms'),
           })}
           {renderSettingsItem({
             icon: 'lock-closed-outline',
             label: 'Privacy Policy',
-            onPress: () => openUrl('https://spendlymanager.com/privacy'),
+            onPress: () => openUrl('https://thefinanciar.com/privacy'),
           })}
         </View>
       </View>
@@ -395,7 +395,7 @@ export default function SettingsScreen() {
         </View>
       </View>
 
-      <Text style={styles.version}>Spendly v1.0.0</Text>
+      <Text style={styles.version}>Financiar v1.0.0</Text>
 
       {/* Profile Edit Modal */}
       <Modal visible={profileModalVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setProfileModalVisible(false)}>

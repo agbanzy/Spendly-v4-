@@ -3381,7 +3381,7 @@ export async function registerRoutes(
       }
 
       const settings = await storage.getOrganizationSettings();
-      const companyName = (settings as any)?.companyName || settings?.name || 'Spendly';
+      const companyName = (settings as any)?.companyName || settings?.name || 'Financiar';
       const currency = settings?.currency || 'USD';
       const payPeriod = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
@@ -3540,7 +3540,7 @@ export async function registerRoutes(
 
       const settings = await storage.getOrganizationSettings();
       const currency = settings?.currency || 'USD';
-      const companyName = (settings as any)?.companyName || settings?.name || 'Spendly';
+      const companyName = (settings as any)?.companyName || settings?.name || 'Financiar';
 
       // --- DETERMINE PAYOUT DESTINATION ---
       // Check if employee has payout destinations configured
@@ -3714,7 +3714,7 @@ export async function registerRoutes(
 
       res.json({
         invoice,
-        companyName: (settings as any)?.companyName || settings?.name || 'Spendly',
+        companyName: (settings as any)?.companyName || settings?.name || 'Financiar',
         companyLogo: (settings as any)?.companyLogo || settings?.logo || null,
         stripePaymentAvailable,
         paymentDetails: companyAccount ? {
@@ -3750,7 +3750,7 @@ export async function registerRoutes(
       const stripe = getStripeClient();
       const invoiceCurrency = ((invoice as any).currency || 'USD').toLowerCase();
       const amount = Math.round(parseFloat(invoice.amount) * 100); // cents
-      const appUrl = process.env.APP_URL || 'https://spendlymanager.com';
+      const appUrl = process.env.APP_URL || 'https://thefinanciar.com';
 
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ['card'],
@@ -3759,7 +3759,7 @@ export async function registerRoutes(
             currency: invoiceCurrency,
             product_data: {
               name: `Invoice ${invoice.invoiceNumber}`,
-              description: `Payment to ${(await storage.getOrganizationSettings() as any)?.companyName || 'Spendly'}`,
+              description: `Payment to ${(await storage.getOrganizationSettings() as any)?.companyName || 'Financiar'}`,
             },
             unit_amount: amount,
           },
@@ -3842,8 +3842,8 @@ export async function registerRoutes(
       // Send invoice email to client if email provided
       if (clientEmail) {
         const settings = await storage.getOrganizationSettings();
-        const companyName = (settings as any)?.companyName || settings?.name || 'Spendly';
-        const appUrl = process.env.APP_URL || 'https://spendlymanager.com';
+        const companyName = (settings as any)?.companyName || settings?.name || 'Financiar';
+        const appUrl = process.env.APP_URL || 'https://thefinanciar.com';
 
         notificationService.sendInvoiceEmail({
           email: clientEmail,
@@ -7340,8 +7340,8 @@ export async function registerRoutes(
               userId: cognitoSub,
               name: result.accountName || `${data.firstName} ${data.lastName}`,
               accountNumber: result.accountNumber || '',
-              bankName: result.bankName || 'Spendly',
-              bankCode: result.bankCode || 'SPENDLY',
+              bankName: result.bankName || 'Financiar',
+              bankCode: result.bankCode || 'FINANCIAR',
               routingNumber: null,
               swiftCode: null,
               country: data.country || 'US',
@@ -9474,8 +9474,8 @@ export async function registerRoutes(
       }
 
       let accountNumber = '';
-      let bankName = 'Spendly';
-      let bankCode = 'SPENDLY';
+      let bankName = 'Financiar';
+      let bankCode = 'FINANCIAR';
       let accountName = safeName;
       let accountStatus = 'active';
       let providerMessage = '';
@@ -9812,7 +9812,7 @@ export async function registerRoutes(
         username: 'admin',
         password: hashedPassword,
         name: 'System Administrator',
-        email: 'info@spendlymanager.com',
+        email: 'info@thefinanciar.com',
         role: 'OWNER',
         department: 'Administration',
       });
@@ -10045,8 +10045,8 @@ export async function registerRoutes(
       }
       
       const settings = await storage.getOrganizationSettings();
-      const companyName = (settings as any)?.companyName || settings?.name || 'Spendly';
-      const appUrl = process.env.APP_URL || 'https://spendlymanager.com';
+      const companyName = (settings as any)?.companyName || settings?.name || 'Financiar';
+      const appUrl = process.env.APP_URL || 'https://thefinanciar.com';
 
       const items = Array.isArray(invoice.items) ? invoice.items : [];
 

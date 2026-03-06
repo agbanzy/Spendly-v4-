@@ -25,7 +25,7 @@ export const shadows = {
   /** Standard card shadow with primary color tint */
   card: Platform.select<ShadowPreset>({
     ios: {
-      shadowColor: '#0284C7',
+      shadowColor: '#6B2346',
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.08,
       shadowRadius: 12,
@@ -64,7 +64,7 @@ export const shadows = {
   /** Dramatic shadow for virtual card visualizations */
   dramatic: Platform.select<ShadowPreset>({
     ios: {
-      shadowColor: '#0284C7',
+      shadowColor: '#6B2346',
       shadowOffset: { width: 0, height: 16 },
       shadowOpacity: 0.2,
       shadowRadius: 40,

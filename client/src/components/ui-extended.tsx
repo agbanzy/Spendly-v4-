@@ -1,5 +1,5 @@
 /**
- * SPENDLY v4 — Extended UI Components
+ * FINANCIAR v4 — Extended UI Components
  * Reusable animated components for consistent UX across all pages
  */
 

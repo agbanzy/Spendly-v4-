@@ -22,7 +22,7 @@ export async function getAuthHeaders(): Promise<Record<string, string>> {
   } catch {
   }
   // Include active company ID so server can scope queries
-  const companyId = _activeCompanyId || localStorage.getItem("spendly-active-company");
+  const companyId = _activeCompanyId || localStorage.getItem("financiar-active-company");
   if (companyId) {
     headers["X-Company-Id"] = companyId;
   }

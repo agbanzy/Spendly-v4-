@@ -121,7 +121,7 @@ export default function Team() {
   const [searchQuery, setSearchQuery] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("all");
   const [isInviteOpen, setIsInviteOpen] = useState(false);
-  const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "EMPLOYEE", department: "" });
+  const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "EMPLOYEE", department: "", jobTitle: "", phone: "" });
 
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
@@ -143,6 +143,7 @@ export default function Team() {
     email: "",
     role: "EMPLOYEE",
     department: "",
+    phone: "",
   });
 
   const [deptForm, setDeptForm] = useState({
@@ -193,7 +194,7 @@ export default function Team() {
       invalidateInvitations();
       toast({ title: "Invitation sent", description: "An email invitation has been sent to the team member." });
       setIsInviteOpen(false);
-      setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "" });
+      setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "", jobTitle: "", phone: "" });
     },
     onError: (error: any) => {
       toast({ title: "Failed to send invitation", description: error.message, variant: "destructive" });
@@ -343,7 +344,7 @@ export default function Team() {
   });
 
   const resetMemberForm = () => {
-    setMemberForm({ name: "", email: "", role: "EMPLOYEE", department: "" });
+    setMemberForm({ name: "", email: "", role: "EMPLOYEE", department: "", phone: "" });
   };
 
   const resetDeptForm = () => {
@@ -357,6 +358,7 @@ export default function Team() {
       email: member.email,
       role: member.role,
       department: member.department,
+      phone: (member as any).phone || "",
     });
     setIsMemberOpen(true);
   };
@@ -778,7 +780,7 @@ export default function Team() {
                     <p className="text-sm text-muted-foreground mt-1">Track and manage team invitations</p>
                   </div>
                   <Button
-                    onClick={() => { setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "" }); setIsInviteOpen(true); }}
+                    onClick={() => { setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "", jobTitle: "" }); setIsInviteOpen(true); }}
                     data-testid="button-new-invite"
                   >
                     <Send className="h-4 w-4 mr-2" />New Invite
@@ -879,7 +881,7 @@ export default function Team() {
                     subtitle="Send invitations to add team members to your company"
                     action={
                       <Button
-                        onClick={() => { setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "" }); setIsInviteOpen(true); }}
+                        onClick={() => { setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "", jobTitle: "" }); setIsInviteOpen(true); }}
                         data-testid="button-send-first-invite"
                       >
                         <Send className="h-4 w-4 mr-2" />Send First Invite
@@ -922,6 +924,18 @@ export default function Team() {
                 onChange={(e) => setMemberForm({ ...memberForm, email: e.target.value })}
                 placeholder="john@company.com"
                 data-testid="input-member-email"
+                className="border-slate-200 dark:border-slate-700"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="phone">Phone Number</Label>
+              <Input
+                id="phone"
+                type="tel"
+                value={memberForm.phone}
+                onChange={(e) => setMemberForm({ ...memberForm, phone: e.target.value })}
+                placeholder="+1 (555) 123-4567"
+                data-testid="input-member-phone"
                 className="border-slate-200 dark:border-slate-700"
               />
             </div>
@@ -1113,6 +1127,31 @@ export default function Team() {
                 data-testid="input-invite-email"
                 className="border-slate-200 dark:border-slate-700"
               />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="inviteJobTitle">Job Title</Label>
+                <Input
+                  id="inviteJobTitle"
+                  value={inviteForm.jobTitle}
+                  onChange={(e) => setInviteForm({ ...inviteForm, jobTitle: e.target.value })}
+                  placeholder="e.g., Software Engineer"
+                  data-testid="input-invite-job-title"
+                  className="border-slate-200 dark:border-slate-700"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="invitePhone">Phone</Label>
+                <Input
+                  id="invitePhone"
+                  type="tel"
+                  value={inviteForm.phone}
+                  onChange={(e) => setInviteForm({ ...inviteForm, phone: e.target.value })}
+                  placeholder="+1 (555) 123-4567"
+                  data-testid="input-invite-phone"
+                  className="border-slate-200 dark:border-slate-700"
+                />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">

@@ -316,7 +316,7 @@ export default function PayInvoicePage() {
 
         {/* Footer */}
         <div className="text-center text-xs text-slate-400 pb-4">
-          Powered by Spendly
+          Powered by Financiar
         </div>
       </div>
     </div>

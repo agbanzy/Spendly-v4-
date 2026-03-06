@@ -205,7 +205,7 @@ export default function WalletScreen() {
           return result;
         } else {
           // Stripe Checkout flow (US, EU, UK, AU, etc.)
-          const callbackUrl = 'spendly://payment-callback';
+          const callbackUrl = 'financiar://payment-callback';
           const result = await api.post<{
             url?: string;
             sessionId?: string;

@@ -21,8 +21,8 @@ import { useTheme } from '../lib/theme-context';
 import { useCompany } from '../lib/company-context';
 import { ColorTokens } from '../lib/colors';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://spendlymanager.com';
-const ACTIVE_COMPANY_KEY = 'spendly_active_company_id';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://thefinanciar.com';
+const ACTIVE_COMPANY_KEY = 'financiar_active_company_id';
 
 async function uploadReceipt(uri: string): Promise<string> {
   const [token, activeCompanyId] = await Promise.all([

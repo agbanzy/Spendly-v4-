@@ -55,7 +55,7 @@ export const initializePaystack = (config: {
     email: config.email,
     amount: config.amount * 100,
     currency: config.currency || "NGN",
-    ref: `spendly_${Date.now()}_${Math.floor(Math.random() * 1000000)}`,
+    ref: `financiar_${Date.now()}_${Math.floor(Math.random() * 1000000)}`,
     metadata: config.metadata,
     callback: config.onSuccess,
     onClose: config.onClose,

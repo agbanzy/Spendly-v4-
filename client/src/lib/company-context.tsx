@@ -38,14 +38,14 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isLoading && companies.length > 0) {
-      const storedCompanyId = localStorage.getItem("spendly-active-company");
+      const storedCompanyId = localStorage.getItem("financiar-active-company");
       
       if (storedCompanyId && companies.some(c => c.id === storedCompanyId)) {
         setCurrentCompanyId(storedCompanyId);
       } else {
         const firstCompanyId = companies[0].id;
         setCurrentCompanyId(firstCompanyId);
-        localStorage.setItem("spendly-active-company", firstCompanyId);
+        localStorage.setItem("financiar-active-company", firstCompanyId);
       }
     }
   }, [isLoading, companies]);
@@ -58,7 +58,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   const switchCompany = (companyId: string) => {
     setCurrentCompanyId(companyId);
     setActiveCompanyId(companyId);
-    localStorage.setItem("spendly-active-company", companyId);
+    localStorage.setItem("financiar-active-company", companyId);
     queryClient.invalidateQueries({ queryKey: ["/api/team"] });
     queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
     queryClient.invalidateQueries({ queryKey: ["/api/settings"] });

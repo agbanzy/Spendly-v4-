@@ -114,10 +114,10 @@ export default function ForgotPasswordPage() {
           <Link href="/">
             <div className="flex items-center gap-3 text-white cursor-pointer group">
               <div className="relative">
-                <img src="/spendly-logo.png" alt="Spendly" className="h-12 w-12 rounded-xl shadow-lg" />
+                <img src="/financiar-logo.svg" alt="Financiar" className="h-12 w-12 rounded-xl shadow-lg" />
                 <div className="absolute -inset-1 bg-white/20 rounded-xl blur-sm opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
-              <span className="font-bold text-2xl tracking-tight">Spendly</span>
+              <span className="font-bold text-2xl tracking-tight">Financiar</span>
             </div>
           </Link>
 
@@ -171,8 +171,8 @@ export default function ForgotPasswordPage() {
         <div className="w-full max-w-md relative z-10">
           <Link href="/">
             <div className="lg:hidden flex items-center gap-2.5 justify-center mb-8 cursor-pointer">
-              <img src="/spendly-logo.png" alt="Spendly" className="h-12 w-12 rounded-xl shadow-md" />
-              <span className="font-bold text-2xl tracking-tight">Spendly</span>
+              <img src="/financiar-logo.svg" alt="Financiar" className="h-12 w-12 rounded-xl shadow-md" />
+              <span className="font-bold text-2xl tracking-tight">Financiar</span>
             </div>
           </Link>
 
@@ -184,7 +184,7 @@ export default function ForgotPasswordPage() {
               <CardDescription className="text-muted-foreground">
                 {step === "sent"
                   ? `We've sent a reset link to ${email}`
-                  : "Enter the email connected to your Spendly account and we'll verify it before sending reset instructions."
+                  : "Enter the email connected to your Financiar account and we'll verify it before sending reset instructions."
                 }
               </CardDescription>
             </CardHeader>

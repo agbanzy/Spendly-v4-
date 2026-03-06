@@ -3,8 +3,10 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth";
 import { apiRequest, queryClient, sanitizeErrorMessage } from "@/lib/queryClient";
 import {
   Dialog,
@@ -50,7 +52,6 @@ import {
   Pencil,
   Trash2,
   Loader2,
-  Smartphone,
   Wifi,
   Zap,
   Tv,
@@ -59,6 +60,17 @@ import {
   CreditCard,
   Building2,
   Sparkles,
+  Repeat,
+  Receipt,
+  ShieldCheck,
+  XCircle,
+  Droplets,
+  Landmark,
+  GraduationCap,
+  Car,
+  Shield,
+  Home,
+  Music,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import type { Bill, CompanySettings, Wallet } from "@shared/schema";
@@ -119,6 +131,25 @@ const utilityProvidersByRegion = {
       { id: "swift", name: "Swift Networks", color: "text-indigo-500" },
       { id: "ntel", name: "ntel", color: "text-cyan-500" },
     ],
+    water: [
+      { id: "lagos-water", name: "Lagos Water Corp", color: "text-blue-500" },
+      { id: "ghana-water", name: "Ghana Water Company", color: "text-blue-600" },
+      { id: "nairobi-water", name: "Nairobi Water", color: "text-cyan-500" },
+    ],
+    government: [
+      { id: "firs", name: "FIRS", color: "text-green-700" },
+      { id: "nis", name: "NIS/Immigration", color: "text-green-600" },
+      { id: "frsc", name: "FRSC", color: "text-yellow-600" },
+    ],
+    education: [
+      { id: "waec", name: "WAEC", color: "text-blue-700" },
+      { id: "neco", name: "NECO", color: "text-green-500" },
+      { id: "jamb", name: "JAMB", color: "text-emerald-600" },
+    ],
+    transport: [
+      { id: "lagos-metro", name: "Lagos Metro", color: "text-blue-500" },
+      { id: "uber-credits", name: "Uber Credits", color: "text-slate-900 dark:text-slate-100" },
+    ],
   },
   "US/Europe": {
     airtime: [
@@ -154,6 +185,28 @@ const utilityProvidersByRegion = {
       { id: "att-fiber", name: "AT&T Fiber", color: "text-blue-600" },
       { id: "virgin", name: "Virgin Media", color: "text-red-500" },
       { id: "bt", name: "BT Broadband", color: "text-indigo-600" },
+    ],
+    insurance: [
+      { id: "state-farm", name: "State Farm", color: "text-red-600" },
+      { id: "allstate", name: "Allstate", color: "text-blue-700" },
+      { id: "progressive", name: "Progressive", color: "text-blue-500" },
+      { id: "geico", name: "Geico", color: "text-green-600" },
+    ],
+    mortgage: [
+      { id: "chase-home", name: "Chase Home", color: "text-blue-600" },
+      { id: "wells-fargo-home", name: "Wells Fargo Home", color: "text-red-600" },
+      { id: "boa-mortgage", name: "Bank of America Mortgage", color: "text-red-500" },
+    ],
+    rent: [
+      { id: "zelle-rent", name: "Zelle Rent", color: "text-purple-600" },
+      { id: "rentcafe", name: "RentCafe", color: "text-teal-500" },
+    ],
+    subscriptions: [
+      { id: "spotify", name: "Spotify", color: "text-green-500" },
+      { id: "apple-music", name: "Apple Music", color: "text-pink-500" },
+      { id: "adobe-cc", name: "Adobe Creative Cloud", color: "text-red-500" },
+      { id: "microsoft-365", name: "Microsoft 365", color: "text-blue-500" },
+      { id: "salesforce", name: "Salesforce", color: "text-blue-600" },
     ],
   },
 };
@@ -210,13 +263,15 @@ const getValidationPattern = (countryCode: string, type: 'phone' | 'meter' | 'sm
 
 export default function Bills() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [confirmPayBill, setConfirmPayBill] = useState<string | null>(null);
   const [editingBill, setEditingBill] = useState<Bill | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("all");
+  const [receiptBill, setReceiptBill] = useState<Bill | null>(null);
   const [utilityDialogOpen, setUtilityDialogOpen] = useState(false);
-  const [utilityType, setUtilityType] = useState<"airtime" | "data" | "electricity" | "cable" | "internet">("airtime");
+  const [utilityType, setUtilityType] = useState<"airtime" | "data" | "electricity" | "cable" | "internet" | "water" | "government" | "education" | "transport" | "insurance" | "mortgage" | "rent" | "subscriptions">("airtime");
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [utilityForm, setUtilityForm] = useState({
     provider: "",
@@ -232,6 +287,10 @@ export default function Bills() {
     amount: "",
     dueDate: "",
     category: "Software",
+    notes: "",
+    reference: "",
+    recurring: false,
+    frequency: "monthly" as string,
   });
   const [billFormErrors, setBillFormErrors] = useState<Record<string, string>>({});
 
@@ -368,7 +427,7 @@ export default function Bills() {
   });
 
   const resetForm = () => {
-    setFormData({ name: "", provider: "", amount: "", dueDate: "", category: "Software" });
+    setFormData({ name: "", provider: "", amount: "", dueDate: "", category: "Software", notes: "", reference: "", recurring: false, frequency: "monthly" });
     setBillFormErrors({});
   };
 
@@ -385,6 +444,10 @@ export default function Bills() {
       amount: String(bill.amount),
       dueDate: bill.dueDate,
       category: bill.category,
+      notes: (bill as any).notes || "",
+      reference: (bill as any).reference || "",
+      recurring: bill.recurring || false,
+      frequency: bill.frequency || "monthly",
     });
     setBillFormErrors({});
     setIsOpen(true);
@@ -459,7 +522,7 @@ export default function Bills() {
       errors.provider = "Please select a provider";
     }
 
-    if (utilityType === "airtime" || utilityType === "data") {
+    if (utilityType === "airtime" || utilityType === "data" || utilityType === "transport") {
       const cleanPhone = utilityForm.phoneNumber.replace(/[\s\-\(\)]/g, '');
       const pattern = getValidationPattern(countryCode, 'phone');
       if (!cleanPhone) {
@@ -469,12 +532,17 @@ export default function Bills() {
       }
     }
 
-    if (utilityType === "electricity" || utilityType === "internet") {
-      const pattern = getValidationPattern(countryCode, 'meter');
+    if (utilityType === "electricity" || utilityType === "internet" ||
+        utilityType === "water" || utilityType === "government" || utilityType === "education" ||
+        utilityType === "insurance" || utilityType === "mortgage" || utilityType === "rent" ||
+        utilityType === "subscriptions") {
       if (!utilityForm.meterNumber) {
-        errors.meterNumber = "Meter/Account number is required";
-      } else if (!pattern.test(utilityForm.meterNumber)) {
+        errors.meterNumber = "Account/Reference number is required";
+      } else if ((utilityType === "electricity" || utilityType === "internet") &&
+                 !getValidationPattern(countryCode, 'meter').test(utilityForm.meterNumber)) {
         errors.meterNumber = `Invalid meter number format for ${countryCode}`;
+      } else if (utilityForm.meterNumber.length < 3) {
+        errors.meterNumber = "Account number must be at least 3 characters";
       }
     }
 
@@ -509,7 +577,8 @@ export default function Bills() {
       }
     }
 
-    if ((utilityType === "airtime" || utilityType === "electricity" || utilityType === "internet")) {
+    const amountRequiredTypes = ["airtime", "electricity", "internet", "water", "government", "education", "transport", "insurance", "mortgage", "rent", "subscriptions"];
+    if (amountRequiredTypes.includes(utilityType)) {
       const amount = parseFloat(utilityForm.amount);
       if (!utilityForm.amount || isNaN(amount) || amount <= 0) {
         errors.amount = "Please enter a valid amount";
@@ -548,10 +617,11 @@ export default function Bills() {
       return;
     }
     
-    const reference = utilityType === "electricity" || utilityType === "internet" 
-      ? utilityForm.meterNumber 
-      : utilityType === "cable" 
-      ? utilityForm.smartCardNumber 
+    const accountTypes = ["electricity", "internet", "water", "government", "education", "insurance", "mortgage", "rent", "subscriptions"];
+    const reference = accountTypes.includes(utilityType)
+      ? utilityForm.meterNumber
+      : utilityType === "cable"
+      ? utilityForm.smartCardNumber
       : utilityForm.phoneNumber;
     
     requirePin(() => payUtilityMutation.mutate({
@@ -584,11 +654,30 @@ export default function Bills() {
   const unpaidBills = totalBills - paidBills;
   const overdueBills = bills?.filter((b) => b.status.toLowerCase() === "overdue").length || 0;
 
+  const isAdminOrManager = user?.role === "admin" || user?.role === "manager" || user?.role === "owner";
+
+  // Approval mutation for admin/manager
+  const approveBillMutation = useMutation({
+    mutationFn: async ({ id, action }: { id: string; action: "approved" | "rejected" }) => {
+      return apiRequest("PATCH", `/api/bills/${id}`, { status: action });
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bills"] });
+      toast({ title: `Bill ${variables.action} successfully` });
+    },
+    onError: () => {
+      toast({ title: "Failed to update bill status", variant: "destructive" });
+    },
+  });
+
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
       case "paid": return "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400";
-      case "unpaid": return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
+      case "unpaid": return "bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-400";
+      case "pending": return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
       case "overdue": return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
+      case "approved": return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
+      case "rejected": return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
       default: return "";
     }
   };
@@ -597,17 +686,49 @@ export default function Bills() {
     switch (status.toLowerCase()) {
       case "paid": return <CheckCircle className="h-4 w-4" />;
       case "unpaid": return <Clock className="h-4 w-4" />;
+      case "pending": return <Clock className="h-4 w-4" />;
       case "overdue": return <AlertTriangle className="h-4 w-4" />;
+      case "approved": return <ShieldCheck className="h-4 w-4" />;
+      case "rejected": return <XCircle className="h-4 w-4" />;
       default: return null;
     }
   };
 
-  const utilityServices = [
+  const getFrequencyLabel = (frequency: string | null) => {
+    switch (frequency) {
+      case "weekly": return "Weekly";
+      case "monthly": return "Monthly";
+      case "quarterly": return "Quarterly";
+      case "yearly": return "Yearly";
+      default: return "Monthly";
+    }
+  };
+
+  const baseUtilityServices = [
     { type: "airtime" as const, icon: Phone, label: "Airtime", color: "bg-green-500", description: "Top up mobile credit" },
     { type: "data" as const, icon: Wifi, label: "Data", color: "bg-blue-500", description: "Buy internet data" },
     { type: "electricity" as const, icon: Zap, label: "Electricity", color: "bg-yellow-500", description: "Pay power bills" },
     { type: "cable" as const, icon: Tv, label: "Cable TV", color: "bg-purple-500", description: "TV subscriptions" },
     { type: "internet" as const, icon: Globe, label: "Internet", color: "bg-indigo-500", description: "Broadband bills" },
+  ];
+
+  const africaServices = [
+    { type: "water" as const, icon: Droplets, label: "Water", color: "bg-cyan-500", description: "Pay water bills" },
+    { type: "government" as const, icon: Landmark, label: "Government", color: "bg-green-700", description: "Govt fees & taxes" },
+    { type: "education" as const, icon: GraduationCap, label: "Education", color: "bg-blue-700", description: "Exam fees & registration" },
+    { type: "transport" as const, icon: Car, label: "Transport", color: "bg-orange-500", description: "Metro & ride credits" },
+  ];
+
+  const usEuServices = [
+    { type: "insurance" as const, icon: Shield, label: "Insurance", color: "bg-blue-600", description: "Insurance premiums" },
+    { type: "mortgage" as const, icon: Home, label: "Mortgage", color: "bg-amber-600", description: "Mortgage payments" },
+    { type: "rent" as const, icon: Building2, label: "Rent", color: "bg-teal-500", description: "Rent payments" },
+    { type: "subscriptions" as const, icon: Music, label: "Subscriptions", color: "bg-pink-500", description: "Software & media" },
+  ];
+
+  const utilityServices = [
+    ...baseUtilityServices,
+    ...(region === "Africa" ? africaServices : usEuServices),
   ];
 
   return (
@@ -643,7 +764,7 @@ export default function Bills() {
             Utility Services
           </h3>
           <div className="overflow-x-auto pb-2">
-            <div className="flex gap-3 min-w-min md:grid md:grid-cols-5 md:gap-4">
+            <div className="flex gap-3 min-w-min md:grid md:grid-cols-3 lg:grid-cols-5 md:gap-4">
               {utilityServices.map((service, idx) => (
                 <motion.button
                   key={service.type}
@@ -758,13 +879,26 @@ export default function Bills() {
                       }`}
                     >
                       <div className="flex items-center gap-4 flex-1">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500/20 to-violet-500/5 flex items-center justify-center flex-shrink-0">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500/20 to-violet-500/5 flex items-center justify-center flex-shrink-0 relative">
                           <FileText className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+                          {bill.recurring && (
+                            <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center" title={`Recurring: ${getFrequencyLabel(bill.frequency)}`}>
+                              <Repeat className="h-3 w-3 text-white" />
+                            </div>
+                          )}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
-                            {bill.name}
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+                              {bill.name}
+                            </p>
+                            {bill.recurring && (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-blue-300 text-blue-600 dark:text-blue-400 dark:border-blue-700 hidden sm:inline-flex">
+                                <Repeat className="h-2.5 w-2.5 mr-1" />
+                                {getFrequencyLabel(bill.frequency)}
+                              </Badge>
+                            )}
+                          </div>
                           <div className="flex items-center gap-2 mt-1 flex-wrap">
                             <span className="text-xs text-slate-500 dark:text-slate-400">
                               {bill.provider}
@@ -777,7 +911,7 @@ export default function Bills() {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-4 ml-4">
+                      <div className="flex items-center gap-3 ml-4">
                         <div className="text-right hidden sm:block">
                           <p className="text-base font-bold text-slate-900 dark:text-slate-100">
                             {formatCurrency(Number(bill.amount))}
@@ -792,6 +926,32 @@ export default function Bills() {
 
                         <StatusBadge status={bill.status} />
 
+                        {/* Approval buttons for pending bills (admin/manager only) */}
+                        {bill.status.toLowerCase() === "pending" && isAdminOrManager && (
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => approveBillMutation.mutate({ id: bill.id, action: "approved" })}
+                              disabled={approveBillMutation.isPending}
+                              className="text-emerald-600 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-700 dark:hover:bg-emerald-900/20 h-8 px-2"
+                            >
+                              <ShieldCheck className="h-3.5 w-3.5 mr-1" />
+                              Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => approveBillMutation.mutate({ id: bill.id, action: "rejected" })}
+                              disabled={approveBillMutation.isPending}
+                              className="text-rose-600 border-rose-300 hover:bg-rose-50 dark:text-rose-400 dark:border-rose-700 dark:hover:bg-rose-900/20 h-8 px-2"
+                            >
+                              <XCircle className="h-3.5 w-3.5 mr-1" />
+                              Reject
+                            </Button>
+                          </div>
+                        )}
+
                         {bill.status.toLowerCase() === "unpaid" && (
                           <Button
                             size="sm"
@@ -804,6 +964,19 @@ export default function Bills() {
                               <Loader2 className="h-4 w-4 animate-spin mr-2" />
                             )}
                             Pay
+                          </Button>
+                        )}
+
+                        {/* View Receipt button for paid bills */}
+                        {bill.status.toLowerCase() === "paid" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setReceiptBill(bill)}
+                            className="text-emerald-600 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-700 dark:hover:bg-emerald-900/20 h-8"
+                          >
+                            <Receipt className="h-3.5 w-3.5 mr-1" />
+                            Receipt
                           </Button>
                         )}
 
@@ -966,11 +1139,83 @@ export default function Bills() {
                   <SelectItem value="Office">Office</SelectItem>
                   <SelectItem value="Utilities">Utilities</SelectItem>
                   <SelectItem value="Marketing">Marketing</SelectItem>
+                  <SelectItem value="Insurance">Insurance</SelectItem>
+                  <SelectItem value="Rent">Rent</SelectItem>
+                  <SelectItem value="Mortgage">Mortgage</SelectItem>
+                  <SelectItem value="Subscriptions">Subscriptions</SelectItem>
                   <SelectItem value="Legal">Legal</SelectItem>
                   <SelectItem value="Other">Other</SelectItem>
                 </SelectContent>
               </Select>
             </FormField>
+
+            <FormField
+              label="Customer Reference / Account Number"
+            >
+              <Input
+                id="reference"
+                value={formData.reference}
+                onChange={(e) => setFormData({ ...formData, reference: e.target.value })}
+                placeholder="e.g., Account #, Invoice #, Customer ID"
+                className="bg-muted/30 border-slate-700 text-slate-100 placeholder:text-slate-500"
+                data-testid="input-bill-reference"
+              />
+            </FormField>
+
+            <FormField
+              label="Notes"
+            >
+              <Textarea
+                id="notes"
+                value={formData.notes}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                placeholder="Add any additional notes about this bill..."
+                className="bg-muted/30 border-slate-700 text-slate-100 placeholder:text-slate-500 min-h-[80px] resize-none"
+                data-testid="input-bill-notes"
+              />
+            </FormField>
+
+            {/* Recurring bill toggle */}
+            <div className="flex items-center justify-between p-3 rounded-xl border border-slate-700 bg-muted/30">
+              <div className="flex items-center gap-2">
+                <Repeat className="h-4 w-4 text-blue-400" />
+                <div>
+                  <p className="text-sm font-medium text-slate-200">Recurring Bill</p>
+                  <p className="text-xs text-slate-400">Automatically repeat this bill</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, recurring: !formData.recurring })}
+                className={`w-11 h-6 rounded-full transition-colors relative ${
+                  formData.recurring ? "bg-blue-500" : "bg-slate-600"
+                }`}
+                data-testid="toggle-recurring"
+              >
+                <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                  formData.recurring ? "translate-x-[22px]" : "translate-x-0.5"
+                }`} />
+              </button>
+            </div>
+
+            {formData.recurring && (
+              <FormField label="Frequency">
+                <Select
+                  value={formData.frequency}
+                  onValueChange={(value) => setFormData({ ...formData, frequency: value })}
+                >
+                  <SelectTrigger className="bg-muted/30 border-slate-700 text-slate-100" data-testid="select-frequency">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-900 border-slate-800">
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                    <SelectItem value="quarterly">Quarterly</SelectItem>
+                    <SelectItem value="yearly">Yearly</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FormField>
+            )}
 
             {Object.keys(billFormErrors).length > 0 && (
               <WarningFeedback
@@ -1012,6 +1257,14 @@ export default function Bills() {
                 {utilityType === "electricity" && <Zap className="h-5 w-5 text-amber-500" />}
                 {utilityType === "cable" && <Tv className="h-5 w-5 text-violet-500" />}
                 {utilityType === "internet" && <Globe className="h-5 w-5 text-cyan-500" />}
+                {utilityType === "water" && <Droplets className="h-5 w-5 text-cyan-500" />}
+                {utilityType === "government" && <Landmark className="h-5 w-5 text-green-600" />}
+                {utilityType === "education" && <GraduationCap className="h-5 w-5 text-blue-500" />}
+                {utilityType === "transport" && <Car className="h-5 w-5 text-orange-500" />}
+                {utilityType === "insurance" && <Shield className="h-5 w-5 text-blue-500" />}
+                {utilityType === "mortgage" && <Home className="h-5 w-5 text-amber-500" />}
+                {utilityType === "rent" && <Building2 className="h-5 w-5 text-teal-500" />}
+                {utilityType === "subscriptions" && <Music className="h-5 w-5 text-pink-500" />}
               </div>
               Pay {utilityType.charAt(0).toUpperCase() + utilityType.slice(1)}
             </DialogTitle>
@@ -1021,6 +1274,14 @@ export default function Bills() {
               {utilityType === "electricity" && "Pay your electricity bill securely"}
               {utilityType === "cable" && "Renew your TV subscription"}
               {utilityType === "internet" && "Pay your internet service bill"}
+              {utilityType === "water" && "Pay your water utility bill"}
+              {utilityType === "government" && "Pay government fees and taxes"}
+              {utilityType === "education" && "Pay exam fees and registrations"}
+              {utilityType === "transport" && "Buy transport credits and passes"}
+              {utilityType === "insurance" && "Pay insurance premiums"}
+              {utilityType === "mortgage" && "Make mortgage payments"}
+              {utilityType === "rent" && "Pay your rent"}
+              {utilityType === "subscriptions" && "Manage software and media subscriptions"}
             </DialogDescription>
           </DialogHeader>
 
@@ -1033,17 +1294,13 @@ export default function Bills() {
 
             <FormField label="Select Provider" error={validationErrors.provider} required>
               <div className="grid grid-cols-3 gap-2">
-                {utilityProviders[utilityType]?.slice(0, 6).map((provider) => {
-                  const ProviderIcon =
-                    utilityType === "airtime"
-                      ? Phone
-                      : utilityType === "data"
-                        ? Wifi
-                        : utilityType === "electricity"
-                          ? Zap
-                          : utilityType === "cable"
-                            ? Tv
-                            : Globe;
+                {(utilityProviders as Record<string, typeof utilityProviders["airtime"]>)[utilityType]?.slice(0, 6).map((provider) => {
+                  const iconMap: Record<string, typeof Phone> = {
+                    airtime: Phone, data: Wifi, electricity: Zap, cable: Tv, internet: Globe,
+                    water: Droplets, government: Landmark, education: GraduationCap,
+                    transport: Car, insurance: Shield, mortgage: Home, rent: Building2, subscriptions: Music,
+                  };
+                  const ProviderIcon = iconMap[utilityType] || Globe;
                   return (
                     <motion.button
                       key={provider.id}
@@ -1153,6 +1410,64 @@ export default function Bills() {
               </FormField>
             )}
 
+            {/* Account/reference fields for new utility types */}
+            {(utilityType === "water" || utilityType === "government" || utilityType === "education" || utilityType === "insurance" || utilityType === "mortgage" || utilityType === "rent" || utilityType === "subscriptions") && (
+              <FormField
+                label={
+                  utilityType === "water" ? "Water Account Number" :
+                  utilityType === "government" ? "Tax ID / Reference Number" :
+                  utilityType === "education" ? "Registration / Exam Number" :
+                  utilityType === "insurance" ? "Policy Number" :
+                  utilityType === "mortgage" ? "Loan Account Number" :
+                  utilityType === "rent" ? "Tenant ID / Account" :
+                  "Subscription ID / Email"
+                }
+                error={validationErrors.meterNumber}
+                required
+              >
+                <Input
+                  id="new-account"
+                  value={utilityForm.meterNumber}
+                  onChange={(e) => {
+                    setUtilityForm({ ...utilityForm, meterNumber: e.target.value });
+                    setValidationErrors((prev) => ({ ...prev, meterNumber: "" }));
+                  }}
+                  placeholder={
+                    utilityType === "water" ? "Enter water account number" :
+                    utilityType === "government" ? "Enter tax/reference number" :
+                    utilityType === "education" ? "Enter registration number" :
+                    utilityType === "insurance" ? "Enter policy number" :
+                    utilityType === "mortgage" ? "Enter loan account number" :
+                    utilityType === "rent" ? "Enter tenant ID" :
+                    "Enter subscription ID or email"
+                  }
+                  className="bg-muted/30 border-slate-700 text-slate-100 placeholder:text-slate-500"
+                  data-testid={`input-${utilityType}-account`}
+                />
+              </FormField>
+            )}
+
+            {utilityType === "transport" && (
+              <FormField
+                label="Phone Number / Account"
+                error={validationErrors.phoneNumber}
+                required
+              >
+                <Input
+                  id="transport-phone"
+                  type="tel"
+                  value={utilityForm.phoneNumber}
+                  onChange={(e) => {
+                    setUtilityForm({ ...utilityForm, phoneNumber: e.target.value });
+                    setValidationErrors((prev) => ({ ...prev, phoneNumber: "" }));
+                  }}
+                  placeholder={placeholders.phone}
+                  className="bg-muted/30 border-slate-700 text-slate-100 placeholder:text-slate-500"
+                  data-testid="input-transport-phone"
+                />
+              </FormField>
+            )}
+
             {utilityType === "data" && (
               <FormField
                 label="Select Data Plan"
@@ -1215,7 +1530,15 @@ export default function Bills() {
 
             {(utilityType === "airtime" ||
               utilityType === "electricity" ||
-              utilityType === "internet") && (
+              utilityType === "internet" ||
+              utilityType === "water" ||
+              utilityType === "government" ||
+              utilityType === "education" ||
+              utilityType === "transport" ||
+              utilityType === "insurance" ||
+              utilityType === "mortgage" ||
+              utilityType === "rent" ||
+              utilityType === "subscriptions") && (
               <FormField
                 label={`Amount (${currencySymbol})`}
                 error={validationErrors.amount}
@@ -1318,16 +1641,16 @@ export default function Bills() {
               disabled={
                 payUtilityMutation.isPending ||
                 !utilityForm.provider ||
-                ((utilityType === "airtime" || utilityType === "data") &&
+                ((utilityType === "airtime" || utilityType === "data" || utilityType === "transport") &&
                   !utilityForm.phoneNumber) ||
-                (utilityType === "electricity" && !utilityForm.meterNumber) ||
+                ((utilityType === "electricity" || utilityType === "internet" ||
+                  utilityType === "water" || utilityType === "government" || utilityType === "education" ||
+                  utilityType === "insurance" || utilityType === "mortgage" || utilityType === "rent" ||
+                  utilityType === "subscriptions") && !utilityForm.meterNumber) ||
                 (utilityType === "cable" && !utilityForm.smartCardNumber) ||
-                (utilityType === "internet" && !utilityForm.meterNumber) ||
                 ((utilityType === "data" || utilityType === "cable") &&
                   !utilityForm.plan) ||
-                ((utilityType === "airtime" ||
-                  utilityType === "electricity" ||
-                  utilityType === "internet") &&
+                ((utilityType !== "data" && utilityType !== "cable") &&
                   !utilityForm.amount)
               }
               data-testid="button-pay-utility"
@@ -1364,6 +1687,85 @@ export default function Bills() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Payment Receipt Dialog */}
+      <Dialog open={!!receiptBill} onOpenChange={(open) => !open && setReceiptBill(null)}>
+        <DialogContent className="sm:max-w-md bg-slate-950 dark:bg-slate-950 border-slate-800">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-100">
+              <div className="p-2 bg-gradient-to-br from-emerald-600/20 to-emerald-700/20 rounded-lg">
+                <Receipt className="h-5 w-5 text-emerald-500" />
+              </div>
+              Payment Receipt
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Payment details for this bill
+            </DialogDescription>
+          </DialogHeader>
+          {receiptBill && (
+            <div className="space-y-4 py-4">
+              <div className="p-4 bg-gradient-to-br from-emerald-900/20 to-emerald-950/20 border border-emerald-800/30 rounded-xl text-center">
+                <CheckCircle className="h-10 w-10 text-emerald-400 mx-auto mb-2" />
+                <p className="text-lg font-bold text-emerald-400">Payment Successful</p>
+              </div>
+
+              <div className="space-y-3 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-slate-400">Bill Name</span>
+                  <span className="text-sm font-semibold text-slate-100">{receiptBill.name}</span>
+                </div>
+                <div className="border-t border-slate-800" />
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-slate-400">Provider</span>
+                  <span className="text-sm font-semibold text-slate-100">{receiptBill.provider}</span>
+                </div>
+                <div className="border-t border-slate-800" />
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-slate-400">Amount</span>
+                  <span className="text-sm font-bold text-emerald-400">{formatCurrency(Number(receiptBill.paidAmount || receiptBill.amount))}</span>
+                </div>
+                <div className="border-t border-slate-800" />
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-slate-400">Date Paid</span>
+                  <span className="text-sm font-semibold text-slate-100">
+                    {receiptBill.paidDate
+                      ? new Date(receiptBill.paidDate).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+                      : "N/A"}
+                  </span>
+                </div>
+                <div className="border-t border-slate-800" />
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-slate-400">Payment Method</span>
+                  <span className="text-sm font-semibold text-slate-100 capitalize">{receiptBill.paymentMethod || "Wallet"}</span>
+                </div>
+                <div className="border-t border-slate-800" />
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-slate-400">Reference</span>
+                  <span className="text-sm font-mono text-slate-300 text-right max-w-[180px] truncate">{receiptBill.paymentReference || "N/A"}</span>
+                </div>
+                {receiptBill.paidBy && (
+                  <>
+                    <div className="border-t border-slate-800" />
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-slate-400">Paid By</span>
+                      <span className="text-sm font-semibold text-slate-100">{receiptBill.paidBy}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setReceiptBill(null)}
+              className="border-slate-700 text-slate-300 hover:bg-slate-800"
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageWrapper>
   );
 }

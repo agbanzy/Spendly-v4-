@@ -1,7 +1,7 @@
-# Spendly - Global Expense Management Platform
+# Financiar - Global Expense Management Platform
 
 ## Overview
-Spendly is a comprehensive financial operating system for high-growth teams, offering a unified platform for expense tracking, budget management, virtual cards, team management, payroll, invoicing, vendor management, and transaction monitoring. Its core purpose is to streamline financial operations and provide robust tools for modern businesses, aiming to be a complete financial operating system for high-growth teams.
+Financiar is a comprehensive financial operating system for high-growth teams, offering a unified platform for expense tracking, budget management, virtual cards, team management, payroll, invoicing, vendor management, and transaction monitoring. Its core purpose is to streamline financial operations and provide robust tools for modern businesses, aiming to be a complete financial operating system for high-growth teams.
 
 ## User Preferences
 - Default theme: Light mode (toggle available in header)
@@ -63,7 +63,7 @@ Spendly is a comprehensive financial operating system for high-growth teams, off
 - **AWS_SECRET_ACCESS_KEY** (secret) - AWS services authentication
 - **AWS_REGION** (secret) - AWS region (US-EAST-1)
 - **AWS_SES_FROM_EMAIL** (secret) - Verified sender email for SES
-- **AWS_SES_FROM_NAME** (env) - Sender display name ("Spendly")
+- **AWS_SES_FROM_NAME** (env) - Sender display name ("Financiar")
 - **SESSION_SECRET** (secret) - Express session encryption
 - **VITE_STRIPE_PUBLISHABLE_KEY** (env) - Stripe frontend key (pk_live_*)
 - **VITE_PAYSTACK_PUBLIC_KEY** (env) - Paystack frontend key (pk_live_*)
@@ -80,11 +80,11 @@ SES is currently in **sandbox mode**. Only verified email addresses can receive 
 
 ## Mobile App Configuration (React Native / Expo)
 - **Location**: `mobile/` directory with Expo managed workflow
-- **API Base URL**: Configured via `EXPO_PUBLIC_API_URL` env var, defaults to `https://spendlymanager.com`
+- **API Base URL**: Configured via `EXPO_PUBLIC_API_URL` env var, defaults to `https://thefinanciar.com`
 - **Firebase Config**: Uses `EXPO_PUBLIC_FIREBASE_*` env vars (API_KEY, AUTH_DOMAIN, PROJECT_ID, STORAGE_BUCKET, MESSAGING_SENDER_ID, APP_ID) - same Firebase project as web
 - **Auth Flow**: Firebase email/password + token stored in AsyncStorage, sent as Bearer token to backend
 - **User Sync**: On login/register, profile synced to backend via POST `/api/user-profile`
-- **Bundle IDs**: iOS `com.spendly.app`, Android `com.spendly.app`
+- **Bundle IDs**: iOS `com.financiar.app`, Android `com.financiar.app`
 
 ## External Dependencies
 - **Firebase**: Authentication (email/password, Google Sign-in) and Firebase Admin SDK.

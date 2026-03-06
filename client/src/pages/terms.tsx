@@ -10,8 +10,8 @@ export default function TermsPage() {
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <Link href="/">
             <div className="flex items-center gap-2 cursor-pointer" data-testid="link-terms-home">
-              <img src="/spendly-logo.png" alt="Spendly" className="h-10 w-10 rounded-xl" />
-              <span className="font-bold text-xl">Spendly</span>
+              <img src="/financiar-logo.svg" alt="Financiar" className="h-10 w-10 rounded-xl" />
+              <span className="font-bold text-xl">Financiar</span>
             </div>
           </Link>
           <Link href="/">
@@ -33,14 +33,14 @@ export default function TermsPage() {
             <section className="mb-8">
               <h2 className="text-xl font-semibold mb-4">1. Acceptance of Terms</h2>
               <p className="text-muted-foreground mb-4">
-                By accessing or using Spendly's services, you agree to be bound by these Terms of Service and all applicable laws and regulations. If you do not agree with any of these terms, you are prohibited from using or accessing our services.
+                By accessing or using Financiar's services, you agree to be bound by these Terms of Service and all applicable laws and regulations. If you do not agree with any of these terms, you are prohibited from using or accessing our services.
               </p>
             </section>
 
             <section className="mb-8">
               <h2 className="text-xl font-semibold mb-4">2. Description of Service</h2>
               <p className="text-muted-foreground mb-4">
-                Spendly provides a comprehensive financial operating system for businesses, including expense tracking, budget management, virtual cards, team management, payroll processing, invoicing, and vendor management services.
+                Financiar provides a comprehensive financial operating system for businesses, including expense tracking, budget management, virtual cards, team management, payroll processing, invoicing, and vendor management services.
               </p>
             </section>
 
@@ -54,7 +54,7 @@ export default function TermsPage() {
             <section className="mb-8">
               <h2 className="text-xl font-semibold mb-4">4. Payment Terms</h2>
               <p className="text-muted-foreground mb-4">
-                Certain features of Spendly require payment. By subscribing to a paid plan, you agree to pay all applicable fees. Fees are non-refundable except as required by law or as explicitly stated in these terms.
+                Certain features of Financiar require payment. By subscribing to a paid plan, you agree to pay all applicable fees. Fees are non-refundable except as required by law or as explicitly stated in these terms.
               </p>
             </section>
 
@@ -68,21 +68,21 @@ export default function TermsPage() {
             <section className="mb-8">
               <h2 className="text-xl font-semibold mb-4">6. Acceptable Use</h2>
               <p className="text-muted-foreground mb-4">
-                You agree not to use Spendly for any unlawful purpose or in any way that could damage, disable, overburden, or impair our services. You may not attempt to gain unauthorized access to any part of our services.
+                You agree not to use Financiar for any unlawful purpose or in any way that could damage, disable, overburden, or impair our services. You may not attempt to gain unauthorized access to any part of our services.
               </p>
             </section>
 
             <section className="mb-8">
               <h2 className="text-xl font-semibold mb-4">7. Intellectual Property</h2>
               <p className="text-muted-foreground mb-4">
-                All content, features, and functionality of Spendly, including but not limited to text, graphics, logos, and software, are the exclusive property of Spendly and are protected by international copyright, trademark, and other intellectual property laws.
+                All content, features, and functionality of Financiar, including but not limited to text, graphics, logos, and software, are the exclusive property of Financiar and are protected by international copyright, trademark, and other intellectual property laws.
               </p>
             </section>
 
             <section className="mb-8">
               <h2 className="text-xl font-semibold mb-4">8. Limitation of Liability</h2>
               <p className="text-muted-foreground mb-4">
-                Spendly shall not be liable for any indirect, incidental, special, consequential, or punitive damages resulting from your use of or inability to use our services.
+                Financiar shall not be liable for any indirect, incidental, special, consequential, or punitive damages resulting from your use of or inability to use our services.
               </p>
             </section>
 
@@ -103,7 +103,7 @@ export default function TermsPage() {
             <section className="mb-8">
               <h2 className="text-xl font-semibold mb-4">11. Contact Us</h2>
               <p className="text-muted-foreground mb-4">
-                If you have any questions about these Terms of Service, please contact us at legal@spendlymanager.com.
+                If you have any questions about these Terms of Service, please contact us at legal@thefinanciar.com.
               </p>
             </section>
           </CardContent>

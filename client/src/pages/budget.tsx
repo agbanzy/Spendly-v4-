@@ -29,6 +29,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Switch } from "@/components/ui/switch";
 import {
   Plus,
   TrendingUp,
@@ -38,6 +39,7 @@ import {
   Trash2,
   Loader2,
   Wallet,
+  RefreshCw,
 } from "lucide-react";
 import {
   PageWrapper,
@@ -61,6 +63,7 @@ export default function BudgetPage() {
     category: "Software",
     limit: "",
     period: "monthly",
+    rollover: false,
   });
 
   const { data: settings } = useQuery<CompanySettings>({
@@ -396,14 +399,33 @@ export default function BudgetPage() {
                                 of {formatCurrency(budget.limit)}
                               </p>
                             </div>
-                            <div className="flex items-center justify-between text-xs font-semibold">
-                              <span className="text-muted-foreground">{Math.round(percentage)}% used</span>
-                              {isOverBudget && (
+                            {/* Horizontal Progress Bar */}
+                            <div className="space-y-1">
+                              <div className="w-full h-2.5 rounded-full bg-muted/50 overflow-hidden">
+                                <motion.div
+                                  className={`h-full rounded-full ${
+                                    isOverBudget ? "bg-rose-500" : isWarning ? "bg-amber-500" : "bg-sky-500"
+                                  }`}
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${Math.min(percentage, 100)}%` }}
+                                  transition={{ duration: 0.8, ease: "easeOut" }}
+                                />
+                              </div>
+                              <div className="flex items-center justify-between text-xs font-semibold">
+                                <span className="text-muted-foreground">{Math.round(percentage)}% used</span>
+                                <span className="text-muted-foreground">
+                                  {formatCurrency(parseFloat(budget.spent))} / {formatCurrency(parseFloat(budget.limit))}
+                                </span>
+                              </div>
+                            </div>
+                            {isOverBudget && (
+                              <div className="flex items-center justify-between text-xs font-semibold">
+                                <span className="text-rose-600 dark:text-rose-400">Over budget</span>
                                 <span className="text-rose-600 dark:text-rose-400">
                                   +{formatCurrency(parseFloat(budget.spent) - parseFloat(budget.limit))}
                                 </span>
-                              )}
-                            </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 120" fill="none">
+  <!-- Infinity Symbol -->
+  <path d="M52 60c0-18.5 13.5-34 31-34 12 0 22.5 7 28 17.5L117 60l-6 16.5C105.5 87 95 94 83 94c-17.5 0-31-15.5-31-34z" stroke="#6B2346" stroke-width="7" stroke-linecap="round" fill="none"/>
+  <path d="M148 60c0 18.5-13.5 34-31 34-12 0-22.5-7-28-17.5L83 60l6-16.5C94.5 33 105 26 117 26c17.5 0 31 15.5 31 34z" stroke="#6B2346" stroke-width="7" stroke-linecap="round" fill="none"/>
+  <path d="M40 85c-5 8-8 12-12 15" stroke="#6B2346" stroke-width="5" stroke-linecap="round" fill="none" opacity="0.7"/>
+  <path d="M160 35c5-8 8-12 12-15" stroke="#6B2346" stroke-width="5" stroke-linecap="round" fill="none" opacity="0.7"/>
+  <!-- Wordmark -->
+  <text x="180" y="74" font-family="'DM Serif Display', Georgia, serif" font-size="48" fill="#6B2346" letter-spacing="1">Financiar</text>
+</svg>

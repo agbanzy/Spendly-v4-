@@ -97,6 +97,7 @@ export default function Transactions() {
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
 
   const [isFundOpen, setIsFundOpen] = useState(false);
   const [isTransferOpen, setIsTransferOpen] = useState(false);
@@ -186,11 +187,16 @@ export default function Transactions() {
     enabled: isPaystack,
   });
 
+  const transactionCategories = Array.from(
+    new Set(transactions?.map(tx => (tx as any).category as string | undefined).filter(Boolean) || [])
+  ).sort() as string[];
+
   const filteredTransactions = transactions?.filter((tx) => {
     const matchesSearch = tx.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesType = typeFilter === "all" || tx.type.toLowerCase() === typeFilter.toLowerCase();
     const matchesStatus = statusFilter === "all" || tx.status.toLowerCase() === statusFilter.toLowerCase();
-    return matchesSearch && matchesType && matchesStatus;
+    const matchesCategory = categoryFilter === "all" || (tx as any).category === categoryFilter;
+    return matchesSearch && matchesType && matchesStatus && matchesCategory;
   })?.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const totalInflow = transactions?.filter(tx => INFLOW_TYPES.includes(tx.type)).reduce((sum, tx) => sum + Number(tx.amount), 0) || 0;
@@ -557,6 +563,19 @@ export default function Transactions() {
                 <SelectItem value="failed">Failed</SelectItem>
               </SelectContent>
             </Select>
+            {transactionCategories.length > 0 && (
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="w-full md:w-[180px]" data-testid="select-transaction-category">
+                  <SelectValue placeholder="All Categories" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  {transactionCategories.map((cat) => (
+                    <SelectItem key={cat} value={cat!}>{cat}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
         </div>
       </GlassCard>

@@ -169,7 +169,7 @@ export default function Onboarding() {
 
   // Persist form data to sessionStorage for resume
   useEffect(() => {
-    const saved = sessionStorage.getItem('spendly_onboarding_form');
+    const saved = sessionStorage.getItem('financiar_onboarding_form');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -180,7 +180,7 @@ export default function Onboarding() {
   }, []);
 
   useEffect(() => {
-    sessionStorage.setItem('spendly_onboarding_form', JSON.stringify({ ...formData, _step: currentStep }));
+    sessionStorage.setItem('financiar_onboarding_form', JSON.stringify({ ...formData, _step: currentStep }));
   }, [formData, currentStep]);
 
   const { data: userProfile, isLoading: profileLoading } = useQuery({
@@ -252,7 +252,7 @@ export default function Onboarding() {
       return res.json();
     },
     onSuccess: () => {
-      sessionStorage.removeItem('spendly_onboarding_form');
+      sessionStorage.removeItem('financiar_onboarding_form');
       queryClient.invalidateQueries({ queryKey: ["/api/user-profile"] });
       toast({
         title: "KYC Submitted Successfully",
@@ -1359,7 +1359,7 @@ export default function Onboarding() {
         </Card>
 
         <p className="text-center text-sm text-muted-foreground mt-6">
-          Need help? <a href="mailto:support@spendlymanager.com" className="text-primary hover:underline">Contact Support</a>
+          Need help? <a href="mailto:support@thefinanciar.com" className="text-primary hover:underline">Contact Support</a>
         </p>
       </div>
     </div>

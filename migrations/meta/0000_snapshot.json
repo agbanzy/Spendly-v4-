@@ -990,14 +990,14 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'Spendly'"
+          "default": "'Financiar'"
         },
         "company_email": {
           "name": "company_email",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'finance@spendlymanager.com'"
+          "default": "'finance@thefinanciar.com'"
         },
         "company_phone": {
           "name": "company_phone",

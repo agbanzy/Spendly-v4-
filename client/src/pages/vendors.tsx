@@ -23,7 +23,9 @@ import {
   MapPin,
   Loader2,
   Send,
-  TrendingUp
+  TrendingUp,
+  Clock,
+  FileText,
 } from "lucide-react";
 import type { Vendor, CompanySettings } from "@shared/schema";
 
@@ -31,7 +33,7 @@ export default function VendorsPage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [vendorForm, setVendorForm] = useState({ name: "", email: "", phone: "", address: "", category: "", paymentTerms: "net30" });
+  const [vendorForm, setVendorForm] = useState({ name: "", email: "", phone: "", address: "", category: "", paymentTerms: "net30", taxId: "" });
 
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
@@ -48,13 +50,13 @@ export default function VendorsPage() {
   });
 
   const createVendorMutation = useMutation({
-    mutationFn: async (vendorData: { name: string; email: string; phone: string; address: string; category: string; paymentTerms: string }) => {
+    mutationFn: async (vendorData: { name: string; email: string; phone: string; address: string; category: string; paymentTerms: string; taxId?: string }) => {
       return apiRequest("POST", "/api/vendors", vendorData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/vendors"] });
       setIsAddOpen(false);
-      setVendorForm({ name: "", email: "", phone: "", address: "", category: "", paymentTerms: "net30" });
+      setVendorForm({ name: "", email: "", phone: "", address: "", category: "", paymentTerms: "net30", taxId: "" });
       toast({
         title: "Vendor added",
         description: "The vendor has been added successfully."
@@ -91,6 +93,7 @@ export default function VendorsPage() {
       address: vendorForm.address,
       category: vendorForm.category || "Other",
       paymentTerms: vendorForm.paymentTerms || "net30",
+      taxId: vendorForm.taxId || undefined,
     });
   };
 
@@ -199,6 +202,16 @@ export default function VendorsPage() {
                       <SelectItem value="net60">Net 60</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-slate-700 dark:text-slate-300">Tax ID / Registration Number</Label>
+                  <Input
+                    placeholder="e.g., EIN, VAT, TIN"
+                    className="border-slate-200 dark:border-slate-700"
+                    value={vendorForm.taxId}
+                    onChange={(e) => setVendorForm({ ...vendorForm, taxId: e.target.value })}
+                    data-testid="input-vendor-tax-id"
+                  />
                 </div>
               </div>
               <DialogFooter>
@@ -460,6 +473,30 @@ function VendorCard({
                 {formatCurrency(vendor.pendingPayments)}
               </p>
             </div>
+          </div>
+
+          {/* Payment History */}
+          <div className="pt-3 border-t border-slate-200 dark:border-slate-700">
+            <div className="flex items-center gap-2 mb-2">
+              <Clock className="h-3.5 w-3.5 text-slate-400" />
+              <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide font-medium">Payment History</p>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-slate-600 dark:text-slate-400">Last Paid</span>
+              <span className="font-medium text-slate-900 dark:text-slate-100">
+                {vendor.lastPaymentDate
+                  ? new Date(vendor.lastPaymentDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                  : "No payments yet"}
+              </span>
+            </div>
+            {vendor.paymentTerms && (
+              <div className="flex items-center justify-between text-sm mt-1">
+                <span className="text-slate-600 dark:text-slate-400">Terms</span>
+                <span className="font-medium text-slate-900 dark:text-slate-100 capitalize">
+                  {vendor.paymentTerms.replace("net", "Net ")}
+                </span>
+              </div>
+            )}
           </div>
 
           {parseFloat(String(vendor.pendingPayments)) > 0 && !isInactive && (

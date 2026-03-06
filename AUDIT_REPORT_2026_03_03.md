@@ -1,4 +1,4 @@
-# Spendly v4 — Comprehensive System Audit Report
+# Financiar — Comprehensive System Audit Report
 
 **Date:** 2026-03-03
 **Scope:** Transactions, currencies, wallet relations, bill payments, API validations, user relations, approvals, live API connections, virtual accounts

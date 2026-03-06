@@ -110,7 +110,7 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.content}>
           <View style={styles.header}>
-            <Text style={styles.logo}>Spendly</Text>
+            <Text style={styles.logo}>Financiar</Text>
             <Text style={styles.subtitle}>Global Expense Management</Text>
           </View>
 
