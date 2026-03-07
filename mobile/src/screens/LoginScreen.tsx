@@ -12,8 +12,8 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../lib/auth-context';
+import { setSecureItem, getSecureItem } from '../lib/secure-storage';
 import { useTheme } from '../lib/theme-context';
 import { ColorTokens } from '../lib/colors';
 import { isBiometricAvailable, getBiometricType, authenticateWithBiometric, isBiometricEnabled, setBiometricEnabled } from '../lib/biometric';
@@ -60,8 +60,8 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
     const success = await authenticateWithBiometric();
     if (success) {
       // Retrieve stored credentials
-      const storedEmail = await AsyncStorage.getItem('biometric_email');
-      const storedPassword = await AsyncStorage.getItem('biometric_password');
+      const storedEmail = await getSecureItem('biometric_email');
+      const storedPassword = await getSecureItem('biometric_password');
       if (storedEmail && storedPassword) {
         setLoading(true);
         try {
@@ -89,8 +89,8 @@ export default function LoginScreen({ navigation }: LoginScreenProps) {
       // Save credentials for biometric login
       const bioAvail = await isBiometricAvailable();
       if (bioAvail) {
-        await AsyncStorage.setItem('biometric_email', email.trim());
-        await AsyncStorage.setItem('biometric_password', password);
+        await setSecureItem('biometric_email', email.trim());
+        await setSecureItem('biometric_password', password);
         await setBiometricEnabled(true);
       }
     } catch (error: any) {

@@ -244,8 +244,8 @@ export default function VendorsPage() {
       address: vendor.address,
       category: vendor.category,
       paymentTerms: vendor.paymentTerms || "net30",
-      taxId: (vendor as any).taxId || "",
-      notes: (vendor as any).notes || "",
+      taxId: vendor.taxId || "",
+      notes: vendor.notes || "",
     });
     setIsEditOpen(true);
   };
@@ -714,10 +714,10 @@ function VendorCard({
               <MapPin className="h-4 w-4 flex-shrink-0" />
               <span className="truncate">{vendor.address}</span>
             </div>
-            {(vendor as any).taxId && (
+            {vendor.taxId && (
               <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 truncate">
                 <FileText className="h-4 w-4 flex-shrink-0" />
-                <span className="truncate">Tax ID: {(vendor as any).taxId}</span>
+                <span className="truncate">Tax ID: {vendor.taxId}</span>
               </div>
             )}
           </div>
@@ -772,14 +772,14 @@ function VendorCard({
           </div>
 
           {/* Notes preview */}
-          {(vendor as any).notes && (
+          {vendor.notes && (
             <div className="pt-3 border-t border-slate-200 dark:border-slate-700">
               <div className="flex items-center gap-2 mb-1">
                 <StickyNote className="h-3.5 w-3.5 text-slate-400" />
                 <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide font-medium">Notes</p>
               </div>
               <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2">
-                {(vendor as any).notes}
+                {vendor.notes}
               </p>
             </div>
           )}
@@ -923,7 +923,7 @@ function VendorDetailDialog({
               </div>
               <div className="space-y-1">
                 <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Tax ID / EIN</p>
-                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{(vendor as any).taxId || "N/A"}</p>
+                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{vendor.taxId || "N/A"}</p>
               </div>
               <div className="space-y-1">
                 <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Status</p>
@@ -946,14 +946,14 @@ function VendorDetailDialog({
               </div>
             </div>
 
-            {(vendor as any).notes && (
+            {vendor.notes && (
               <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
                 <div className="flex items-center gap-2 mb-2">
                   <StickyNote className="h-4 w-4 text-slate-400" />
                   <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide font-medium">Internal Notes</p>
                 </div>
                 <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap bg-slate-50 dark:bg-slate-900 rounded-lg p-3 border border-slate-200 dark:border-slate-700">
-                  {(vendor as any).notes}
+                  {vendor.notes}
                 </p>
               </div>
             )}
