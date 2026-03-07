@@ -9,7 +9,7 @@ env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: financiar
   ECS_CLUSTER: financiar
-  ECS_SERVICE: FinanciarStack-FinanciarServicexxxxxxxx  # Update after first CDK deploy
+  ECS_SERVICE: FinanciarStack-FinanciarService17E2212F-iqJEim2EGNKx
 
 permissions:
   id-token: write
