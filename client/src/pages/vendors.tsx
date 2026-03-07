@@ -1,13 +1,16 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatCurrencyAmount } from "@/lib/constants";
@@ -18,7 +21,6 @@ import {
   Search,
   CheckCircle2,
   AlertCircle,
-  DollarSign,
   Mail,
   MapPin,
   Loader2,
@@ -26,14 +28,80 @@ import {
   TrendingUp,
   Clock,
   FileText,
+  Eye,
+  Edit2,
+  AlertTriangle,
+  Receipt,
+  StickyNote,
 } from "lucide-react";
-import type { Vendor, CompanySettings } from "@shared/schema";
+import type { Vendor, Payout, CompanySettings, PayoutDestination } from "@shared/schema";
+
+// ── Vendor payment status helpers ──────────────────────────────
+
+type VendorPaymentStatus = "active" | "inactive" | "pending_setup";
+
+function derivePaymentStatus(vendor: Vendor, hasPayoutDestinations: boolean): VendorPaymentStatus {
+  if (!hasPayoutDestinations) return "pending_setup";
+
+  if (vendor.lastPayment) {
+    const lastDate = new Date(vendor.lastPayment);
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+    if (lastDate >= ninetyDaysAgo) return "active";
+    return "inactive";
+  }
+
+  // No last payment recorded - check if there's any totalPaid
+  if (parseFloat(String(vendor.totalPaid) || "0") > 0) return "active";
+  return "inactive";
+}
+
+function PaymentStatusBadge({ status }: { status: VendorPaymentStatus }) {
+  switch (status) {
+    case "active":
+      return (
+        <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20 text-[11px] font-semibold gap-1 px-2 py-0.5" variant="outline">
+          <CheckCircle2 className="h-3 w-3" />
+          Active
+        </Badge>
+      );
+    case "inactive":
+      return (
+        <Badge className="bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20 text-[11px] font-semibold gap-1 px-2 py-0.5" variant="outline">
+          <Clock className="h-3 w-3" />
+          Inactive
+        </Badge>
+      );
+    case "pending_setup":
+      return (
+        <Badge className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 text-[11px] font-semibold gap-1 px-2 py-0.5" variant="outline">
+          <AlertTriangle className="h-3 w-3" />
+          Pending Setup
+        </Badge>
+      );
+  }
+}
+
+// ── Main page ────────────────────────────────────────────────
 
 export default function VendorsPage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [vendorForm, setVendorForm] = useState({ name: "", email: "", phone: "", address: "", category: "", paymentTerms: "net30", taxId: "" });
+  const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [detailVendor, setDetailVendor] = useState<Vendor | null>(null);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [vendorForm, setVendorForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    address: "",
+    category: "",
+    paymentTerms: "net30",
+    taxId: "",
+    notes: "",
+  });
 
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
@@ -49,14 +117,35 @@ export default function VendorsPage() {
     queryKey: ["/api/vendors"]
   });
 
+  // Fetch payout destinations for all vendors to determine payment status
+  const { data: allPayoutDestinations = [] } = useQuery<PayoutDestination[]>({
+    queryKey: ["/api/payout-destinations"],
+  });
+
+  // Build a set of vendor IDs that have at least one payout destination
+  const vendorIdsWithDestinations = new Set(
+    allPayoutDestinations
+      .filter((d) => d.vendorId)
+      .map((d) => d.vendorId!)
+  );
+
   const createVendorMutation = useMutation({
-    mutationFn: async (vendorData: { name: string; email: string; phone: string; address: string; category: string; paymentTerms: string; taxId?: string }) => {
+    mutationFn: async (vendorData: {
+      name: string;
+      email: string;
+      phone: string;
+      address: string;
+      category: string;
+      paymentTerms: string;
+      taxId?: string;
+      notes?: string;
+    }) => {
       return apiRequest("POST", "/api/vendors", vendorData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/vendors"] });
       setIsAddOpen(false);
-      setVendorForm({ name: "", email: "", phone: "", address: "", category: "", paymentTerms: "net30", taxId: "" });
+      resetForm();
       toast({
         title: "Vendor added",
         description: "The vendor has been added successfully."
@@ -70,6 +159,33 @@ export default function VendorsPage() {
       });
     }
   });
+
+  const updateVendorMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
+      return apiRequest("PATCH", `/api/vendors/${id}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/vendors"] });
+      setIsEditOpen(false);
+      setEditingVendor(null);
+      resetForm();
+      toast({
+        title: "Vendor updated",
+        description: "The vendor has been updated successfully."
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update vendor. Please try again.",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const resetForm = () => {
+    setVendorForm({ name: "", email: "", phone: "", address: "", category: "", paymentTerms: "net30", taxId: "", notes: "" });
+  };
 
   const totalVendors = vendors.length;
   const activeVendors = vendors.filter(v => v.status === "active").length;
@@ -94,7 +210,49 @@ export default function VendorsPage() {
       category: vendorForm.category || "Other",
       paymentTerms: vendorForm.paymentTerms || "net30",
       taxId: vendorForm.taxId || undefined,
+      notes: vendorForm.notes || undefined,
     });
+  };
+
+  const handleEditVendor = () => {
+    if (!editingVendor) return;
+    if (!vendorForm.name || !vendorForm.email) {
+      toast({ title: "Name and email are required", variant: "destructive" });
+      return;
+    }
+    updateVendorMutation.mutate({
+      id: editingVendor.id,
+      data: {
+        name: vendorForm.name,
+        email: vendorForm.email,
+        phone: vendorForm.phone,
+        address: vendorForm.address,
+        category: vendorForm.category || "Other",
+        paymentTerms: vendorForm.paymentTerms || "net30",
+        taxId: vendorForm.taxId || undefined,
+        notes: vendorForm.notes || undefined,
+      },
+    });
+  };
+
+  const openEditDialog = (vendor: Vendor) => {
+    setEditingVendor(vendor);
+    setVendorForm({
+      name: vendor.name,
+      email: vendor.email,
+      phone: vendor.phone,
+      address: vendor.address,
+      category: vendor.category,
+      paymentTerms: vendor.paymentTerms || "net30",
+      taxId: (vendor as any).taxId || "",
+      notes: (vendor as any).notes || "",
+    });
+    setIsEditOpen(true);
+  };
+
+  const openDetailDialog = (vendor: Vendor) => {
+    setDetailVendor(vendor);
+    setIsDetailOpen(true);
   };
 
   const handlePayVendor = (vendor: Vendor) => {
@@ -139,81 +297,24 @@ export default function VendorsPage() {
             title="Vendor Management"
             subtitle="Manage vendors and track payments"
           />
-          <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+          <Dialog open={isAddOpen} onOpenChange={(open) => { setIsAddOpen(open); if (!open) resetForm(); }}>
             <DialogTrigger asChild>
               <Button data-testid="button-add-vendor" className="bg-violet-600 hover:bg-violet-700 w-full sm:w-auto">
                 <Plus className="mr-2 h-4 w-4" />
                 Add Vendor
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[500px] border-slate-200 dark:border-slate-700">
+            <DialogContent className="sm:max-w-[500px] border-slate-200 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle className="text-xl">Add New Vendor</DialogTitle>
                 <DialogDescription>
                   Enter the vendor details to add them to your list.
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label className="text-slate-700 dark:text-slate-300">Vendor Name</Label>
-                  <Input placeholder="e.g., Amazon Web Services" data-testid="input-vendor-name" className="border-slate-200 dark:border-slate-700" value={vendorForm.name} onChange={(e) => setVendorForm({ ...vendorForm, name: e.target.value })} />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-slate-700 dark:text-slate-300">Email</Label>
-                    <Input type="email" placeholder="billing@vendor.com" className="border-slate-200 dark:border-slate-700" value={vendorForm.email} onChange={(e) => setVendorForm({ ...vendorForm, email: e.target.value })} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-slate-700 dark:text-slate-300">Phone</Label>
-                    <Input type="tel" placeholder="+1 (555) 123-4567" className="border-slate-200 dark:border-slate-700" value={vendorForm.phone} onChange={(e) => setVendorForm({ ...vendorForm, phone: e.target.value })} />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-slate-700 dark:text-slate-300">Address</Label>
-                  <Input placeholder="City, State, Country" className="border-slate-200 dark:border-slate-700" value={vendorForm.address} onChange={(e) => setVendorForm({ ...vendorForm, address: e.target.value })} />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-slate-700 dark:text-slate-300">Category</Label>
-                  <Select value={vendorForm.category} onValueChange={(value) => setVendorForm({ ...vendorForm, category: value })}>
-                    <SelectTrigger className="border-slate-200 dark:border-slate-700">
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Cloud Services">Cloud Services</SelectItem>
-                      <SelectItem value="Software">Software</SelectItem>
-                      <SelectItem value="Office Space">Office Space</SelectItem>
-                      <SelectItem value="Utilities">Utilities</SelectItem>
-                      <SelectItem value="Insurance">Insurance</SelectItem>
-                      <SelectItem value="Marketing">Marketing</SelectItem>
-                      <SelectItem value="Other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-slate-700 dark:text-slate-300">Payment Terms</Label>
-                  <Select value={vendorForm.paymentTerms} onValueChange={(value) => setVendorForm({ ...vendorForm, paymentTerms: value })}>
-                    <SelectTrigger className="border-slate-200 dark:border-slate-700">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="net15">Net 15</SelectItem>
-                      <SelectItem value="net30">Net 30</SelectItem>
-                      <SelectItem value="net45">Net 45</SelectItem>
-                      <SelectItem value="net60">Net 60</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-slate-700 dark:text-slate-300">Tax ID / Registration Number</Label>
-                  <Input
-                    placeholder="e.g., EIN, VAT, TIN"
-                    className="border-slate-200 dark:border-slate-700"
-                    value={vendorForm.taxId}
-                    onChange={(e) => setVendorForm({ ...vendorForm, taxId: e.target.value })}
-                    data-testid="input-vendor-tax-id"
-                  />
-                </div>
-              </div>
+              <VendorFormFields
+                vendorForm={vendorForm}
+                setVendorForm={setVendorForm}
+              />
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsAddOpen(false)} className="border-slate-200 dark:border-slate-700">
                   Cancel
@@ -304,9 +405,12 @@ export default function VendorsPage() {
                       vendor={vendor}
                       index={index}
                       onPay={handlePayVendor}
+                      onView={openDetailDialog}
+                      onEdit={openEditDialog}
                       getCategoryGradient={getCategoryGradient}
                       getStatusVariant={getStatusVariant}
                       formatCurrency={formatCurrency}
+                      hasPayoutDestinations={vendorIdsWithDestinations.has(vendor.id)}
                     />
                   ))}
                 </motion.div>
@@ -333,9 +437,12 @@ export default function VendorsPage() {
                       vendor={vendor}
                       index={index}
                       onPay={handlePayVendor}
+                      onView={openDetailDialog}
+                      onEdit={openEditDialog}
                       getCategoryGradient={getCategoryGradient}
                       getStatusVariant={getStatusVariant}
                       formatCurrency={formatCurrency}
+                      hasPayoutDestinations={vendorIdsWithDestinations.has(vendor.id)}
                     />
                   ))}
                 </motion.div>
@@ -362,10 +469,13 @@ export default function VendorsPage() {
                       vendor={vendor}
                       index={index}
                       onPay={handlePayVendor}
+                      onView={openDetailDialog}
+                      onEdit={openEditDialog}
                       getCategoryGradient={getCategoryGradient}
                       getStatusVariant={getStatusVariant}
                       formatCurrency={formatCurrency}
                       isInactive
+                      hasPayoutDestinations={vendorIdsWithDestinations.has(vendor.id)}
                     />
                   ))}
                 </motion.div>
@@ -374,27 +484,178 @@ export default function VendorsPage() {
           </Tabs>
         </GlassCard>
 
+        {/* Edit Vendor Dialog */}
+        <Dialog open={isEditOpen} onOpenChange={(open) => { setIsEditOpen(open); if (!open) { setEditingVendor(null); resetForm(); } }}>
+          <DialogContent className="sm:max-w-[500px] border-slate-200 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="text-xl">Edit Vendor</DialogTitle>
+              <DialogDescription>
+                Update the vendor details below.
+              </DialogDescription>
+            </DialogHeader>
+            <VendorFormFields
+              vendorForm={vendorForm}
+              setVendorForm={setVendorForm}
+            />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsEditOpen(false)} className="border-slate-200 dark:border-slate-700">
+                Cancel
+              </Button>
+              <Button onClick={handleEditVendor} disabled={updateVendorMutation.isPending} className="bg-violet-600 hover:bg-violet-700">
+                {updateVendorMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Save Changes"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Vendor Detail Dialog */}
+        {detailVendor && (
+          <VendorDetailDialog
+            vendor={detailVendor}
+            open={isDetailOpen}
+            onOpenChange={(open) => { setIsDetailOpen(open); if (!open) setDetailVendor(null); }}
+            formatCurrency={formatCurrency}
+            getCategoryGradient={getCategoryGradient}
+            hasPayoutDestinations={vendorIdsWithDestinations.has(detailVendor.id)}
+          />
+        )}
+
       </motion.div>
     </PageWrapper>
   );
 }
 
+// ── Shared form fields component ─────────────────────────────
+
+function VendorFormFields({
+  vendorForm,
+  setVendorForm,
+}: {
+  vendorForm: {
+    name: string;
+    email: string;
+    phone: string;
+    address: string;
+    category: string;
+    paymentTerms: string;
+    taxId: string;
+    notes: string;
+  };
+  setVendorForm: React.Dispatch<React.SetStateAction<typeof vendorForm>>;
+}) {
+  return (
+    <div className="space-y-4 py-4">
+      <div className="space-y-2">
+        <Label className="text-slate-700 dark:text-slate-300">Vendor Name</Label>
+        <Input placeholder="e.g., Amazon Web Services" data-testid="input-vendor-name" className="border-slate-200 dark:border-slate-700" value={vendorForm.name} onChange={(e) => setVendorForm({ ...vendorForm, name: e.target.value })} />
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label className="text-slate-700 dark:text-slate-300">Email</Label>
+          <Input type="email" placeholder="billing@vendor.com" className="border-slate-200 dark:border-slate-700" value={vendorForm.email} onChange={(e) => setVendorForm({ ...vendorForm, email: e.target.value })} />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-slate-700 dark:text-slate-300">Phone</Label>
+          <Input type="tel" placeholder="+1 (555) 123-4567" className="border-slate-200 dark:border-slate-700" value={vendorForm.phone} onChange={(e) => setVendorForm({ ...vendorForm, phone: e.target.value })} />
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-slate-700 dark:text-slate-300">Address</Label>
+        <Input placeholder="City, State, Country" className="border-slate-200 dark:border-slate-700" value={vendorForm.address} onChange={(e) => setVendorForm({ ...vendorForm, address: e.target.value })} />
+      </div>
+      <div className="space-y-2">
+        <Label className="text-slate-700 dark:text-slate-300">Category</Label>
+        <Select value={vendorForm.category} onValueChange={(value) => setVendorForm({ ...vendorForm, category: value })}>
+          <SelectTrigger className="border-slate-200 dark:border-slate-700">
+            <SelectValue placeholder="Select category" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="Cloud Services">Cloud Services</SelectItem>
+            <SelectItem value="Software">Software</SelectItem>
+            <SelectItem value="Office Space">Office Space</SelectItem>
+            <SelectItem value="Utilities">Utilities</SelectItem>
+            <SelectItem value="Insurance">Insurance</SelectItem>
+            <SelectItem value="Marketing">Marketing</SelectItem>
+            <SelectItem value="Other">Other</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-slate-700 dark:text-slate-300">Payment Terms</Label>
+        <Select value={vendorForm.paymentTerms} onValueChange={(value) => setVendorForm({ ...vendorForm, paymentTerms: value })}>
+          <SelectTrigger className="border-slate-200 dark:border-slate-700">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="net15">Net 15</SelectItem>
+            <SelectItem value="net30">Net 30</SelectItem>
+            <SelectItem value="net45">Net 45</SelectItem>
+            <SelectItem value="net60">Net 60</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-slate-700 dark:text-slate-300">Tax ID / EIN</Label>
+        <Input
+          placeholder="e.g., 12-3456789, VAT123456"
+          className="border-slate-200 dark:border-slate-700"
+          value={vendorForm.taxId}
+          onChange={(e) => setVendorForm({ ...vendorForm, taxId: e.target.value })}
+          data-testid="input-vendor-tax-id"
+        />
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Tax identification number (EIN, VAT, TIN, etc.)
+        </p>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-slate-700 dark:text-slate-300">Internal Notes</Label>
+        <Textarea
+          placeholder="Add any internal notes about this vendor..."
+          className="border-slate-200 dark:border-slate-700 resize-none"
+          rows={3}
+          value={vendorForm.notes}
+          onChange={(e) => setVendorForm({ ...vendorForm, notes: e.target.value })}
+          data-testid="input-vendor-notes"
+        />
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          These notes are only visible to your team.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Vendor Card ──────────────────────────────────────────────
+
 function VendorCard({
   vendor,
   index,
   onPay,
+  onView,
+  onEdit,
   getCategoryGradient,
   getStatusVariant,
   formatCurrency,
-  isInactive = false
+  isInactive = false,
+  hasPayoutDestinations,
 }: {
   vendor: Vendor;
   index: number;
   onPay: (vendor: Vendor) => void;
+  onView: (vendor: Vendor) => void;
+  onEdit: (vendor: Vendor) => void;
   getCategoryGradient: (category: string) => string;
   getStatusVariant: (status: Vendor["status"]) => "success" | "secondary" | "warning";
   formatCurrency: (amount: number | string) => string;
   isInactive?: boolean;
+  hasPayoutDestinations: boolean;
 }) {
   const initials = vendor.name
     .split(" ")
@@ -402,6 +663,8 @@ function VendorCard({
     .join("")
     .slice(0, 2)
     .toUpperCase();
+
+  const paymentStatus = derivePaymentStatus(vendor, hasPayoutDestinations);
 
   return (
     <motion.div
@@ -430,13 +693,16 @@ function VendorCard({
                 </p>
               </div>
             </div>
-            <StatusBadge status={vendor.status} variant={getStatusVariant(vendor.status)} className="ml-2 flex-shrink-0">
-              {vendor.status === "active"
-                ? "Active"
-                : vendor.status === "pending"
-                  ? "Pending"
-                  : "Inactive"}
-            </StatusBadge>
+            <div className="ml-2 flex-shrink-0 flex flex-col items-end gap-1">
+              <StatusBadge status={vendor.status} variant={getStatusVariant(vendor.status)} className="flex-shrink-0">
+                {vendor.status === "active"
+                  ? "Active"
+                  : vendor.status === "pending"
+                    ? "Pending"
+                    : "Inactive"}
+              </StatusBadge>
+              <PaymentStatusBadge status={paymentStatus} />
+            </div>
           </div>
 
           <div className="space-y-2 text-sm">
@@ -448,6 +714,12 @@ function VendorCard({
               <MapPin className="h-4 w-4 flex-shrink-0" />
               <span className="truncate">{vendor.address}</span>
             </div>
+            {(vendor as any).taxId && (
+              <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 truncate">
+                <FileText className="h-4 w-4 flex-shrink-0" />
+                <span className="truncate">Tax ID: {(vendor as any).taxId}</span>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
@@ -484,8 +756,8 @@ function VendorCard({
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-600 dark:text-slate-400">Last Paid</span>
               <span className="font-medium text-slate-900 dark:text-slate-100">
-                {vendor.lastPaymentDate
-                  ? new Date(vendor.lastPaymentDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                {vendor.lastPayment
+                  ? new Date(vendor.lastPayment).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                   : "No payments yet"}
               </span>
             </div>
@@ -499,9 +771,44 @@ function VendorCard({
             )}
           </div>
 
+          {/* Notes preview */}
+          {(vendor as any).notes && (
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-2 mb-1">
+                <StickyNote className="h-3.5 w-3.5 text-slate-400" />
+                <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide font-medium">Notes</p>
+              </div>
+              <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2">
+                {(vendor as any).notes}
+              </p>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="flex gap-2 pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 border-slate-200 dark:border-slate-700"
+              onClick={() => onView(vendor)}
+            >
+              <Eye className="mr-1.5 h-3.5 w-3.5" />
+              View
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 border-slate-200 dark:border-slate-700"
+              onClick={() => onEdit(vendor)}
+            >
+              <Edit2 className="mr-1.5 h-3.5 w-3.5" />
+              Edit
+            </Button>
+          </div>
+
           {parseFloat(String(vendor.pendingPayments)) > 0 && !isInactive && (
             <Button
-              className="w-full mt-4 bg-violet-600 hover:bg-violet-700 text-white"
+              className="w-full bg-violet-600 hover:bg-violet-700 text-white"
               onClick={() => onPay(vendor)}
               data-testid={`button-pay-vendor-${index}`}
             >
@@ -512,5 +819,218 @@ function VendorCard({
         </div>
       </GlassCard>
     </motion.div>
+  );
+}
+
+// ── Vendor Detail Dialog with Payment History ────────────────
+
+function VendorDetailDialog({
+  vendor,
+  open,
+  onOpenChange,
+  formatCurrency,
+  getCategoryGradient,
+  hasPayoutDestinations,
+}: {
+  vendor: Vendor;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  formatCurrency: (amount: number | string) => string;
+  getCategoryGradient: (category: string) => string;
+  hasPayoutDestinations: boolean;
+}) {
+  const paymentStatus = derivePaymentStatus(vendor, hasPayoutDestinations);
+
+  // Fetch payment history (payouts for this vendor)
+  const { data: payouts = [], isLoading: payoutsLoading } = useQuery<Payout[]>({
+    queryKey: ["/api/payouts", { recipientId: vendor.id }],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/payouts?recipientId=${vendor.id}`);
+      return res.json();
+    },
+    enabled: open,
+  });
+
+  const initials = vendor.name
+    .split(" ")
+    .map(n => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  const getPayoutStatusVariant = (status: string) => {
+    switch (status) {
+      case "completed":
+        return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20";
+      case "pending":
+        return "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20";
+      case "failed":
+        return "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/20";
+      case "processing":
+        return "bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20";
+      default:
+        return "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20";
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[650px] border-slate-200 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <div className="flex items-center gap-4">
+            <Avatar className="h-14 w-14 border-2 border-slate-200 dark:border-slate-700">
+              <AvatarFallback className={`bg-gradient-to-br ${getCategoryGradient(vendor.category)} text-white font-semibold text-sm`}>
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <DialogTitle className="text-xl">{vendor.name}</DialogTitle>
+              <DialogDescription className="flex items-center gap-2 mt-1">
+                {vendor.category}
+                <span className="inline-block mx-1">--</span>
+                <PaymentStatusBadge status={paymentStatus} />
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+
+        <Tabs defaultValue="details" className="w-full mt-4">
+          <TabsList className="bg-slate-100 dark:bg-slate-800 w-full">
+            <TabsTrigger value="details" className="flex-1">Details</TabsTrigger>
+            <TabsTrigger value="payments" className="flex-1">Payment History</TabsTrigger>
+          </TabsList>
+
+          {/* Details Tab */}
+          <TabsContent value="details" className="mt-4 space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Email</p>
+                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{vendor.email || "N/A"}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Phone</p>
+                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{vendor.phone || "N/A"}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Address</p>
+                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{vendor.address || "N/A"}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Payment Terms</p>
+                <p className="text-sm font-medium text-slate-900 dark:text-slate-100 capitalize">
+                  {vendor.paymentTerms ? vendor.paymentTerms.replace("net", "Net ") : "N/A"}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Tax ID / EIN</p>
+                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{(vendor as any).taxId || "N/A"}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Status</p>
+                <StatusBadge status={vendor.status}>
+                  {vendor.status === "active" ? "Active" : vendor.status === "pending" ? "Pending" : "Inactive"}
+                </StatusBadge>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+              <div className="space-y-1">
+                <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Total Paid</p>
+                <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(vendor.totalPaid)}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Pending Payments</p>
+                <p className={`text-lg font-semibold ${parseFloat(String(vendor.pendingPayments)) > 0 ? "text-amber-600 dark:text-amber-400" : "text-slate-900 dark:text-slate-100"}`}>
+                  {formatCurrency(vendor.pendingPayments)}
+                </p>
+              </div>
+            </div>
+
+            {(vendor as any).notes && (
+              <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-2 mb-2">
+                  <StickyNote className="h-4 w-4 text-slate-400" />
+                  <p className="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide font-medium">Internal Notes</p>
+                </div>
+                <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap bg-slate-50 dark:bg-slate-900 rounded-lg p-3 border border-slate-200 dark:border-slate-700">
+                  {(vendor as any).notes}
+                </p>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* Payment History Tab */}
+          <TabsContent value="payments" className="mt-4">
+            {payoutsLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+                <span className="ml-2 text-sm text-slate-500">Loading payment history...</span>
+              </div>
+            ) : payouts.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <Receipt className="h-10 w-10 text-slate-300 dark:text-slate-600 mb-3" />
+                <p className="text-sm font-medium text-slate-600 dark:text-slate-400">No payment history</p>
+                <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">
+                  Payments to this vendor will appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50 dark:bg-slate-900">
+                      <TableHead className="text-xs font-semibold uppercase tracking-wide text-slate-500">Date</TableHead>
+                      <TableHead className="text-xs font-semibold uppercase tracking-wide text-slate-500">Amount</TableHead>
+                      <TableHead className="text-xs font-semibold uppercase tracking-wide text-slate-500">Method</TableHead>
+                      <TableHead className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {payouts
+                      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                      .map((payout) => (
+                      <TableRow key={payout.id}>
+                        <TableCell className="text-sm text-slate-700 dark:text-slate-300">
+                          {new Date(payout.createdAt).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                        </TableCell>
+                        <TableCell className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                          {formatCurrency(payout.amount)}
+                        </TableCell>
+                        <TableCell className="text-sm text-slate-600 dark:text-slate-400 capitalize">
+                          {payout.provider || "N/A"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={`text-[11px] font-semibold capitalize ${getPayoutStatusVariant(payout.status)}`}
+                          >
+                            {payout.status}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+
+            {payouts.length > 0 && (
+              <div className="flex items-center justify-between mt-4 px-1">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {payouts.length} payment{payouts.length !== 1 ? "s" : ""} found
+                </p>
+                <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                  Total: {formatCurrency(payouts.reduce((sum, p) => sum + parseFloat(String(p.amount) || "0"), 0))}
+                </p>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
   );
 }

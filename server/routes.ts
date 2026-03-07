@@ -361,6 +361,9 @@ const vendorSchema = z.object({
   phone: z.string().regex(/^[+]?[(]?[0-9]{1,4}[)]?[-\s.]?[(]?[0-9]{1,4}[)]?[-\s.]?[0-9]{1,9}$/, "Invalid phone number format").optional().or(z.literal('')),
   address: z.string().optional().default(''),
   category: z.string().optional().default('Other'),
+  paymentTerms: z.string().optional(),
+  taxId: z.string().optional(),
+  notes: z.string().optional(),
 });
 
 const fundingSourceSchema = z.object({

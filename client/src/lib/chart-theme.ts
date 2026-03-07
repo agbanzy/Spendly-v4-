@@ -1,17 +1,17 @@
 /**
  * Centralized chart color theme for Recharts and other visualizations.
- * Uses the new sky/cyan palette.
+ * Uses the Financiar burgundy palette.
  */
 
 export const chartColors = {
-  primary: '#0284c7',   // sky-600
+  primary: '#6B2346',   // burgundy
   emerald: '#10b981',
   amber: '#f59e0b',
   rose: '#f43f5e',
   slate: '#64748b',
-  cyan: '#06b6d4',
+  plum: '#8B3A5E',
   teal: '#14b8a6',
-  sky: '#0ea5e9',
+  mauve: '#A6496F',
 } as const;
 
 /** Ordered palette for pie charts, legends, and sequential data series */
@@ -21,9 +21,9 @@ export const chartPalette = [
   chartColors.amber,
   chartColors.rose,
   chartColors.slate,
-  chartColors.cyan,
+  chartColors.plum,
   chartColors.teal,
-  chartColors.sky,
+  chartColors.mauve,
 ];
 
 /** Semantic mapping for common chart series */

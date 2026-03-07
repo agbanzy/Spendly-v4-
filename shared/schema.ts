@@ -422,6 +422,8 @@ export const vendors = pgTable("vendors", {
   lastPayment: text("last_payment"),
   companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
   paymentTerms: text("payment_terms"),
+  taxId: text("tax_id"),
+  notes: text("notes"),
 }, (t) => [
   index("vendors_company_id_idx").on(t.companyId),
 ]);

@@ -29,7 +29,14 @@ function useScrollReveal() {
 
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el) { setIsVisible(true); return; }
+
+    // Check if already in viewport on mount
+    const rect = el.getBoundingClientRect();
+    if (rect.top < window.innerHeight && rect.bottom > 0) {
+      setIsVisible(true);
+      return;
+    }
 
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -38,11 +45,15 @@ function useScrollReveal() {
           observer.unobserve(el);
         }
       },
-      { threshold: 0.12, rootMargin: "0px 0px -60px 0px" }
+      { threshold: 0.08, rootMargin: "0px 0px -40px 0px" }
     );
 
     observer.observe(el);
-    return () => observer.disconnect();
+
+    // Fallback: reveal after 2s in case observer never fires
+    const timeout = setTimeout(() => setIsVisible(true), 2000);
+
+    return () => { observer.disconnect(); clearTimeout(timeout); };
   }, []);
 
   return { ref, isVisible };

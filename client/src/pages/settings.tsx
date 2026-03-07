@@ -34,6 +34,18 @@ import {
   Users,
   Link,
   Hash,
+  Download,
+  Database,
+  Webhook,
+  Key,
+  Copy,
+  Eye,
+  EyeOff,
+  RefreshCw,
+  Trash2,
+  Plus,
+  Send,
+  Clock,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import {
@@ -110,6 +122,15 @@ interface RegionConfig {
   currency: string;
   paymentProvider: 'stripe' | 'paystack';
   currencySymbol: string;
+}
+
+interface ApiKeyEntry {
+  id: string;
+  name: string;
+  keyPreview: string;
+  fullKey?: string;
+  createdAt: string;
+  lastUsedAt: string | null;
 }
 
 const COUNTRY_OPTIONS = [
@@ -212,6 +233,171 @@ export default function Settings() {
       });
     },
   });
+
+  // --- Data Export state ---
+  const [exportLoading, setExportLoading] = useState<string | null>(null);
+
+  const handleExport = async (endpoint: string, filename: string) => {
+    setExportLoading(endpoint);
+    try {
+      const res = await apiRequest("GET", endpoint);
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      toast({
+        title: "Export complete",
+        description: `${filename} has been downloaded.`,
+      });
+    } catch {
+      toast({
+        title: "Export failed",
+        description: "Could not export data. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportLoading(null);
+    }
+  };
+
+  // --- Webhook state ---
+  const [webhookEvents, setWebhookEvents] = useState<Record<string, boolean>>({
+    "payment.completed": true,
+    "payment.failed": false,
+    "card.created": true,
+    "card.frozen": false,
+    "expense.submitted": true,
+    "expense.approved": true,
+    "invoice.paid": false,
+    "transfer.completed": false,
+    "budget.exceeded": false,
+    "team.member_added": false,
+  });
+  const [showWebhookSecret, setShowWebhookSecret] = useState(false);
+  const [testingWebhook, setTestingWebhook] = useState(false);
+
+  const { data: webhookConfig } = useQuery<{
+    webhookUrl: string;
+    webhookSecret: string;
+    events: Record<string, boolean>;
+  }>({
+    queryKey: ["/api/webhooks/config"],
+  });
+
+  useEffect(() => {
+    if (webhookConfig?.events) {
+      setWebhookEvents(webhookConfig.events);
+    }
+  }, [webhookConfig]);
+
+  const updateWebhookMutation = useMutation({
+    mutationFn: async (data: { events: Record<string, boolean> }) => {
+      return apiRequest("PATCH", "/api/webhooks/config", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/webhooks/config"] });
+      toast({
+        title: "Webhooks updated",
+        description: "Your webhook configuration has been saved.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update webhook settings.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleWebhookToggle = (event: string, enabled: boolean) => {
+    const updated = { ...webhookEvents, [event]: enabled };
+    setWebhookEvents(updated);
+    updateWebhookMutation.mutate({ events: updated });
+  };
+
+  const handleTestWebhook = async () => {
+    setTestingWebhook(true);
+    try {
+      await apiRequest("POST", "/api/webhooks/test");
+      toast({
+        title: "Test webhook sent",
+        description: "A test event has been dispatched to your webhook URL.",
+      });
+    } catch {
+      toast({
+        title: "Test failed",
+        description: "Could not send test webhook. Please check your URL.",
+        variant: "destructive",
+      });
+    } finally {
+      setTestingWebhook(false);
+    }
+  };
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    toast({
+      title: "Copied",
+      description: `${label} copied to clipboard.`,
+    });
+  };
+
+  // --- API Keys state ---
+  const [generatingKey, setGeneratingKey] = useState(false);
+  const [revokingKeyId, setRevokingKeyId] = useState<string | null>(null);
+  const [newlyGeneratedKey, setNewlyGeneratedKey] = useState<string | null>(null);
+
+  const { data: apiKeys, refetch: refetchApiKeys } = useQuery<ApiKeyEntry[]>({
+    queryKey: ["/api/api-keys"],
+  });
+
+  const handleGenerateApiKey = async () => {
+    setGeneratingKey(true);
+    try {
+      const res = await apiRequest("POST", "/api/api-keys");
+      const data = await res.json();
+      setNewlyGeneratedKey(data.key);
+      refetchApiKeys();
+      toast({
+        title: "API key generated",
+        description: "Copy your new key now. It won't be shown again.",
+      });
+    } catch {
+      toast({
+        title: "Error",
+        description: "Failed to generate API key.",
+        variant: "destructive",
+      });
+    } finally {
+      setGeneratingKey(false);
+    }
+  };
+
+  const handleRevokeApiKey = async (keyId: string) => {
+    setRevokingKeyId(keyId);
+    try {
+      await apiRequest("DELETE", `/api/api-keys/${keyId}`);
+      refetchApiKeys();
+      toast({
+        title: "API key revoked",
+        description: "The API key has been permanently revoked.",
+      });
+    } catch {
+      toast({
+        title: "Error",
+        description: "Failed to revoke API key.",
+        variant: "destructive",
+      });
+    } finally {
+      setRevokingKeyId(null);
+    }
+  };
 
   const handleSaveCompany = () => {
     if (formData.companyEmail && !formData.companyEmail.includes("@")) {
@@ -1419,6 +1605,408 @@ export default function Settings() {
                   </Button>
                 </div>
               </div>
+            </div>
+          </div>
+        </GlassCard>
+      </motion.div>
+
+      {/* Data & Export */}
+      <motion.div variants={fadeUp} initial="hidden" animate="visible">
+        <GlassCard>
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500/20 to-indigo-500/10 flex items-center justify-center">
+                <Database className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+              </div>
+              <div>
+                <SectionLabel>Data & Export</SectionLabel>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Download your data in CSV or JSON format.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Button
+                variant="outline"
+                className="border-slate-500/50 hover:bg-slate-500/10 justify-start h-auto py-3"
+                disabled={exportLoading === "/api/export/transactions?format=csv"}
+                onClick={() =>
+                  handleExport(
+                    "/api/export/transactions?format=csv",
+                    `transactions-${new Date().toISOString().slice(0, 10)}.csv`
+                  )
+                }
+                data-testid="button-export-transactions"
+              >
+                {exportLoading === "/api/export/transactions?format=csv" ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
+                ) : (
+                  <Download className="h-4 w-4 mr-2 shrink-0" />
+                )}
+                <div className="text-left">
+                  <p className="text-sm font-medium">Export Transactions (CSV)</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    All transaction records
+                  </p>
+                </div>
+              </Button>
+
+              <Button
+                variant="outline"
+                className="border-slate-500/50 hover:bg-slate-500/10 justify-start h-auto py-3"
+                disabled={exportLoading === "/api/export/expenses?format=csv"}
+                onClick={() =>
+                  handleExport(
+                    "/api/export/expenses?format=csv",
+                    `expenses-${new Date().toISOString().slice(0, 10)}.csv`
+                  )
+                }
+                data-testid="button-export-expenses"
+              >
+                {exportLoading === "/api/export/expenses?format=csv" ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
+                ) : (
+                  <Download className="h-4 w-4 mr-2 shrink-0" />
+                )}
+                <div className="text-left">
+                  <p className="text-sm font-medium">Export Expenses (CSV)</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    All expense submissions
+                  </p>
+                </div>
+              </Button>
+
+              <Button
+                variant="outline"
+                className="border-slate-500/50 hover:bg-slate-500/10 justify-start h-auto py-3"
+                disabled={exportLoading === "/api/export/team?format=csv"}
+                onClick={() =>
+                  handleExport(
+                    "/api/export/team?format=csv",
+                    `team-members-${new Date().toISOString().slice(0, 10)}.csv`
+                  )
+                }
+                data-testid="button-export-team"
+              >
+                {exportLoading === "/api/export/team?format=csv" ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
+                ) : (
+                  <Download className="h-4 w-4 mr-2 shrink-0" />
+                )}
+                <div className="text-left">
+                  <p className="text-sm font-medium">Export Team Members (CSV)</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    All team member records
+                  </p>
+                </div>
+              </Button>
+
+              <Button
+                variant="outline"
+                className="border-slate-500/50 hover:bg-slate-500/10 justify-start h-auto py-3"
+                disabled={exportLoading === "/api/export/all?format=json"}
+                onClick={() =>
+                  handleExport(
+                    "/api/export/all?format=json",
+                    `spendly-export-${new Date().toISOString().slice(0, 10)}.json`
+                  )
+                }
+                data-testid="button-export-all"
+              >
+                {exportLoading === "/api/export/all?format=json" ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" />
+                ) : (
+                  <Download className="h-4 w-4 mr-2 shrink-0" />
+                )}
+                <div className="text-left">
+                  <p className="text-sm font-medium">Export All Data (JSON)</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                    Complete data backup
+                  </p>
+                </div>
+              </Button>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-400">
+              Exports include data from your current company workspace only.
+            </p>
+          </div>
+        </GlassCard>
+      </motion.div>
+
+      {/* Webhooks & Integrations */}
+      <motion.div variants={fadeUp} initial="hidden" animate="visible">
+        <GlassCard>
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/20 to-violet-500/10 flex items-center justify-center">
+                <Webhook className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+              </div>
+              <div>
+                <SectionLabel>Webhooks & Integrations</SectionLabel>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Receive real-time event notifications.
+                </p>
+              </div>
+            </div>
+
+            {/* Webhook URL */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Webhook URL</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  readOnly
+                  value={webhookConfig?.webhookUrl || `${window.location.origin}/api/webhooks/incoming`}
+                  className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11 font-mono text-xs flex-1"
+                  data-testid="input-webhook-url"
+                />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="border-slate-500/50 hover:bg-slate-500/10 h-11 w-11 shrink-0"
+                  onClick={() =>
+                    copyToClipboard(
+                      webhookConfig?.webhookUrl || `${window.location.origin}/api/webhooks/incoming`,
+                      "Webhook URL"
+                    )
+                  }
+                  data-testid="button-copy-webhook-url"
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Webhook Secret */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Webhook Secret</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  readOnly
+                  type={showWebhookSecret ? "text" : "password"}
+                  value={webhookConfig?.webhookSecret || "whsec_••••••••••••••••••••••••"}
+                  className="bg-slate-500/30 border-slate-500/50 rounded-xl h-11 font-mono text-xs flex-1"
+                  data-testid="input-webhook-secret"
+                />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="border-slate-500/50 hover:bg-slate-500/10 h-11 w-11 shrink-0"
+                  onClick={() => setShowWebhookSecret(!showWebhookSecret)}
+                  data-testid="button-toggle-webhook-secret"
+                >
+                  {showWebhookSecret ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="border-slate-500/50 hover:bg-slate-500/10 h-11 w-11 shrink-0"
+                  onClick={() =>
+                    copyToClipboard(
+                      webhookConfig?.webhookSecret || "",
+                      "Webhook secret"
+                    )
+                  }
+                  data-testid="button-copy-webhook-secret"
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                Use this secret to verify webhook signatures.
+              </p>
+            </div>
+
+            <div className="h-px bg-slate-500/20" />
+
+            {/* Webhook Events */}
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Subscribed Events</Label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {Object.entries(webhookEvents).map(([event, enabled]) => (
+                  <div
+                    key={event}
+                    className="flex items-center justify-between p-3 rounded-lg bg-slate-500/10"
+                  >
+                    <div>
+                      <p className="text-sm font-medium font-mono">{event}</p>
+                    </div>
+                    <Switch
+                      checked={enabled}
+                      onCheckedChange={(checked) =>
+                        handleWebhookToggle(event, checked)
+                      }
+                      data-testid={`switch-webhook-${event}`}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button
+                onClick={handleTestWebhook}
+                disabled={testingWebhook}
+                className="bg-violet-600 hover:bg-violet-700 text-white"
+                data-testid="button-test-webhook"
+              >
+                {testingWebhook ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <Send className="h-4 w-4 mr-2" />
+                )}
+                Test Webhook
+              </Button>
+            </div>
+          </div>
+        </GlassCard>
+      </motion.div>
+
+      {/* API Access */}
+      <motion.div variants={fadeUp} initial="hidden" animate="visible">
+        <GlassCard>
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500/20 to-orange-500/10 flex items-center justify-center">
+                <Key className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+              </div>
+              <div className="flex-1">
+                <SectionLabel>API Access</SectionLabel>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Manage API keys for programmatic access.
+                </p>
+              </div>
+              <Button
+                onClick={handleGenerateApiKey}
+                disabled={generatingKey}
+                className="bg-orange-600 hover:bg-orange-700 text-white"
+                data-testid="button-generate-api-key"
+              >
+                {generatingKey ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <Plus className="h-4 w-4 mr-2" />
+                )}
+                Generate New Key
+              </Button>
+            </div>
+
+            {/* Newly generated key banner */}
+            {newlyGeneratedKey && (
+              <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-500/30 space-y-2">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                  <p className="text-sm font-medium text-orange-700 dark:text-orange-300">
+                    New API key generated — copy it now. It won't be shown again.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    readOnly
+                    value={newlyGeneratedKey}
+                    className="bg-slate-500/30 border-slate-500/50 rounded-xl h-10 font-mono text-xs flex-1"
+                    data-testid="input-new-api-key"
+                  />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="border-slate-500/50 hover:bg-slate-500/10 h-10 w-10 shrink-0"
+                    onClick={() => copyToClipboard(newlyGeneratedKey, "API key")}
+                    data-testid="button-copy-new-api-key"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-10 w-10 shrink-0 text-slate-500 hover:text-slate-700"
+                    onClick={() => setNewlyGeneratedKey(null)}
+                    data-testid="button-dismiss-new-api-key"
+                  >
+                    <XCircle className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Existing API keys list */}
+            <div className="space-y-2">
+              {apiKeys && apiKeys.length > 0 ? (
+                apiKeys.map((apiKey) => (
+                  <div
+                    key={apiKey.id}
+                    className="flex items-center gap-3 p-3 rounded-lg bg-slate-500/10"
+                  >
+                    <Key className="h-4 w-4 text-slate-500 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium truncate">
+                          {apiKey.name || "API Key"}
+                        </p>
+                        <Badge
+                          variant="outline"
+                          className="text-xs border-slate-500/30 shrink-0"
+                        >
+                          {apiKey.keyPreview}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-3 mt-0.5">
+                        <p className="text-xs text-slate-600 dark:text-slate-400">
+                          Created {new Date(apiKey.createdAt).toLocaleDateString()}
+                        </p>
+                        <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400">
+                          <Clock className="h-3 w-3" />
+                          {apiKey.lastUsedAt
+                            ? `Last used ${new Date(apiKey.lastUsedAt).toLocaleDateString()}`
+                            : "Never used"}
+                        </div>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="border-slate-500/50 hover:bg-slate-500/10 h-9 w-9 shrink-0"
+                      onClick={() => copyToClipboard(apiKey.keyPreview, "API key")}
+                      data-testid={`button-copy-key-${apiKey.id}`}
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="border-red-500/30 hover:bg-red-500/10 text-red-600 dark:text-red-400 h-9 w-9 shrink-0"
+                      disabled={revokingKeyId === apiKey.id}
+                      onClick={() => handleRevokeApiKey(apiKey.id)}
+                      data-testid={`button-revoke-key-${apiKey.id}`}
+                    >
+                      {revokingKeyId === apiKey.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  </div>
+                ))
+              ) : (
+                <div className="p-6 rounded-xl border border-dashed border-slate-500/30 text-center">
+                  <Key className="h-8 w-8 text-slate-500/40 mx-auto mb-2" />
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    No API keys yet. Generate one to get started.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                <strong>Security note:</strong> API keys grant full access to your company data.
+                Keep them secure and rotate them regularly. Revoked keys cannot be restored.
+              </p>
             </div>
           </div>
         </GlassCard>

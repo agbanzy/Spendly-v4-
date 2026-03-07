@@ -1,10 +1,16 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
+import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient, sanitizeErrorMessage } from "@/lib/queryClient";
 import { getCurrencySymbol, formatCurrencyAmount } from "@/lib/constants";
@@ -58,8 +64,11 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Clock,
+  ShieldCheck,
+  Store,
+  Globe,
 } from "lucide-react";
-import type { VirtualCard, CompanySettings, Transaction } from "@shared/schema";
+import type { VirtualCard, CompanySettings, CardTransaction } from "@shared/schema";
 
 const cardGradients: Record<string, string> = {
   indigo: "bg-gradient-to-br from-violet-500 via-violet-600 to-indigo-700",
@@ -69,6 +78,135 @@ const cardGradients: Record<string, string> = {
   slate: "bg-gradient-to-br from-slate-700 via-slate-800 to-zinc-900",
   cyan: "bg-gradient-to-br from-cyan-500 via-cyan-600 to-blue-700",
 };
+
+const SPENDING_CATEGORIES = [
+  "Travel",
+  "Software",
+  "Office Supplies",
+  "Marketing",
+  "Meals",
+  "Transportation",
+  "Entertainment",
+  "Other",
+] as const;
+
+const txStatusColors: Record<string, string> = {
+  completed: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+  pending: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
+  declined: "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300",
+  reversed: "bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-300",
+};
+
+function CardTransactionHistory({
+  cardId,
+  cardCurrency,
+  formatCurrency,
+}: {
+  cardId: string;
+  cardCurrency: string;
+  formatCurrency: (amount: number | string, currency?: string) => string;
+}) {
+  const { data: cardTxns, isLoading } = useQuery<CardTransaction[]>({
+    queryKey: [`/api/cards/${cardId}/transactions`],
+    enabled: !!cardId,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2 py-2">
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-12 w-full rounded-lg" />
+        ))}
+      </div>
+    );
+  }
+
+  const transactions = cardTxns || [];
+
+  if (transactions.length === 0) {
+    return (
+      <div className="text-center py-6 text-xs text-muted-foreground">
+        <Clock className="h-5 w-5 mx-auto mb-2 opacity-50" />
+        No transactions found for this card
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      {/* Header row */}
+      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+        <span>Description</span>
+        <span className="w-20 text-right">Amount</span>
+        <span className="w-16 text-center">Status</span>
+        <span className="w-16 text-right">Date</span>
+      </div>
+      <Separator className="opacity-50" />
+      {transactions.slice(0, 10).map((tx) => {
+        const isDebit = Number(tx.amount) < 0;
+        return (
+          <div
+            key={tx.id}
+            className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center px-2 py-2 rounded-lg hover:bg-muted/40 transition-colors"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <div
+                className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+                  isDebit
+                    ? "bg-rose-100 dark:bg-rose-950"
+                    : "bg-emerald-100 dark:bg-emerald-950"
+                }`}
+              >
+                {isDebit ? (
+                  <ArrowUpRight className="h-3 w-3 text-rose-600" />
+                ) : (
+                  <ArrowDownRight className="h-3 w-3 text-emerald-600" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-medium truncate">
+                  {tx.merchant || tx.description}
+                </p>
+                {tx.category && (
+                  <p className="text-[10px] text-muted-foreground truncate">
+                    {tx.category}
+                  </p>
+                )}
+              </div>
+            </div>
+            <span
+              className={`text-xs font-bold w-20 text-right flex-shrink-0 ${
+                isDebit ? "text-rose-600" : "text-emerald-600"
+              }`}
+            >
+              {isDebit ? "-" : "+"}
+              {formatCurrency(
+                Math.abs(Number(tx.amount)),
+                tx.currency || cardCurrency
+              )}
+            </span>
+            <span className="w-16 flex-shrink-0 flex justify-center">
+              <Badge
+                variant="secondary"
+                className={`text-[9px] px-1.5 py-0 font-medium ${
+                  txStatusColors[tx.status] || txStatusColors.pending
+                }`}
+              >
+                {tx.status}
+              </Badge>
+            </span>
+            <span className="text-[10px] text-muted-foreground w-16 text-right flex-shrink-0">
+              {new Date(tx.date).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+              })}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function Cards() {
   const { toast } = useToast();
@@ -100,14 +238,13 @@ export default function Cards() {
     type: "Visa",
     color: "indigo",
     currency: currency,
+    allowedCategories: [] as string[],
+    blockedMerchants: "",
+    allowOnlineTransactions: true,
   });
   
   const { data: cards, isLoading } = useQuery<VirtualCard[]>({
     queryKey: ["/api/cards"],
-  });
-
-  const { data: transactions } = useQuery<Transaction[]>({
-    queryKey: ["/api/transactions"],
   });
 
   const createMutation = useMutation({
@@ -214,17 +351,32 @@ export default function Cards() {
   };
 
   const resetForm = () => {
-    setFormData({ name: "", limit: "", type: "Visa", color: "indigo", currency: currency });
+    setFormData({
+      name: "",
+      limit: "",
+      type: "Visa",
+      color: "indigo",
+      currency: currency,
+      allowedCategories: [],
+      blockedMerchants: "",
+      allowOnlineTransactions: true,
+    });
   };
 
   const openEditDialog = (card: VirtualCard) => {
     setEditingCard(card);
+    const cardAny = card as any;
     setFormData({
       name: card.name,
       limit: String(card.limit),
       type: card.type,
       color: card.color,
       currency: card.currency || currency,
+      allowedCategories: cardAny.allowedCategories || [],
+      blockedMerchants: Array.isArray(cardAny.blockedMerchants)
+        ? cardAny.blockedMerchants.join(", ")
+        : cardAny.blockedMerchants || "",
+      allowOnlineTransactions: cardAny.allowOnlineTransactions !== false,
     });
     setIsOpen(true);
   };
@@ -243,10 +395,30 @@ export default function Cards() {
       toast({ title: "Invalid spending limit", description: "Spending limit cannot exceed 1,000,000.", variant: "destructive" });
       return;
     }
+    const blockedMerchantsList = formData.blockedMerchants
+      .split(",")
+      .map((m) => m.trim())
+      .filter(Boolean);
+    const payload = {
+      ...formData,
+      blockedMerchants: blockedMerchantsList,
+    };
     if (editingCard) {
-      updateMutation.mutate({ id: editingCard.id, data: { name: formData.name, limit: formData.limit, type: formData.type as 'Visa' | 'Mastercard', color: formData.color, currency: formData.currency } });
+      updateMutation.mutate({
+        id: editingCard.id,
+        data: {
+          name: payload.name,
+          limit: payload.limit,
+          type: payload.type as "Visa" | "Mastercard",
+          color: payload.color,
+          currency: payload.currency,
+          allowedCategories: payload.allowedCategories,
+          blockedMerchants: payload.blockedMerchants,
+          allowOnlineTransactions: payload.allowOnlineTransactions,
+        } as any,
+      });
     } else {
-      createMutation.mutate(formData);
+      createMutation.mutate(payload as any);
     }
   };
 
@@ -256,13 +428,6 @@ export default function Cards() {
 
   const toggleExpandCard = (cardId: string) => {
     setExpandedCards((prev) => ({ ...prev, [cardId]: !prev[cardId] }));
-  };
-
-  const getCardTransactions = (cardId: string) => {
-    return transactions?.filter(tx =>
-      tx.description.toLowerCase().includes("card") &&
-      (tx.description.includes(cardId.slice(-4)) || tx.metadata?.cardId === cardId)
-    ).slice(0, 5) || [];
   };
 
   const totalBalance = cards?.reduce((sum, c) => sum + parseFloat(String(c.balance) || '0'), 0) || 0;
@@ -506,6 +671,28 @@ export default function Cards() {
                                 ? `4532 •••• •••• ${card.last4}`
                                 : `•••• •••• •••• ${card.last4}`}
                             </p>
+                            {showNumbers[card.id] && (
+                              <div className="flex items-center gap-4 mt-1.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] opacity-50 uppercase">Exp</span>
+                                  <span className="text-xs font-mono font-semibold">
+                                    {(() => {
+                                      const c = card as any;
+                                      if (c.expiryMonth && c.expiryYear) {
+                                        return `${String(c.expiryMonth).padStart(2, "0")}/${String(c.expiryYear).slice(-2)}`;
+                                      }
+                                      return c.expiryDate || "12/28";
+                                    })()}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] opacity-50 uppercase">CVV</span>
+                                  <span className="text-xs font-mono font-semibold">
+                                    {(card as any).cvv || "***"}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
                           </div>
 
                           <div className="flex items-end justify-between pt-2">
@@ -520,14 +707,16 @@ export default function Cards() {
                                 )}
                               </p>
                             </div>
-                            <div className="text-center">
-                              <p className="text-xs opacity-60 uppercase tracking-wider">
-                                Exp
-                              </p>
-                              <p className="text-sm font-semibold font-mono">
-                                {card.expiryDate || "12/28"}
-                              </p>
-                            </div>
+                            {!showNumbers[card.id] && (
+                              <div className="text-center">
+                                <p className="text-xs opacity-60 uppercase tracking-wider">
+                                  Exp
+                                </p>
+                                <p className="text-sm font-semibold font-mono">
+                                  {(card as any).expiryDate || "12/28"}
+                                </p>
+                              </div>
+                            )}
                             <div className="text-right">
                               <p className="text-xs opacity-60 uppercase tracking-wider">
                                 Limit
@@ -554,53 +743,124 @@ export default function Cards() {
                       onClick={() => toggleExpandCard(card.id)}
                     >
                       {expandedCards[card.id] ? (
-                        <><ChevronUp className="h-3 w-3 mr-1" />Hide Transactions</>
+                        <><ChevronUp className="h-3 w-3 mr-1" />Hide Details</>
                       ) : (
-                        <><ChevronDown className="h-3 w-3 mr-1" />Transaction History</>
+                        <><ChevronDown className="h-3 w-3 mr-1" />View Details</>
                       )}
                     </Button>
 
-                    {expandedCards[card.id] && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        className="mt-2 space-y-2 rounded-xl border border-border/50 p-3 bg-muted/20"
-                      >
-                        {getCardTransactions(card.id).length > 0 ? (
-                          getCardTransactions(card.id).map((tx) => (
-                            <div key={tx.id} className="flex items-center justify-between py-2 px-2 rounded-lg hover:bg-muted/40 transition-colors">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
-                                  Number(tx.amount) > 0 ? "bg-emerald-100 dark:bg-emerald-950" : "bg-rose-100 dark:bg-rose-950"
-                                }`}>
-                                  {Number(tx.amount) > 0 ? (
-                                    <ArrowDownRight className="h-3 w-3 text-emerald-600" />
-                                  ) : (
-                                    <ArrowUpRight className="h-3 w-3 text-rose-600" />
-                                  )}
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="text-xs font-medium truncate">{tx.description}</p>
-                                  <p className="text-[10px] text-muted-foreground">
-                                    {new Date(tx.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                                  </p>
-                                </div>
+                    <AnimatePresence>
+                      {expandedCards[card.id] && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <Tabs defaultValue="transactions" className="mt-2">
+                            <TabsList className="w-full h-8">
+                              <TabsTrigger value="transactions" className="text-xs flex-1">
+                                Transactions
+                              </TabsTrigger>
+                              <TabsTrigger value="controls" className="text-xs flex-1">
+                                Controls
+                              </TabsTrigger>
+                            </TabsList>
+
+                            <TabsContent value="transactions" className="mt-2">
+                              <div className="rounded-xl border border-border/50 p-3 bg-muted/20">
+                                <CardTransactionHistory
+                                  cardId={card.id}
+                                  cardCurrency={card.currency || currency}
+                                  formatCurrency={formatCurrency}
+                                />
                               </div>
-                              <span className={`text-xs font-bold flex-shrink-0 ${
-                                Number(tx.amount) > 0 ? "text-emerald-600" : "text-rose-600"
-                              }`}>
-                                {Number(tx.amount) > 0 ? "+" : "-"}{formatCurrency(Math.abs(Number(tx.amount)), card.currency)}
-                              </span>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="text-center py-4 text-xs text-muted-foreground">
-                            <Clock className="h-4 w-4 mx-auto mb-1 opacity-50" />
-                            No recent transactions for this card
-                          </div>
-                        )}
-                      </motion.div>
-                    )}
+                            </TabsContent>
+
+                            <TabsContent value="controls" className="mt-2">
+                              <div className="rounded-xl border border-border/50 p-3 bg-muted/20 space-y-3">
+                                {/* Allowed categories */}
+                                {(() => {
+                                  const cardAny = card as any;
+                                  const categories: string[] = cardAny.allowedCategories || [];
+                                  const blockedMerchants: string[] = Array.isArray(cardAny.blockedMerchants)
+                                    ? cardAny.blockedMerchants
+                                    : [];
+                                  const allowOnline = cardAny.allowOnlineTransactions !== false;
+
+                                  return (
+                                    <>
+                                      <div>
+                                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+                                          Allowed Categories
+                                        </p>
+                                        {categories.length > 0 ? (
+                                          <div className="flex flex-wrap gap-1">
+                                            {categories.map((cat) => (
+                                              <Badge
+                                                key={cat}
+                                                variant="secondary"
+                                                className="text-[10px] px-1.5 py-0"
+                                              >
+                                                {cat}
+                                              </Badge>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <p className="text-xs text-muted-foreground">
+                                            All categories allowed
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      <Separator className="opacity-50" />
+
+                                      <div>
+                                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+                                          Blocked Merchants
+                                        </p>
+                                        {blockedMerchants.length > 0 ? (
+                                          <div className="flex flex-wrap gap-1">
+                                            {blockedMerchants.map((m) => (
+                                              <Badge
+                                                key={m}
+                                                variant="destructive"
+                                                className="text-[10px] px-1.5 py-0"
+                                              >
+                                                {m}
+                                              </Badge>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <p className="text-xs text-muted-foreground">
+                                            No merchants blocked
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      <Separator className="opacity-50" />
+
+                                      <div className="flex items-center justify-between">
+                                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                                          Online Transactions
+                                        </p>
+                                        <Badge
+                                          variant={allowOnline ? "secondary" : "destructive"}
+                                          className="text-[10px] px-1.5 py-0"
+                                        >
+                                          {allowOnline ? "Allowed" : "Blocked"}
+                                        </Badge>
+                                      </div>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </TabsContent>
+                          </Tabs>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 </motion.div>
               ))}
@@ -627,7 +887,7 @@ export default function Cards() {
       </div>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[540px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingCard ? "Edit Card" : "Issue New Card"}
@@ -756,6 +1016,148 @@ export default function Cards() {
                     />
                   ))}
                 </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Spending Category Controls */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                <Label className="text-sm font-medium">
+                  Allowed Spending Categories
+                </Label>
+              </div>
+              <p className="text-xs text-muted-foreground -mt-1">
+                Select which categories this card can be used for. Leave empty to allow all.
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {SPENDING_CATEGORIES.map((category) => (
+                  <div
+                    key={category}
+                    className="flex items-center space-x-2"
+                  >
+                    <Checkbox
+                      id={`category-${category}`}
+                      checked={formData.allowedCategories.includes(category)}
+                      onCheckedChange={(checked) => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          allowedCategories: checked
+                            ? [...prev.allowedCategories, category]
+                            : prev.allowedCategories.filter(
+                                (c) => c !== category
+                              ),
+                        }));
+                      }}
+                    />
+                    <Label
+                      htmlFor={`category-${category}`}
+                      className="text-xs font-normal cursor-pointer"
+                    >
+                      {category}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+              {formData.allowedCategories.length > 0 && (
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {formData.allowedCategories.map((cat) => (
+                    <Badge
+                      key={cat}
+                      variant="secondary"
+                      className="text-[10px] px-1.5 py-0 cursor-pointer hover:bg-destructive hover:text-destructive-foreground transition-colors"
+                      onClick={() =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          allowedCategories: prev.allowedCategories.filter(
+                            (c) => c !== cat
+                          ),
+                        }))
+                      }
+                    >
+                      {cat} x
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <Separator />
+
+            {/* Merchant Restriction Settings */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Store className="h-4 w-4 text-muted-foreground" />
+                <Label className="text-sm font-medium">
+                  Merchant Restrictions
+                </Label>
+              </div>
+
+              <div className="space-y-2">
+                <Label
+                  htmlFor="blockedMerchants"
+                  className="text-xs font-normal text-muted-foreground"
+                >
+                  Blocked Merchants (comma-separated)
+                </Label>
+                <Textarea
+                  id="blockedMerchants"
+                  value={formData.blockedMerchants}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      blockedMerchants: e.target.value,
+                    })
+                  }
+                  placeholder="e.g., Casino Royal, Gambling Inc, Liquor Store"
+                  className="bg-muted/30 border-border/50 rounded-xl resize-none h-20 text-sm"
+                />
+                {formData.blockedMerchants.trim() && (
+                  <div className="flex flex-wrap gap-1">
+                    {formData.blockedMerchants
+                      .split(",")
+                      .map((m) => m.trim())
+                      .filter(Boolean)
+                      .map((merchant, idx) => (
+                        <Badge
+                          key={`${merchant}-${idx}`}
+                          variant="destructive"
+                          className="text-[10px] px-1.5 py-0"
+                        >
+                          {merchant}
+                        </Badge>
+                      ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between rounded-xl border border-border/50 bg-muted/20 p-3">
+                <div className="flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <Label
+                      htmlFor="allowOnline"
+                      className="text-sm font-medium cursor-pointer"
+                    >
+                      Allow Online Transactions
+                    </Label>
+                    <p className="text-[10px] text-muted-foreground">
+                      Enable or disable online/e-commerce purchases
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  id="allowOnline"
+                  checked={formData.allowOnlineTransactions}
+                  onCheckedChange={(checked) =>
+                    setFormData({
+                      ...formData,
+                      allowOnlineTransactions: checked,
+                    })
+                  }
+                />
               </div>
             </div>
           </div>
