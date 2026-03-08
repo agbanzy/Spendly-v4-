@@ -22,12 +22,40 @@ async function runSQL(client, sqlFile, label) {
 
   const sql = fs.readFileSync(filePath, 'utf-8');
 
-  // Split by statement-breakpoint comments and semicolons
-  // Filter out comments and empty statements
-  const statements = sql
-    .split(/;/)
-    .map(s => s.trim())
-    .filter(s => s.length > 0 && !s.startsWith('--') && !s.startsWith('/*'));
+  // Drizzle migration files use '--> statement-breakpoint' as delimiter
+  // Other SQL files may use plain semicolons
+  let statements;
+  if (sql.includes('--> statement-breakpoint')) {
+    statements = sql
+      .split(/-->\s*statement-breakpoint/)
+      .map(s => s.trim())
+      .filter(s => s.length > 0 && !s.startsWith('--'));
+  } else {
+    // For DO $$ ... END $$; blocks, we need smarter splitting
+    // Split on semicolons that are NOT inside $$ blocks
+    const rawStatements = [];
+    let current = '';
+    let inDollarBlock = false;
+    for (const line of sql.split('\n')) {
+      current += line + '\n';
+      if (line.includes('$$') && !inDollarBlock) {
+        // Count $$ occurrences - odd means we entered a block
+        const count = (line.match(/\$\$/g) || []).length;
+        if (count % 2 === 1) inDollarBlock = true;
+      } else if (line.includes('$$') && inDollarBlock) {
+        const count = (line.match(/\$\$/g) || []).length;
+        if (count % 2 === 1) inDollarBlock = false;
+      }
+      if (!inDollarBlock && line.trimEnd().endsWith(';')) {
+        rawStatements.push(current.trim());
+        current = '';
+      }
+    }
+    if (current.trim()) rawStatements.push(current.trim());
+    statements = rawStatements
+      .map(s => s.replace(/;$/, '').trim())
+      .filter(s => s.length > 0 && !s.startsWith('--') && !s.startsWith('/*'));
+  }
 
   console.log(`\n=== Running ${label} (${statements.length} statements) ===\n`);
 
@@ -462,6 +490,17 @@ async function main() {
 
   try {
     if (mode === 'migrate' || mode === 'all') {
+      // Phase 0: Run base migration SQL files to create tables
+      const migrationsDir = path.join(__dirname, '..', 'migrations');
+      const sqlFiles = fs.readdirSync(migrationsDir)
+        .filter(f => f.endsWith('.sql'))
+        .sort();
+
+      for (const file of sqlFiles) {
+        await runSQL(client, path.join('migrations', file), file);
+      }
+
+      // Phase 1+: Run ALTER TABLE, indexes, FKs, etc.
       await runDrizzlePush(client);
     }
 

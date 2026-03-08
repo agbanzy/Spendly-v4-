@@ -1,0 +1,21 @@
+{
+  "version": "50.0.0",
+  "files": {
+    "5ce4ae9e39cdec3ca9310ea6d45eb6cd1f9123677e27a91aa8eaaa5830209875": {
+      "displayName": "FinanciarStack Template",
+      "source": {
+        "path": "FinanciarStack.template.json",
+        "packaging": "file"
+      },
+      "destinations": {
+        "677343720858-us-east-1-bce8a54b": {
+          "bucketName": "cdk-hnb659fds-assets-677343720858-us-east-1",
+          "objectKey": "5ce4ae9e39cdec3ca9310ea6d45eb6cd1f9123677e27a91aa8eaaa5830209875.json",
+          "region": "us-east-1",
+          "assumeRoleArn": "arn:${AWS::Partition}:iam::677343720858:role/cdk-hnb659fds-file-publishing-role-677343720858-us-east-1"
+        }
+      }
+    }
+  },
+  "dockerImages": {}
+}

@@ -1,0 +1,1436 @@
+{
+ "Resources": {
+  "FinanciarVpcFA3D75BE": {
+   "Type": "AWS::EC2::VPC",
+   "Properties": {
+    "CidrBlock": "10.0.0.0/16",
+    "EnableDnsHostnames": true,
+    "EnableDnsSupport": true,
+    "InstanceTenancy": "default",
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "FinanciarStack/FinanciarVpc"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/Resource"
+   }
+  },
+  "FinanciarVpcPublicSubnet1SubnetABE158A5": {
+   "Type": "AWS::EC2::Subnet",
+   "Properties": {
+    "AvailabilityZone": "us-east-1a",
+    "CidrBlock": "10.0.0.0/24",
+    "MapPublicIpOnLaunch": true,
+    "Tags": [
+     {
+      "Key": "aws-cdk:subnet-name",
+      "Value": "Public"
+     },
+     {
+      "Key": "aws-cdk:subnet-type",
+      "Value": "Public"
+     },
+     {
+      "Key": "Name",
+      "Value": "FinanciarStack/FinanciarVpc/PublicSubnet1"
+     }
+    ],
+    "VpcId": {
+     "Ref": "FinanciarVpcFA3D75BE"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PublicSubnet1/Subnet"
+   }
+  },
+  "FinanciarVpcPublicSubnet1RouteTableD0E316CC": {
+   "Type": "AWS::EC2::RouteTable",
+   "Properties": {
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "FinanciarStack/FinanciarVpc/PublicSubnet1"
+     }
+    ],
+    "VpcId": {
+     "Ref": "FinanciarVpcFA3D75BE"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PublicSubnet1/RouteTable"
+   }
+  },
+  "FinanciarVpcPublicSubnet1RouteTableAssociation148D7598": {
+   "Type": "AWS::EC2::SubnetRouteTableAssociation",
+   "Properties": {
+    "RouteTableId": {
+     "Ref": "FinanciarVpcPublicSubnet1RouteTableD0E316CC"
+    },
+    "SubnetId": {
+     "Ref": "FinanciarVpcPublicSubnet1SubnetABE158A5"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PublicSubnet1/RouteTableAssociation"
+   }
+  },
+  "FinanciarVpcPublicSubnet1DefaultRoute68045AA8": {
+   "Type": "AWS::EC2::Route",
+   "Properties": {
+    "DestinationCidrBlock": "0.0.0.0/0",
+    "GatewayId": {
+     "Ref": "FinanciarVpcIGW509CA978"
+    },
+    "RouteTableId": {
+     "Ref": "FinanciarVpcPublicSubnet1RouteTableD0E316CC"
+    }
+   },
+   "DependsOn": [
+    "FinanciarVpcVPCGW05AC8404"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PublicSubnet1/DefaultRoute"
+   }
+  },
+  "FinanciarVpcPublicSubnet1EIPFD7A8BDE": {
+   "Type": "AWS::EC2::EIP",
+   "Properties": {
+    "Domain": "vpc",
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "FinanciarStack/FinanciarVpc/PublicSubnet1"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PublicSubnet1/EIP"
+   }
+  },
+  "FinanciarVpcPublicSubnet1NATGatewayB533C825": {
+   "Type": "AWS::EC2::NatGateway",
+   "Properties": {
+    "AllocationId": {
+     "Fn::GetAtt": [
+      "FinanciarVpcPublicSubnet1EIPFD7A8BDE",
+      "AllocationId"
+     ]
+    },
+    "SubnetId": {
+     "Ref": "FinanciarVpcPublicSubnet1SubnetABE158A5"
+    },
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "FinanciarStack/FinanciarVpc/PublicSubnet1"
+     }
+    ]
+   },
+   "DependsOn": [
+    "FinanciarVpcPublicSubnet1DefaultRoute68045AA8",
+    "FinanciarVpcPublicSubnet1RouteTableAssociation148D7598"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PublicSubnet1/NATGateway"
+   }
+  },
+  "FinanciarVpcPublicSubnet2Subnet25AAE1BB": {
+   "Type": "AWS::EC2::Subnet",
+   "Properties": {
+    "AvailabilityZone": "us-east-1b",
+    "CidrBlock": "10.0.1.0/24",
+    "MapPublicIpOnLaunch": true,
+    "Tags": [
+     {
+      "Key": "aws-cdk:subnet-name",
+      "Value": "Public"
+     },
+     {
+      "Key": "aws-cdk:subnet-type",
+      "Value": "Public"
+     },
+     {
+      "Key": "Name",
+      "Value": "FinanciarStack/FinanciarVpc/PublicSubnet2"
+     }
+    ],
+    "VpcId": {
+     "Ref": "FinanciarVpcFA3D75BE"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PublicSubnet2/Subnet"
+   }
+  },
+  "FinanciarVpcPublicSubnet2RouteTable22C7CD0F": {
+   "Type": "AWS::EC2::RouteTable",
+   "Properties": {
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "FinanciarStack/FinanciarVpc/PublicSubnet2"
+     }
+    ],
+    "VpcId": {
+     "Ref": "FinanciarVpcFA3D75BE"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PublicSubnet2/RouteTable"
+   }
+  },
+  "FinanciarVpcPublicSubnet2RouteTableAssociationE83A5861": {
+   "Type": "AWS::EC2::SubnetRouteTableAssociation",
+   "Properties": {
+    "RouteTableId": {
+     "Ref": "FinanciarVpcPublicSubnet2RouteTable22C7CD0F"
+    },
+    "SubnetId": {
+     "Ref": "FinanciarVpcPublicSubnet2Subnet25AAE1BB"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PublicSubnet2/RouteTableAssociation"
+   }
+  },
+  "FinanciarVpcPublicSubnet2DefaultRoute1F303568": {
+   "Type": "AWS::EC2::Route",
+   "Properties": {
+    "DestinationCidrBlock": "0.0.0.0/0",
+    "GatewayId": {
+     "Ref": "FinanciarVpcIGW509CA978"
+    },
+    "RouteTableId": {
+     "Ref": "FinanciarVpcPublicSubnet2RouteTable22C7CD0F"
+    }
+   },
+   "DependsOn": [
+    "FinanciarVpcVPCGW05AC8404"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PublicSubnet2/DefaultRoute"
+   }
+  },
+  "FinanciarVpcPrivateSubnet1SubnetC08F83EA": {
+   "Type": "AWS::EC2::Subnet",
+   "Properties": {
+    "AvailabilityZone": "us-east-1a",
+    "CidrBlock": "10.0.2.0/24",
+    "MapPublicIpOnLaunch": false,
+    "Tags": [
+     {
+      "Key": "aws-cdk:subnet-name",
+      "Value": "Private"
+     },
+     {
+      "Key": "aws-cdk:subnet-type",
+      "Value": "Private"
+     },
+     {
+      "Key": "Name",
+      "Value": "FinanciarStack/FinanciarVpc/PrivateSubnet1"
+     }
+    ],
+    "VpcId": {
+     "Ref": "FinanciarVpcFA3D75BE"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PrivateSubnet1/Subnet"
+   }
+  },
+  "FinanciarVpcPrivateSubnet1RouteTableA7B6F87A": {
+   "Type": "AWS::EC2::RouteTable",
+   "Properties": {
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "FinanciarStack/FinanciarVpc/PrivateSubnet1"
+     }
+    ],
+    "VpcId": {
+     "Ref": "FinanciarVpcFA3D75BE"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PrivateSubnet1/RouteTable"
+   }
+  },
+  "FinanciarVpcPrivateSubnet1RouteTableAssociation9860A45A": {
+   "Type": "AWS::EC2::SubnetRouteTableAssociation",
+   "Properties": {
+    "RouteTableId": {
+     "Ref": "FinanciarVpcPrivateSubnet1RouteTableA7B6F87A"
+    },
+    "SubnetId": {
+     "Ref": "FinanciarVpcPrivateSubnet1SubnetC08F83EA"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PrivateSubnet1/RouteTableAssociation"
+   }
+  },
+  "FinanciarVpcPrivateSubnet1DefaultRoute9D7490EB": {
+   "Type": "AWS::EC2::Route",
+   "Properties": {
+    "DestinationCidrBlock": "0.0.0.0/0",
+    "NatGatewayId": {
+     "Ref": "FinanciarVpcPublicSubnet1NATGatewayB533C825"
+    },
+    "RouteTableId": {
+     "Ref": "FinanciarVpcPrivateSubnet1RouteTableA7B6F87A"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PrivateSubnet1/DefaultRoute"
+   }
+  },
+  "FinanciarVpcPrivateSubnet2Subnet694D526E": {
+   "Type": "AWS::EC2::Subnet",
+   "Properties": {
+    "AvailabilityZone": "us-east-1b",
+    "CidrBlock": "10.0.3.0/24",
+    "MapPublicIpOnLaunch": false,
+    "Tags": [
+     {
+      "Key": "aws-cdk:subnet-name",
+      "Value": "Private"
+     },
+     {
+      "Key": "aws-cdk:subnet-type",
+      "Value": "Private"
+     },
+     {
+      "Key": "Name",
+      "Value": "FinanciarStack/FinanciarVpc/PrivateSubnet2"
+     }
+    ],
+    "VpcId": {
+     "Ref": "FinanciarVpcFA3D75BE"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PrivateSubnet2/Subnet"
+   }
+  },
+  "FinanciarVpcPrivateSubnet2RouteTable60D2204C": {
+   "Type": "AWS::EC2::RouteTable",
+   "Properties": {
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "FinanciarStack/FinanciarVpc/PrivateSubnet2"
+     }
+    ],
+    "VpcId": {
+     "Ref": "FinanciarVpcFA3D75BE"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PrivateSubnet2/RouteTable"
+   }
+  },
+  "FinanciarVpcPrivateSubnet2RouteTableAssociation13247471": {
+   "Type": "AWS::EC2::SubnetRouteTableAssociation",
+   "Properties": {
+    "RouteTableId": {
+     "Ref": "FinanciarVpcPrivateSubnet2RouteTable60D2204C"
+    },
+    "SubnetId": {
+     "Ref": "FinanciarVpcPrivateSubnet2Subnet694D526E"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PrivateSubnet2/RouteTableAssociation"
+   }
+  },
+  "FinanciarVpcPrivateSubnet2DefaultRouteECE48310": {
+   "Type": "AWS::EC2::Route",
+   "Properties": {
+    "DestinationCidrBlock": "0.0.0.0/0",
+    "NatGatewayId": {
+     "Ref": "FinanciarVpcPublicSubnet1NATGatewayB533C825"
+    },
+    "RouteTableId": {
+     "Ref": "FinanciarVpcPrivateSubnet2RouteTable60D2204C"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/PrivateSubnet2/DefaultRoute"
+   }
+  },
+  "FinanciarVpcIGW509CA978": {
+   "Type": "AWS::EC2::InternetGateway",
+   "Properties": {
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": "FinanciarStack/FinanciarVpc"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/IGW"
+   }
+  },
+  "FinanciarVpcVPCGW05AC8404": {
+   "Type": "AWS::EC2::VPCGatewayAttachment",
+   "Properties": {
+    "InternetGatewayId": {
+     "Ref": "FinanciarVpcIGW509CA978"
+    },
+    "VpcId": {
+     "Ref": "FinanciarVpcFA3D75BE"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarVpc/VPCGW"
+   }
+  },
+  "FinanciarSecrets8FEB300C": {
+   "Type": "AWS::SecretsManager::Secret",
+   "Properties": {
+    "Description": "Financiar application secrets",
+    "GenerateSecretString": {
+     "GenerateStringKey": "SESSION_SECRET",
+     "SecretStringTemplate": "{\"DATABASE_URL\":\"\",\"SESSION_SECRET\":\"\",\"STRIPE_SECRET_KEY\":\"\",\"STRIPE_WEBHOOK_SECRET\":\"\",\"PAYSTACK_SECRET_KEY\":\"\",\"COGNITO_USER_POOL_ID\":\"\",\"COGNITO_CLIENT_ID\":\"\"}"
+    },
+    "Name": "financiar/app-secrets"
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarSecrets/Resource"
+   }
+  },
+  "DbSecurityGroupE9D701AD": {
+   "Type": "AWS::EC2::SecurityGroup",
+   "Properties": {
+    "GroupDescription": "Security group for Financiar RDS",
+    "SecurityGroupEgress": [
+     {
+      "CidrIp": "255.255.255.255/32",
+      "Description": "Disallow all traffic",
+      "FromPort": 252,
+      "IpProtocol": "icmp",
+      "ToPort": 86
+     }
+    ],
+    "VpcId": {
+     "Ref": "FinanciarVpcFA3D75BE"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/DbSecurityGroup/Resource"
+   }
+  },
+  "DbSecurityGroupfromFinanciarStackServiceSecurityGroup0EE0EF5C5432FD5C7C47": {
+   "Type": "AWS::EC2::SecurityGroupIngress",
+   "Properties": {
+    "Description": "Allow from ECS",
+    "FromPort": 5432,
+    "GroupId": {
+     "Fn::GetAtt": [
+      "DbSecurityGroupE9D701AD",
+      "GroupId"
+     ]
+    },
+    "IpProtocol": "tcp",
+    "SourceSecurityGroupId": {
+     "Fn::GetAtt": [
+      "ServiceSecurityGroup61DE1A49",
+      "GroupId"
+     ]
+    },
+    "ToPort": 5432
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/DbSecurityGroup/from FinanciarStackServiceSecurityGroup0EE0EF5C:5432"
+   }
+  },
+  "FinanciarDbSubnetGroup0C86D8A0": {
+   "Type": "AWS::RDS::DBSubnetGroup",
+   "Properties": {
+    "DBSubnetGroupDescription": "Subnet group for FinanciarDb database",
+    "SubnetIds": [
+     {
+      "Ref": "FinanciarVpcPrivateSubnet1SubnetC08F83EA"
+     },
+     {
+      "Ref": "FinanciarVpcPrivateSubnet2Subnet694D526E"
+     }
+    ]
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarDb/SubnetGroup/Default"
+   }
+  },
+  "FinanciarStackFinanciarDbSecretE24B16923fdaad7efa858a3daf9490cf0a702aeb": {
+   "Type": "AWS::SecretsManager::Secret",
+   "Properties": {
+    "Description": {
+     "Fn::Join": [
+      "",
+      [
+       "Generated by the CDK for stack: ",
+       {
+        "Ref": "AWS::StackName"
+       }
+      ]
+     ]
+    },
+    "GenerateSecretString": {
+     "ExcludeCharacters": " %+~`#$&*()|[]{}:;<>?!'/@\"\\",
+     "GenerateStringKey": "password",
+     "PasswordLength": 30,
+     "SecretStringTemplate": "{\"username\":\"financiar_admin\"}"
+    },
+    "Name": "financiar/db-credentials"
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarDb/Secret/Resource"
+   }
+  },
+  "FinanciarDbSecretAttachmentF282DAD5": {
+   "Type": "AWS::SecretsManager::SecretTargetAttachment",
+   "Properties": {
+    "SecretId": {
+     "Ref": "FinanciarStackFinanciarDbSecretE24B16923fdaad7efa858a3daf9490cf0a702aeb"
+    },
+    "TargetId": {
+     "Ref": "FinanciarDbC2E3F377"
+    },
+    "TargetType": "AWS::RDS::DBInstance"
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarDb/Secret/Attachment/Resource"
+   }
+  },
+  "FinanciarDbC2E3F377": {
+   "Type": "AWS::RDS::DBInstance",
+   "Properties": {
+    "AllocatedStorage": "20",
+    "BackupRetentionPeriod": 7,
+    "CopyTagsToSnapshot": true,
+    "DBInstanceClass": "db.t3.micro",
+    "DBName": "financiar",
+    "DBSubnetGroupName": {
+     "Ref": "FinanciarDbSubnetGroup0C86D8A0"
+    },
+    "DeletionProtection": true,
+    "Engine": "postgres",
+    "EngineVersion": "16.4",
+    "MasterUserPassword": {
+     "Fn::Join": [
+      "",
+      [
+       "{{resolve:secretsmanager:",
+       {
+        "Ref": "FinanciarStackFinanciarDbSecretE24B16923fdaad7efa858a3daf9490cf0a702aeb"
+       },
+       ":SecretString:password::}}"
+      ]
+     ]
+    },
+    "MasterUsername": "financiar_admin",
+    "MaxAllocatedStorage": 100,
+    "MultiAZ": false,
+    "PubliclyAccessible": false,
+    "StorageEncrypted": true,
+    "StorageType": "gp2",
+    "VPCSecurityGroups": [
+     {
+      "Fn::GetAtt": [
+       "DbSecurityGroupE9D701AD",
+       "GroupId"
+      ]
+     }
+    ]
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarDb/Resource"
+   }
+  },
+  "FinanciarRepo7B425D17": {
+   "Type": "AWS::ECR::Repository",
+   "Properties": {
+    "LifecyclePolicy": {
+     "LifecyclePolicyText": "{\"rules\":[{\"rulePriority\":1,\"description\":\"Keep last 10 images\",\"selection\":{\"tagStatus\":\"any\",\"countType\":\"imageCountMoreThan\",\"countNumber\":10},\"action\":{\"type\":\"expire\"}}]}"
+    },
+    "RepositoryName": "financiar"
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarRepo/Resource"
+   }
+  },
+  "FinanciarClusterFDC73B43": {
+   "Type": "AWS::ECS::Cluster",
+   "Properties": {
+    "ClusterName": "financiar",
+    "ClusterSettings": [
+     {
+      "Name": "containerInsights",
+      "Value": "enabled"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarCluster/Resource"
+   }
+  },
+  "FinanciarTaskRole68FA2620": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "Description": "Financiar ECS task role"
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarTaskRole/Resource"
+   }
+  },
+  "FinanciarTaskRoleDefaultPolicyADD81B5C": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ses:SendEmail",
+        "ses:SendRawEmail"
+       ],
+       "Effect": "Allow",
+       "Resource": "*"
+      },
+      {
+       "Action": "sns:Publish",
+       "Effect": "Allow",
+       "Resource": "*"
+      },
+      {
+       "Action": [
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:DescribeSecret"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "FinanciarSecrets8FEB300C"
+       }
+      },
+      {
+       "Action": [
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:DescribeSecret"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "FinanciarDbSecretAttachmentF282DAD5"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "FinanciarTaskRoleDefaultPolicyADD81B5C",
+    "Roles": [
+     {
+      "Ref": "FinanciarTaskRole68FA2620"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarTaskRole/DefaultPolicy/Resource"
+   }
+  },
+  "FinanciarTaskB9A63832": {
+   "Type": "AWS::ECS::TaskDefinition",
+   "Properties": {
+    "ContainerDefinitions": [
+     {
+      "Environment": [
+       {
+        "Name": "NODE_ENV",
+        "Value": "production"
+       },
+       {
+        "Name": "PORT",
+        "Value": "5000"
+       },
+       {
+        "Name": "APP_URL",
+        "Value": "https://app.thefinanciar.com"
+       },
+       {
+        "Name": "AWS_REGION",
+        "Value": "us-east-1"
+       },
+       {
+        "Name": "AWS_SES_FROM_EMAIL",
+        "Value": "noreply@thefinanciar.com"
+       },
+       {
+        "Name": "AWS_SES_FROM_NAME",
+        "Value": "Financiar"
+       },
+       {
+        "Name": "AWS_SNS_SENDER_ID",
+        "Value": "Financiar"
+       },
+       {
+        "Name": "NODE_TLS_REJECT_UNAUTHORIZED",
+        "Value": "0"
+       }
+      ],
+      "Essential": true,
+      "HealthCheck": {
+       "Command": [
+        "CMD-SHELL",
+        "wget -qO- http://localhost:5000/api/health || exit 1"
+       ],
+       "Interval": 30,
+       "Retries": 3,
+       "StartPeriod": 30,
+       "Timeout": 5
+      },
+      "Image": {
+       "Fn::Join": [
+        "",
+        [
+         {
+          "Fn::Select": [
+           4,
+           {
+            "Fn::Split": [
+             ":",
+             {
+              "Fn::GetAtt": [
+               "FinanciarRepo7B425D17",
+               "Arn"
+              ]
+             }
+            ]
+           }
+          ]
+         },
+         ".dkr.ecr.",
+         {
+          "Fn::Select": [
+           3,
+           {
+            "Fn::Split": [
+             ":",
+             {
+              "Fn::GetAtt": [
+               "FinanciarRepo7B425D17",
+               "Arn"
+              ]
+             }
+            ]
+           }
+          ]
+         },
+         ".",
+         {
+          "Ref": "AWS::URLSuffix"
+         },
+         "/",
+         {
+          "Ref": "FinanciarRepo7B425D17"
+         },
+         ":latest"
+        ]
+       ]
+      },
+      "LogConfiguration": {
+       "LogDriver": "awslogs",
+       "Options": {
+        "awslogs-group": {
+         "Ref": "FinanciarLogs9F1B3AA9"
+        },
+        "awslogs-stream-prefix": "financiar",
+        "awslogs-region": "us-east-1"
+       }
+      },
+      "Name": "financiar",
+      "PortMappings": [
+       {
+        "ContainerPort": 5000,
+        "Protocol": "tcp"
+       }
+      ],
+      "Secrets": [
+       {
+        "Name": "DATABASE_URL",
+        "ValueFrom": {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Ref": "FinanciarSecrets8FEB300C"
+           },
+           ":DATABASE_URL::"
+          ]
+         ]
+        }
+       },
+       {
+        "Name": "SESSION_SECRET",
+        "ValueFrom": {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Ref": "FinanciarSecrets8FEB300C"
+           },
+           ":SESSION_SECRET::"
+          ]
+         ]
+        }
+       },
+       {
+        "Name": "STRIPE_SECRET_KEY",
+        "ValueFrom": {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Ref": "FinanciarSecrets8FEB300C"
+           },
+           ":STRIPE_SECRET_KEY::"
+          ]
+         ]
+        }
+       },
+       {
+        "Name": "STRIPE_WEBHOOK_SECRET",
+        "ValueFrom": {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Ref": "FinanciarSecrets8FEB300C"
+           },
+           ":STRIPE_WEBHOOK_SECRET::"
+          ]
+         ]
+        }
+       },
+       {
+        "Name": "PAYSTACK_SECRET_KEY",
+        "ValueFrom": {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Ref": "FinanciarSecrets8FEB300C"
+           },
+           ":PAYSTACK_SECRET_KEY::"
+          ]
+         ]
+        }
+       },
+       {
+        "Name": "COGNITO_USER_POOL_ID",
+        "ValueFrom": {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Ref": "FinanciarSecrets8FEB300C"
+           },
+           ":COGNITO_USER_POOL_ID::"
+          ]
+         ]
+        }
+       },
+       {
+        "Name": "COGNITO_CLIENT_ID",
+        "ValueFrom": {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Ref": "FinanciarSecrets8FEB300C"
+           },
+           ":COGNITO_CLIENT_ID::"
+          ]
+         ]
+        }
+       }
+      ]
+     }
+    ],
+    "Cpu": "512",
+    "ExecutionRoleArn": {
+     "Fn::GetAtt": [
+      "FinanciarTaskExecutionRoleB3BCF758",
+      "Arn"
+     ]
+    },
+    "Family": "FinanciarStackFinanciarTaskDE2F8C6E",
+    "Memory": "1024",
+    "NetworkMode": "awsvpc",
+    "RequiresCompatibilities": [
+     "FARGATE"
+    ],
+    "TaskRoleArn": {
+     "Fn::GetAtt": [
+      "FinanciarTaskRole68FA2620",
+      "Arn"
+     ]
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarTask/Resource"
+   }
+  },
+  "FinanciarTaskExecutionRoleB3BCF758": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarTask/ExecutionRole/Resource"
+   }
+  },
+  "FinanciarTaskExecutionRoleDefaultPolicyDAC60A6C": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:BatchGetImage"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "FinanciarRepo7B425D17",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": "ecr:GetAuthorizationToken",
+       "Effect": "Allow",
+       "Resource": "*"
+      },
+      {
+       "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "FinanciarLogs9F1B3AA9",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": [
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:DescribeSecret"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "FinanciarSecrets8FEB300C"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "FinanciarTaskExecutionRoleDefaultPolicyDAC60A6C",
+    "Roles": [
+     {
+      "Ref": "FinanciarTaskExecutionRoleB3BCF758"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarTask/ExecutionRole/DefaultPolicy/Resource"
+   }
+  },
+  "FinanciarLogs9F1B3AA9": {
+   "Type": "AWS::Logs::LogGroup",
+   "Properties": {
+    "LogGroupName": "/ecs/financiar",
+    "RetentionInDays": 30
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarLogs/Resource"
+   }
+  },
+  "AlbSecurityGroup86A59E99": {
+   "Type": "AWS::EC2::SecurityGroup",
+   "Properties": {
+    "GroupDescription": "Security group for Financiar ALB",
+    "SecurityGroupEgress": [
+     {
+      "CidrIp": "0.0.0.0/0",
+      "Description": "Allow all outbound traffic by default",
+      "IpProtocol": "-1"
+     }
+    ],
+    "SecurityGroupIngress": [
+     {
+      "CidrIp": "0.0.0.0/0",
+      "Description": "Allow HTTP",
+      "FromPort": 80,
+      "IpProtocol": "tcp",
+      "ToPort": 80
+     },
+     {
+      "CidrIp": "0.0.0.0/0",
+      "Description": "Allow HTTPS",
+      "FromPort": 443,
+      "IpProtocol": "tcp",
+      "ToPort": 443
+     }
+    ],
+    "VpcId": {
+     "Ref": "FinanciarVpcFA3D75BE"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/AlbSecurityGroup/Resource"
+   }
+  },
+  "FinanciarAlb315EC907": {
+   "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+   "Properties": {
+    "LoadBalancerAttributes": [
+     {
+      "Key": "deletion_protection.enabled",
+      "Value": "false"
+     }
+    ],
+    "Scheme": "internet-facing",
+    "SecurityGroups": [
+     {
+      "Fn::GetAtt": [
+       "AlbSecurityGroup86A59E99",
+       "GroupId"
+      ]
+     }
+    ],
+    "Subnets": [
+     {
+      "Ref": "FinanciarVpcPublicSubnet1SubnetABE158A5"
+     },
+     {
+      "Ref": "FinanciarVpcPublicSubnet2Subnet25AAE1BB"
+     }
+    ],
+    "Type": "application"
+   },
+   "DependsOn": [
+    "FinanciarVpcPublicSubnet1DefaultRoute68045AA8",
+    "FinanciarVpcPublicSubnet1RouteTableAssociation148D7598",
+    "FinanciarVpcPublicSubnet2DefaultRoute1F303568",
+    "FinanciarVpcPublicSubnet2RouteTableAssociationE83A5861"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarAlb/Resource"
+   }
+  },
+  "FinanciarAlbHttpListener0CBF5C62": {
+   "Type": "AWS::ElasticLoadBalancingV2::Listener",
+   "Properties": {
+    "DefaultActions": [
+     {
+      "TargetGroupArn": {
+       "Ref": "FinanciarTargetGroup8F6BCEC2"
+      },
+      "Type": "forward"
+     }
+    ],
+    "LoadBalancerArn": {
+     "Ref": "FinanciarAlb315EC907"
+    },
+    "Port": 80,
+    "Protocol": "HTTP"
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarAlb/HttpListener/Resource"
+   }
+  },
+  "ServiceSecurityGroup61DE1A49": {
+   "Type": "AWS::EC2::SecurityGroup",
+   "Properties": {
+    "GroupDescription": "Security group for Financiar ECS service",
+    "SecurityGroupEgress": [
+     {
+      "CidrIp": "0.0.0.0/0",
+      "Description": "Allow all outbound traffic by default",
+      "IpProtocol": "-1"
+     }
+    ],
+    "VpcId": {
+     "Ref": "FinanciarVpcFA3D75BE"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/ServiceSecurityGroup/Resource"
+   }
+  },
+  "ServiceSecurityGroupfromFinanciarStackAlbSecurityGroupD9C92DE05000CE14115D": {
+   "Type": "AWS::EC2::SecurityGroupIngress",
+   "Properties": {
+    "Description": "Allow from ALB",
+    "FromPort": 5000,
+    "GroupId": {
+     "Fn::GetAtt": [
+      "ServiceSecurityGroup61DE1A49",
+      "GroupId"
+     ]
+    },
+    "IpProtocol": "tcp",
+    "SourceSecurityGroupId": {
+     "Fn::GetAtt": [
+      "AlbSecurityGroup86A59E99",
+      "GroupId"
+     ]
+    },
+    "ToPort": 5000
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/ServiceSecurityGroup/from FinanciarStackAlbSecurityGroupD9C92DE0:5000"
+   }
+  },
+  "FinanciarService17E2212F": {
+   "Type": "AWS::ECS::Service",
+   "Properties": {
+    "Cluster": {
+     "Ref": "FinanciarClusterFDC73B43"
+    },
+    "DeploymentConfiguration": {
+     "Alarms": {
+      "AlarmNames": [],
+      "Enable": false,
+      "Rollback": false
+     },
+     "DeploymentCircuitBreaker": {
+      "Enable": true,
+      "Rollback": true
+     },
+     "MaximumPercent": 200,
+     "MinimumHealthyPercent": 50
+    },
+    "DeploymentController": {
+     "Type": "ECS"
+    },
+    "DesiredCount": 0,
+    "EnableECSManagedTags": false,
+    "HealthCheckGracePeriodSeconds": 60,
+    "LaunchType": "FARGATE",
+    "LoadBalancers": [
+     {
+      "ContainerName": "financiar",
+      "ContainerPort": 5000,
+      "TargetGroupArn": {
+       "Ref": "FinanciarTargetGroup8F6BCEC2"
+      }
+     }
+    ],
+    "NetworkConfiguration": {
+     "AwsvpcConfiguration": {
+      "AssignPublicIp": "DISABLED",
+      "SecurityGroups": [
+       {
+        "Fn::GetAtt": [
+         "ServiceSecurityGroup61DE1A49",
+         "GroupId"
+        ]
+       }
+      ],
+      "Subnets": [
+       {
+        "Ref": "FinanciarVpcPrivateSubnet1SubnetC08F83EA"
+       },
+       {
+        "Ref": "FinanciarVpcPrivateSubnet2Subnet694D526E"
+       }
+      ]
+     }
+    },
+    "TaskDefinition": {
+     "Ref": "FinanciarTaskB9A63832"
+    }
+   },
+   "DependsOn": [
+    "FinanciarAlbHttpListener0CBF5C62",
+    "FinanciarTaskRoleDefaultPolicyADD81B5C",
+    "FinanciarTaskRole68FA2620"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarService/Service"
+   }
+  },
+  "FinanciarServiceTaskCountTarget615FBD42": {
+   "Type": "AWS::ApplicationAutoScaling::ScalableTarget",
+   "Properties": {
+    "MaxCapacity": 4,
+    "MinCapacity": 1,
+    "ResourceId": {
+     "Fn::Join": [
+      "",
+      [
+       "service/",
+       {
+        "Ref": "FinanciarClusterFDC73B43"
+       },
+       "/",
+       {
+        "Fn::GetAtt": [
+         "FinanciarService17E2212F",
+         "Name"
+        ]
+       }
+      ]
+     ]
+    },
+    "RoleARN": {
+     "Fn::Join": [
+      "",
+      [
+       "arn:",
+       {
+        "Ref": "AWS::Partition"
+       },
+       ":iam::677343720858:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService"
+      ]
+     ]
+    },
+    "ScalableDimension": "ecs:service:DesiredCount",
+    "ServiceNamespace": "ecs"
+   },
+   "DependsOn": [
+    "FinanciarTaskRoleDefaultPolicyADD81B5C",
+    "FinanciarTaskRole68FA2620"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarService/TaskCount/Target/Resource"
+   }
+  },
+  "FinanciarServiceTaskCountTargetCpuScalingB3F3F8E0": {
+   "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+   "Properties": {
+    "PolicyName": "FinanciarStackFinanciarServiceTaskCountTargetCpuScalingE042E95F",
+    "PolicyType": "TargetTrackingScaling",
+    "ScalingTargetId": {
+     "Ref": "FinanciarServiceTaskCountTarget615FBD42"
+    },
+    "TargetTrackingScalingPolicyConfiguration": {
+     "PredefinedMetricSpecification": {
+      "PredefinedMetricType": "ECSServiceAverageCPUUtilization"
+     },
+     "ScaleInCooldown": 300,
+     "ScaleOutCooldown": 60,
+     "TargetValue": 70
+    }
+   },
+   "DependsOn": [
+    "FinanciarTaskRoleDefaultPolicyADD81B5C",
+    "FinanciarTaskRole68FA2620"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarService/TaskCount/Target/CpuScaling/Resource"
+   }
+  },
+  "FinanciarTargetGroup8F6BCEC2": {
+   "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+   "Properties": {
+    "HealthCheckIntervalSeconds": 30,
+    "HealthCheckPath": "/api/health",
+    "HealthCheckTimeoutSeconds": 5,
+    "HealthyThresholdCount": 2,
+    "Port": 5000,
+    "Protocol": "HTTP",
+    "TargetGroupAttributes": [
+     {
+      "Key": "deregistration_delay.timeout_seconds",
+      "Value": "30"
+     },
+     {
+      "Key": "stickiness.enabled",
+      "Value": "false"
+     }
+    ],
+    "TargetType": "ip",
+    "UnhealthyThresholdCount": 3,
+    "VpcId": {
+     "Ref": "FinanciarVpcFA3D75BE"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/FinanciarTargetGroup/Resource"
+   }
+  },
+  "CDKMetadata": {
+   "Type": "AWS::CDK::Metadata",
+   "Properties": {
+    "Analytics": "v2:deflate64:H4sIAAAAAAAA/31T227bMAz9lr0rXhF0H5DLVgQoNiMO+jrQCuupcSRDpFIUhv99lOVb+tAnHh6S0iEprbP140P28A3eaaXPl1VtyqwtGPRFCfW3Rb3O2pdGq92rfcl3Kg9lbXQRSoscuRkdXWA8QVnjzM/chshpA2ycnZIj+HnIo/kN/ASM7/Chcm9uAueDD5bRCx4TkpLB27Bo/XdFy6pAHbzhjyfvQtNr+JI42MojUacItUemK1io0Ev3vT/kR5TMCXyFvLhvSvgc6ZQ/U9bugaEEwoMlBqtRpZYmNfvtkhiz59v327GyU0Jm7REbR4ad72cwezEs9+3qQDKpGBvhL1EGcQN02eOrsWac/2fGWQZj0S+4obZAfzM67XSAhYY67jQesnMhNmzgKvpc2n1vcyfvpBeaUKdqV4nKZ1dNExixNFADsdG1g3Mph1ttbHWTl7dpGinun82zxLZ9LPV45y/zjLRuh5wRL+JpW5OGhdspmNMgsCNpVITIk5g6jsn9LO6ZZE5e/o0UFKluHsEd0XXqiOSCT1P9E7gJMkLrzpi90ffb+kf2KD/yjYxZeZmuuWJ2TPY/pFPBZa4DAAA="
+   },
+   "Metadata": {
+    "aws:cdk:path": "FinanciarStack/CDKMetadata/Default"
+   }
+  }
+ },
+ "Outputs": {
+  "AlbDnsName": {
+   "Description": "ALB DNS name",
+   "Value": {
+    "Fn::GetAtt": [
+     "FinanciarAlb315EC907",
+     "DNSName"
+    ]
+   }
+  },
+  "EcrRepositoryUri": {
+   "Description": "ECR repository URI",
+   "Value": {
+    "Fn::Join": [
+     "",
+     [
+      {
+       "Fn::Select": [
+        4,
+        {
+         "Fn::Split": [
+          ":",
+          {
+           "Fn::GetAtt": [
+            "FinanciarRepo7B425D17",
+            "Arn"
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      ".dkr.ecr.",
+      {
+       "Fn::Select": [
+        3,
+        {
+         "Fn::Split": [
+          ":",
+          {
+           "Fn::GetAtt": [
+            "FinanciarRepo7B425D17",
+            "Arn"
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      ".",
+      {
+       "Ref": "AWS::URLSuffix"
+      },
+      "/",
+      {
+       "Ref": "FinanciarRepo7B425D17"
+      }
+     ]
+    ]
+   }
+  },
+  "ClusterName": {
+   "Description": "ECS cluster name",
+   "Value": {
+    "Ref": "FinanciarClusterFDC73B43"
+   }
+  },
+  "ServiceName": {
+   "Description": "ECS service name",
+   "Value": {
+    "Fn::GetAtt": [
+     "FinanciarService17E2212F",
+     "Name"
+    ]
+   }
+  },
+  "DatabaseEndpoint": {
+   "Description": "RDS endpoint",
+   "Value": {
+    "Fn::GetAtt": [
+     "FinanciarDbC2E3F377",
+     "Endpoint.Address"
+    ]
+   }
+  }
+ },
+ "Parameters": {
+  "BootstrapVersion": {
+   "Type": "AWS::SSM::Parameter::Value<String>",
+   "Default": "/cdk-bootstrap/hnb659fds/version",
+   "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]"
+  }
+ },
+ "Rules": {
+  "CheckBootstrapVersion": {
+   "Assertions": [
+    {
+     "Assert": {
+      "Fn::Not": [
+       {
+        "Fn::Contains": [
+         [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5"
+         ],
+         {
+          "Ref": "BootstrapVersion"
+         }
+        ]
+       }
+      ]
+     },
+     "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI."
+    }
+   ]
+  }
+ }
+}
