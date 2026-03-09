@@ -780,7 +780,7 @@ export default function Team() {
                     <p className="text-sm text-muted-foreground mt-1">Track and manage team invitations</p>
                   </div>
                   <Button
-                    onClick={() => { setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "", jobTitle: "" }); setIsInviteOpen(true); }}
+                    onClick={() => { setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "", jobTitle: "", phone: "" }); setIsInviteOpen(true); }}
                     data-testid="button-new-invite"
                   >
                     <Send className="h-4 w-4 mr-2" />New Invite
@@ -881,7 +881,7 @@ export default function Team() {
                     subtitle="Send invitations to add team members to your company"
                     action={
                       <Button
-                        onClick={() => { setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "", jobTitle: "" }); setIsInviteOpen(true); }}
+                        onClick={() => { setInviteForm({ name: "", email: "", role: "EMPLOYEE", department: "", jobTitle: "", phone: "" }); setIsInviteOpen(true); }}
                         data-testid="button-send-first-invite"
                       >
                         <Send className="h-4 w-4 mr-2" />Send First Invite

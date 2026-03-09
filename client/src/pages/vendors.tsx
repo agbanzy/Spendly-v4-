@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { formatCurrencyAmount } from "@/lib/constants";
+import { formatCurrencyAmount, SUPPORTED_COUNTRIES, getCountryConfig, getCurrencyForCountry, getBankDetailFormat, getBankDetailLabel, getBankListKey } from "@/lib/constants";
 import { PageWrapper, PageHeader, MetricCard, StatusBadge, EmptyState, GlassCard, fadeUp, stagger } from "@/components/ui-extended";
 import {
   Building2,
@@ -33,6 +33,10 @@ import {
   AlertTriangle,
   Receipt,
   StickyNote,
+  Landmark,
+  ShieldCheck,
+  Trash2,
+  CreditCard,
 } from "lucide-react";
 import type { Vendor, Payout, CompanySettings, PayoutDestination } from "@shared/schema";
 
@@ -839,7 +843,74 @@ function VendorDetailDialog({
   getCategoryGradient: (category: string) => string;
   hasPayoutDestinations: boolean;
 }) {
+  const { toast } = useToast();
   const paymentStatus = derivePaymentStatus(vendor, hasPayoutDestinations);
+
+  // Fetch bank accounts (payout destinations) for this vendor
+  const { data: destinations = [], isLoading: destinationsLoading } = useQuery<PayoutDestination[]>({
+    queryKey: ["/api/payout-destinations", { vendorId: vendor.id }],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/payout-destinations?vendorId=${vendor.id}`);
+      return res.json();
+    },
+    enabled: open,
+  });
+
+  // Fetch available banks for the selected country (unified endpoint: Paystack dynamic + Stripe static)
+  const [bankCountry, setBankCountry] = useState("NG");
+  const { data: bankList = [] } = useQuery<{ name: string; code: string }[]>({
+    queryKey: ["/api/payment/banks", bankCountry],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/payment/banks/${bankCountry}`);
+      return res.json();
+    },
+    enabled: open,
+  });
+
+  // Add bank account mutation
+  const [showAddBank, setShowAddBank] = useState(false);
+  const [bankForm, setBankForm] = useState({
+    bankName: "",
+    bankCode: "",
+    accountNumber: "",
+    accountName: vendor.name,
+    provider: "paystack",
+    currency: "NGN",
+    country: "NG",
+    routingNumber: "",
+  });
+
+  const addBankMutation = useMutation({
+    mutationFn: async (data: typeof bankForm) => {
+      return apiRequest("POST", "/api/payout-destinations", {
+        ...data,
+        vendorId: vendor.id,
+        type: "bank_account",
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/payout-destinations"] });
+      setShowAddBank(false);
+      setBankForm({ bankName: "", bankCode: "", accountNumber: "", accountName: vendor.name, provider: "paystack", currency: "NGN", country: "NG", routingNumber: "" });
+      toast({ title: "Bank account added", description: "The account has been verified and saved." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Failed to add bank account", description: err.message || "Verification failed. Check account details.", variant: "destructive" });
+    },
+  });
+
+  const deleteBankMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("DELETE", `/api/payout-destinations/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/payout-destinations"] });
+      toast({ title: "Bank account removed" });
+    },
+  });
+
+  // Use shared constants for country → provider/currency/bankListKey lookup
+  // No more hardcoded map — getCountryConfig() has everything
 
   // Fetch payment history (payouts for this vendor)
   const { data: payouts = [], isLoading: payoutsLoading } = useQuery<Payout[]>({
@@ -897,7 +968,8 @@ function VendorDetailDialog({
         <Tabs defaultValue="details" className="w-full mt-4">
           <TabsList className="bg-slate-100 dark:bg-slate-800 w-full">
             <TabsTrigger value="details" className="flex-1">Details</TabsTrigger>
-            <TabsTrigger value="payments" className="flex-1">Payment History</TabsTrigger>
+            <TabsTrigger value="bank" className="flex-1">Bank Accounts</TabsTrigger>
+            <TabsTrigger value="payments" className="flex-1">Payments</TabsTrigger>
           </TabsList>
 
           {/* Details Tab */}
@@ -956,6 +1028,202 @@ function VendorDetailDialog({
                   {vendor.notes}
                 </p>
               </div>
+            )}
+          </TabsContent>
+
+          {/* Bank Accounts Tab */}
+          <TabsContent value="bank" className="mt-4 space-y-4">
+            {destinationsLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+                <span className="ml-2 text-sm text-slate-500">Loading bank accounts...</span>
+              </div>
+            ) : (
+              <>
+                {destinations.length > 0 && (
+                  <div className="space-y-3">
+                    {destinations.map((dest) => (
+                      <div key={dest.id} className="flex items-center justify-between p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+                        <div className="flex items-center gap-3">
+                          <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
+                            <Landmark className="h-4 w-4 text-primary" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                                {dest.bankName || dest.provider}
+                              </p>
+                              {dest.isVerified ? (
+                                <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20 gap-1">
+                                  <ShieldCheck className="h-3 w-3" /> Verified
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20">
+                                  Unverified
+                                </Badge>
+                              )}
+                              {dest.isDefault && (
+                                <Badge variant="outline" className="text-[10px] bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20">
+                                  Default
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                              {dest.accountName} &middot; ****{dest.accountNumber?.slice(-4)} &middot; {dest.currency}
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-slate-400 hover:text-rose-500"
+                          onClick={() => {
+                            if (confirm("Remove this bank account?")) {
+                              deleteBankMutation.mutate(dest.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {destinations.length === 0 && !showAddBank && (
+                  <div className="flex flex-col items-center justify-center py-10 text-center">
+                    <CreditCard className="h-10 w-10 text-slate-300 dark:text-slate-600 mb-3" />
+                    <p className="text-sm font-medium text-slate-600 dark:text-slate-400">No bank accounts</p>
+                    <p className="text-xs text-slate-500 mt-1">Add a bank account to enable instant payouts to this vendor.</p>
+                  </div>
+                )}
+
+                {!showAddBank ? (
+                  <Button variant="outline" className="w-full" onClick={() => setShowAddBank(true)}>
+                    <Plus className="h-4 w-4 mr-2" /> Add Bank Account
+                  </Button>
+                ) : (
+                  <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">New Bank Account</p>
+                      <Button variant="ghost" size="sm" onClick={() => setShowAddBank(false)}>Cancel</Button>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div>
+                        <Label className="text-xs">Country / Region</Label>
+                        <Select
+                          value={bankForm.country}
+                          onValueChange={(val) => {
+                            const config = getCountryConfig(val);
+                            setBankForm((f) => ({
+                              ...f,
+                              country: val,
+                              provider: config?.provider || "stripe",
+                              currency: config?.currency || "USD",
+                              bankCode: "",
+                              bankName: "",
+                            }));
+                            setBankCountry(val);
+                          }}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent className="max-h-60">
+                            {SUPPORTED_COUNTRIES.map(c => (
+                              <SelectItem key={c.code} value={c.code}>{c.name} ({c.currency})</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Bank selector — works for all countries (Paystack dynamic, Stripe static) */}
+                      <div>
+                        <Label className="text-xs">Bank</Label>
+                        <Select
+                          value={bankForm.bankCode}
+                          onValueChange={(val) => {
+                            const bank = bankList.find((b) => b.code === val);
+                            if (val === 'OTHER') {
+                              setBankForm((f) => ({ ...f, bankCode: val, bankName: "" }));
+                            } else {
+                              setBankForm((f) => ({ ...f, bankCode: val, bankName: bank?.name || "" }));
+                            }
+                          }}
+                        >
+                          <SelectTrigger><SelectValue placeholder="Select bank..." /></SelectTrigger>
+                          <SelectContent className="max-h-60">
+                            {bankList.map((bank) => (
+                              <SelectItem key={bank.code} value={bank.code}>{bank.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Manual bank name input when "Other" is selected */}
+                      {bankForm.bankCode === 'OTHER' && (
+                        <div>
+                          <Label className="text-xs">Bank Name</Label>
+                          <Input
+                            value={bankForm.bankName}
+                            onChange={(e) => setBankForm((f) => ({ ...f, bankName: e.target.value }))}
+                            placeholder="Enter bank name"
+                          />
+                        </div>
+                      )}
+
+                      {/* Country-specific routing field */}
+                      {(() => {
+                        const format = getBankDetailFormat(bankForm.country);
+                        if (format === 'bank_code') return null; // Paystack countries use bank code from selector
+                        return (
+                          <div>
+                            <Label className="text-xs">{getBankDetailLabel(format)}</Label>
+                            <Input
+                              value={bankForm.routingNumber}
+                              onChange={(e) => setBankForm((f) => ({ ...f, routingNumber: e.target.value }))}
+                              placeholder={`Enter ${getBankDetailLabel(format).toLowerCase()}`}
+                            />
+                          </div>
+                        );
+                      })()}
+
+                      <div>
+                        <Label className="text-xs">Account Number</Label>
+                        <Input
+                          value={bankForm.accountNumber}
+                          onChange={(e) => setBankForm((f) => ({ ...f, accountNumber: e.target.value }))}
+                          placeholder="Enter account number"
+                        />
+                      </div>
+
+                      <div>
+                        <Label className="text-xs">Account Name</Label>
+                        <Input
+                          value={bankForm.accountName}
+                          onChange={(e) => setBankForm((f) => ({ ...f, accountName: e.target.value }))}
+                          placeholder="Account holder name"
+                        />
+                      </div>
+                    </div>
+
+                    <Button
+                      className="w-full"
+                      disabled={addBankMutation.isPending || !bankForm.accountNumber || !bankForm.bankCode}
+                      onClick={() => addBankMutation.mutate(bankForm)}
+                    >
+                      {addBankMutation.isPending ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Verifying & Saving...
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck className="h-4 w-4 mr-2" /> Verify & Save Account
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </TabsContent>
 

@@ -135,8 +135,8 @@ export class FinanciarStack extends cdk.Stack {
         AWS_SES_FROM_EMAIL: 'noreply@thefinanciar.com',
         AWS_SES_FROM_NAME: 'Financiar',
         AWS_SNS_SENDER_ID: 'Financiar',
-        // Trust RDS CA certificate (within VPC, encrypted in transit)
-        NODE_TLS_REJECT_UNAUTHORIZED: '0',
+        // RDS uses AWS-managed TLS within VPC; Node trusts the default CAs
+        NODE_TLS_REJECT_UNAUTHORIZED: '1',
       },
       secrets: {
         // NOTE: After CDK deploy, manually set the full DATABASE_URL in Secrets Manager:

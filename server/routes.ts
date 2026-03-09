@@ -16,12 +16,13 @@ import {
   financialLimiter,
   emailLimiter
 } from "./middleware/rateLimiter";
-import { requireAuth, requireAdmin, requireOwnership } from "./middleware/auth";
+import { requireAuth, requireAdmin, requireOwnership, requirePin } from "./middleware/auth";
 import { verifyPaystackSignature, PaystackWebhookHandler } from './paystackWebhook';
 import { registerStripeWebhooks } from './webhookHandlers';
 import { mapPaymentError, Money, paymentLogger } from './utils/paymentUtils';
 import { IdempotencyCache } from './utils/idempotencyCache';
 import { computeNextDate, runRecurringScheduler } from './recurringScheduler';
+import { registerSmsAuthRoutes } from './sms-auth';
 
 // Helper to safely extract route params (Express 5 types params as string | string[])
 function param(val: string | string[]): string {
@@ -62,15 +63,15 @@ const receiptStorage = multer.diskStorage({
   }
 });
 
-const upload = multer({ 
+const upload = multer({
   storage: receiptStorage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf'];
+    const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file type. Only JPEG, PNG, GIF, and PDF are allowed.'));
+      cb(new Error('Invalid file type. Only JPEG, PNG, and PDF files are allowed.'));
     }
   }
 });
@@ -422,6 +423,9 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
+  // ==================== SMS AUTH (Cognito Custom Auth) ====================
+  registerSmsAuthRoutes(app);
+
   // ==================== HEALTH CHECK ====================
   app.get("/api/health", async (_req, res) => {
     let dbStatus = "ok";
@@ -528,7 +532,7 @@ export async function registerRoutes(
         description: "Wallet Funding",
         currency,
         reference: null,
-        userId: null,
+        userId: (req as any).user?.uid || null,
         companyId: fundCompany?.companyId ?? null,
       });
 
@@ -555,7 +559,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/balances/withdraw", financialLimiter, requireAuth, async (req, res) => {
+  app.post("/api/balances/withdraw", financialLimiter, requireAuth, requirePin, async (req, res) => {
     try {
       const { amount } = req.body;
       const amountCheck = validateAmount(amount);
@@ -586,7 +590,7 @@ export async function registerRoutes(
         description: "Wallet Withdrawal",
         currency,
         reference: null,
-        userId: null,
+        userId: (req as any).user?.uid || null,
         companyId: withdrawCompany?.companyId ?? null,
       });
 
@@ -613,7 +617,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/balances/send", financialLimiter, requireAuth, async (req, res) => {
+  app.post("/api/balances/send", financialLimiter, requireAuth, requirePin, async (req, res) => {
     try {
       const { amount, recipient, note } = req.body;
       const amountCheck = validateAmount(amount);
@@ -648,7 +652,7 @@ export async function registerRoutes(
         description: `Payment to ${recipient}${note ? ` - ${note}` : ''}`,
         currency,
         reference: null,
-        userId: null,
+        userId: (req as any).user?.uid || null,
         companyId: sendCompany?.companyId ?? null,
       });
 
@@ -693,6 +697,16 @@ export async function registerRoutes(
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
+
+      // Validate magic bytes to prevent MIME spoofing
+      const { validateUploadedFile } = await import('./utils/fileValidation');
+      if (!validateUploadedFile(req.file.path, req.file.mimetype)) {
+        // Delete the spoofed file
+        const fsDel = await import('fs');
+        fsDel.unlinkSync(req.file.path);
+        return res.status(400).json({ error: "Invalid file content. Only JPEG, PNG, and PDF files are allowed." });
+      }
+
       const fileUrl = `/uploads/${req.file.filename}`;
       res.json({ success: true, url: fileUrl });
     } catch (error: any) {
@@ -753,6 +767,7 @@ export async function registerRoutes(
         vendorId: null,
         payoutStatus: null,
         payoutId: null,
+        reviewerComments: null,
       });
 
       // Notify the submitter
@@ -826,18 +841,18 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/expenses/:id", requireAuth, async (req, res) => {
+  app.patch("/api/expenses/:id", requireAuth, requirePin, async (req, res) => {
     try {
       const result = expenseUpdateSchema.safeParse(req.body);
       if (!result.success) {
         return res.status(400).json({ error: "Invalid expense data", details: result.error.issues });
       }
 
-      // SECURITY: Role check for expense approval/rejection
-      if (result.data.status === 'APPROVED' || result.data.status === 'REJECTED') {
+      // SECURITY: Role check for expense approval/rejection/changes-requested
+      if (result.data.status === 'APPROVED' || result.data.status === 'REJECTED' || result.data.status === 'CHANGES_REQUESTED') {
         const userCompany = await resolveUserCompany(req);
         if (!userCompany || !['OWNER', 'ADMIN', 'MANAGER'].includes(userCompany.role)) {
-          return res.status(403).json({ error: 'Only owners, admins, and managers can approve or reject expenses' });
+          return res.status(403).json({ error: 'Only owners, admins, and managers can approve, reject, or request changes on expenses' });
         }
       }
 
@@ -964,7 +979,7 @@ export async function registerRoutes(
   });
 
   // Batch expense approval
-  app.post("/api/expenses/batch-approve", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/expenses/batch-approve", requireAuth, requireAdmin, requirePin, async (req, res) => {
     try {
       const { expenseIds } = req.body;
       if (!Array.isArray(expenseIds) || expenseIds.length === 0) {
@@ -1073,10 +1088,10 @@ export async function registerRoutes(
         description: description || '',
         currency,
         reference: null,
-        userId: null,
+        userId: (req as any).user?.uid || null,
         companyId: txnCompany?.companyId ?? null,
       });
-      
+
       res.status(201).json(transaction);
     } catch (error) {
       res.status(500).json({ error: "Failed to create transaction" });
@@ -1232,7 +1247,7 @@ export async function registerRoutes(
     reason: z.string().optional(),
   });
 
-  app.post("/api/bills/:id/approve", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/bills/:id/approve", requireAuth, requireAdmin, requirePin, async (req, res) => {
     try {
       const company = await resolveUserCompany(req);
       const bill = await storage.getBill(param(req.params.id));
@@ -1243,7 +1258,7 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Access denied" });
       }
 
-      if (bill.status !== 'Pending' && bill.status !== 'Overdue') {
+      if (!['Pending', 'Overdue', 'changes_requested'].includes(bill.status)) {
         return res.status(400).json({ error: "Bill is not in a state that can be approved" });
       }
 
@@ -1252,6 +1267,9 @@ export async function registerRoutes(
 
       const updatedBill = await storage.updateBill(bill.id, {
         status: 'Approved',
+        approvedBy: userId,
+        approvedAt: new Date().toISOString(),
+        reviewerComments: null,
       });
 
       await logAudit('bill', bill.id, 'approved', userId, userName,
@@ -1279,7 +1297,7 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Access denied" });
       }
 
-      if (bill.status !== 'Pending') {
+      if (!['Pending', 'changes_requested'].includes(bill.status)) {
         return res.status(400).json({ error: "Only pending bills can be rejected" });
       }
 
@@ -1299,6 +1317,46 @@ export async function registerRoutes(
       res.json(updatedBill);
     } catch (error: any) {
       res.status(500).json({ error: "Failed to reject bill" });
+    }
+  });
+
+  // Request changes on a bill
+  app.post("/api/bills/:id/request-changes", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { comments } = req.body;
+      if (!comments || !comments.trim()) {
+        return res.status(400).json({ error: "Comments are required when requesting changes" });
+      }
+
+      const company = await resolveUserCompany(req);
+      const bill = await storage.getBill(param(req.params.id));
+      if (!bill) {
+        return res.status(404).json({ error: "Bill not found" });
+      }
+      if (company && !await verifyCompanyAccess(bill.companyId, company.companyId)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      if (bill.status !== 'Pending') {
+        return res.status(400).json({ error: "Only pending bills can have changes requested" });
+      }
+
+      const userId = (req as any).user?.uid || 'system';
+      const userName = await getAuditUserName(req);
+
+      const updatedBill = await storage.updateBill(bill.id, {
+        status: 'changes_requested',
+        reviewerComments: comments.trim(),
+      });
+
+      await logAudit('bill', bill.id, 'changes_requested', userId, userName,
+        { status: bill.status },
+        { status: 'changes_requested', reviewerComments: comments.trim() },
+        { requestedBy: userId, billName: bill.name }
+      );
+
+      res.json(updatedBill);
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to request changes on bill" });
     }
   });
 
@@ -1568,7 +1626,7 @@ export async function registerRoutes(
   });
 
   // Fund a virtual card from wallet
-  app.post("/api/cards/:id/fund", financialLimiter, requireAuth, async (req, res) => {
+  app.post("/api/cards/:id/fund", financialLimiter, requireAuth, requirePin, async (req, res) => {
     try {
       const { amount, sourceCurrency } = req.body;
       const userId = (req as any).user?.uid;
@@ -1658,7 +1716,7 @@ export async function registerRoutes(
         date: new Date().toISOString().split('T')[0],
         currency: cardCurrency,
         reference: null,
-        userId: null,
+        userId: (req as any).user?.uid || null,
         companyId: company?.companyId ?? null,
       });
 
@@ -1685,7 +1743,7 @@ export async function registerRoutes(
   });
 
   // Make a payment with virtual card
-  app.post("/api/cards/:id/pay", requireAuth, async (req, res) => {
+  app.post("/api/cards/:id/pay", requireAuth, requirePin, async (req, res) => {
     try {
       const { amount, merchant, category, description } = req.body;
       if (!amount || amount <= 0) {
@@ -1750,10 +1808,11 @@ export async function registerRoutes(
         vendorId: null,
         payoutStatus: 'not_started',
         payoutId: null,
+        reviewerComments: null,
       });
-      
-      res.json({ 
-        success: true, 
+
+      res.json({
+        success: true,
         transaction: cardTx,
         remainingBalance: newBalance,
         message: `$${amount.toLocaleString()} paid to ${merchant}`
@@ -2034,7 +2093,7 @@ export async function registerRoutes(
             date: new Date().toISOString().split('T')[0],
             currency: account.currency,
             reference: transfer.id,
-            userId: null,
+            userId: (req as any).user?.uid || null,
           });
 
           res.json({
@@ -2056,7 +2115,7 @@ export async function registerRoutes(
   });
 
   // Withdraw from virtual account — initiates real payout via provider
-  app.post("/api/virtual-accounts/:id/withdraw", requireAuth, async (req, res) => {
+  app.post("/api/virtual-accounts/:id/withdraw", requireAuth, requirePin, async (req, res) => {
     try {
       const { amount, destination, reason } = req.body;
       if (!amount || amount <= 0) {
@@ -2126,7 +2185,7 @@ export async function registerRoutes(
             date: new Date().toISOString().split('T')[0],
             currency: account.currency,
             reference: transfer.data?.transfer_code || transfer.data?.reference || null,
-            userId: null,
+            userId: (req as any).user?.uid || null,
           });
 
           // Send SMS notification
@@ -2208,7 +2267,7 @@ export async function registerRoutes(
             date: new Date().toISOString().split('T')[0],
             currency: account.currency,
             reference: outboundPayment.id,
-            userId: null,
+            userId: (req as any).user?.uid || null,
           });
 
           res.json({
@@ -3178,6 +3237,31 @@ export async function registerRoutes(
       }
       const { employeeId, employeeName, department, country, currency, salary, bonus, deductions, deductionBreakdown, payDate, recurring, frequency, email } = result.data;
       const company = await resolveUserCompany(req);
+      const payoutDestinationId = req.body.payoutDestinationId || null;
+
+      // Default country/currency from company settings when not provided
+      let resolvedCountry = country || null;
+      let resolvedCurrency = currency || null;
+      if (company?.companyId && (!resolvedCountry || !resolvedCurrency)) {
+        const companyRecord = await storage.getCompany(company.companyId);
+        if (companyRecord) {
+          resolvedCountry = resolvedCountry || (companyRecord as any).country || 'US';
+          resolvedCurrency = resolvedCurrency || (companyRecord as any).currency || 'USD';
+        }
+      }
+
+      // Auto-populate bank details from payout destination if provided
+      let bankName = req.body.bankName || null;
+      let accountNumber = req.body.accountNumber || null;
+      let accountName = req.body.accountName || null;
+      if (payoutDestinationId) {
+        const dest = await storage.getPayoutDestination(payoutDestinationId);
+        if (dest) {
+          bankName = bankName || dest.bankName;
+          accountNumber = accountNumber || dest.accountNumber;
+          accountName = accountName || dest.accountName;
+        }
+      }
 
       const salaryNum = parseFloat(salary);
       const bonusNum = parseFloat(bonus || '0');
@@ -3189,8 +3273,8 @@ export async function registerRoutes(
         employeeId: employeeId || String(Date.now()),
         employeeName,
         department: department || 'General',
-        country: country || null,
-        currency: currency || null,
+        country: resolvedCountry,
+        currency: resolvedCurrency,
         salary,
         bonus: bonus || '0',
         deductions: deductions || '0',
@@ -3203,6 +3287,10 @@ export async function registerRoutes(
         nextPayDate: recurring ? computeNextDate(actualPayDate, frequency || 'monthly') : null,
         companyId: company?.companyId,
         email: email || null,
+        bankName,
+        accountNumber,
+        accountName,
+        payoutDestinationId,
       } as any);
       
       res.status(201).json(entry);
@@ -3374,7 +3462,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/payroll/process", financialLimiter, requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/payroll/process", financialLimiter, requireAuth, requireAdmin, requirePin, async (req, res) => {
     try {
       const entries = await storage.getPayroll();
       const pendingEntries = entries.filter((e: any) => e.status === "pending");
@@ -3401,9 +3489,15 @@ export async function registerRoutes(
         }
         const netPayAmount = salaryCheck.parsed;
 
-        // Get employee's payout destination
-        const destinations = await storage.getPayoutDestinations(entry.employeeId);
-        const defaultDest = destinations?.find((d: any) => d.isDefault) || destinations?.[0];
+        // Get employee's payout destination — prefer linked payoutDestinationId
+        let defaultDest: any = null;
+        if ((entry as any).payoutDestinationId) {
+          defaultDest = await storage.getPayoutDestination((entry as any).payoutDestinationId);
+        }
+        if (!defaultDest) {
+          const destinations = await storage.getPayoutDestinations(entry.employeeId);
+          defaultDest = destinations?.find((d: any) => d.isDefault) || destinations?.[0];
+        }
 
         if (!defaultDest) {
           // No banking details — skip but don't mark as paid
@@ -3413,9 +3507,10 @@ export async function registerRoutes(
           continue;
         }
 
-        // Initiate real transfer
-        const countryCode = (defaultDest as any).countryCode || 'US';
+        // Initiate real transfer — use entry-level or destination-level currency
+        const countryCode = (defaultDest as any).country || (entry as any).country || 'US';
         const provider = getPaymentProvider(countryCode);
+        const entryCurrency = (entry as any).currency || (defaultDest as any).currency || currency;
         let reference = '';
 
         try {
@@ -3424,7 +3519,7 @@ export async function registerRoutes(
               entry.employeeName,
               (defaultDest as any).accountNumber,
               (defaultDest as any).bankCode,
-              currency
+              entryCurrency
             );
             const recipientCode = recipientResponse.data?.recipient_code;
             if (!recipientCode) throw new Error('Failed to create transfer recipient');
@@ -3472,7 +3567,7 @@ export async function registerRoutes(
             description: `Salary payment - ${entry.employeeName}`,
             currency,
             reference,
-            userId: null,
+            userId: (req as any).user?.uid || null,
           });
 
           // Send payslip email
@@ -3645,7 +3740,7 @@ export async function registerRoutes(
         description: `Salary payment - ${entry.employeeName}`,
         currency,
         reference: providerResult?.transferCode || providerResult?.payoutId || `PAY-${entry.id}-${Date.now()}`,
-        userId: null,
+        userId: (req as any).user?.uid || null,
       });
 
       // Only send payslip email when payout was actually initiated
@@ -3752,10 +3847,10 @@ export async function registerRoutes(
 
       const stripe = getStripeClient();
       const invoiceCurrency = ((invoice as any).currency || 'USD').toLowerCase();
-      const amount = Math.round(parseFloat(invoice.amount) * 100); // cents
+      const amount = Math.round(parseFloat(invoice.amount as string) * 100); // cents
       const appUrl = process.env.APP_URL || 'https://thefinanciar.com';
 
-      const session = await stripe.checkout.sessions.create({
+      const session = await (stripe.checkout.sessions.create as Function)({
         payment_method_types: ['card'],
         line_items: [{
           price_data: {
@@ -3948,6 +4043,8 @@ export async function registerRoutes(
         lastPayment: null,
         companyId: company?.companyId || null,
         paymentTerms: req.body.paymentTerms || null,
+        taxId: req.body.taxId || null,
+        notes: req.body.notes || null,
       });
       
       res.status(201).json(vendor);
@@ -4401,9 +4498,9 @@ export async function registerRoutes(
           currency,
           date: new Date().toISOString().split('T')[0],
           reference: null,
-          userId: null,
+          userId: (req as any).user?.uid || null,
         });
-        
+
         res.json({
           success: true,
           amount,
@@ -4489,7 +4586,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/payment/transfer", requireAuth, financialLimiter, async (req, res) => {
+  app.post("/api/payment/transfer", requireAuth, requirePin, financialLimiter, async (req, res) => {
     try {
       const result = transferSchema.safeParse(req.body);
       if (!result.success) {
@@ -4594,7 +4691,7 @@ export async function registerRoutes(
         description: providerRef, // Store provider reference in description for lookup
         currency,
         reference: null,
-        userId: null,
+        userId: (req as any).user?.uid || null,
       });
 
       // Send notification (in-app + push) and email separately
@@ -4722,7 +4819,7 @@ export async function registerRoutes(
     countryCode: z.string().min(2).max(2).default('US'),
   });
 
-  app.post("/api/bills/pay", financialLimiter, requireAuth, async (req, res) => {
+  app.post("/api/bills/pay", financialLimiter, requireAuth, requirePin, async (req, res) => {
     try {
       const result = billPaymentSchema.safeParse(req.body);
       if (!result.success) {
@@ -4965,7 +5062,7 @@ export async function registerRoutes(
         description: `Wallet deposit confirmed - DEP-${idempotencyKey}`,
         currency: depositCurrency,
         reference: null,
-        userId: null,
+        userId: (req as any).user?.uid || null,
       });
 
       // Send deposit notification
@@ -4998,7 +5095,7 @@ export async function registerRoutes(
     frequency: z.enum(['once', 'weekly', 'monthly', 'quarterly', 'yearly']).optional().default('monthly'),
   });
 
-  app.post("/api/wallet/payout", requireAuth, financialLimiter, async (req, res) => {
+  app.post("/api/wallet/payout", requireAuth, requirePin, financialLimiter, async (req, res) => {
     try {
       const result = payoutSchema.safeParse(req.body);
       if (!result.success) {
@@ -5052,7 +5149,7 @@ export async function registerRoutes(
         description: reason,
         currency,
         reference: null,
-        userId: null,
+        userId: (req as any).user?.uid || null,
       });
 
       const userId = (req as any).user?.uid || 'system';
@@ -5341,7 +5438,7 @@ export async function registerRoutes(
         description: `${type.charAt(0).toUpperCase() + type.slice(1)} - ${provider} (${phoneNumber || meterNumber || smartCardNumber || reference})`,
         currency: wallet?.currency || 'USD',
         reference: providerResult.reference || providerResult.orderId || utilityRef,
-        userId: null,
+        userId: (req as any).user?.uid || null,
       });
 
       try {
@@ -6013,10 +6110,10 @@ export async function registerRoutes(
           currency: 'NGN',
           date: new Date().toISOString().split('T')[0],
           reference: null,
-          userId: null,
+          userId: (req as any).user?.uid || null,
         });
       }
-      
+
       res.json(result);
     } catch (error: any) {
       const mapped = mapPaymentError(error, 'subscription');
@@ -6121,7 +6218,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/paystack/transfers/finalize", requireAuth, financialLimiter, async (req, res) => {
+  app.post("/api/paystack/transfers/finalize", requireAuth, requireAdmin, requirePin, financialLimiter, async (req, res) => {
     try {
       const { transferCode, otp } = req.body;
       if (!transferCode || !otp) {
@@ -8282,7 +8379,7 @@ export async function registerRoutes(
   });
 
   // Withdraw from wallet (debit)
-  app.post("/api/wallets/:id/withdraw", financialLimiter, requireAuth, async (req, res) => {
+  app.post("/api/wallets/:id/withdraw", financialLimiter, requireAuth, requirePin, async (req, res) => {
     try {
       const { amount, reference, description, metadata } = req.body;
 
@@ -8596,7 +8693,65 @@ export async function registerRoutes(
       if (!result.success) {
         return res.status(400).json({ error: "Invalid destination data", details: result.error.issues });
       }
-      const destination = await storage.createPayoutDestination(result.data);
+
+      const data = result.data;
+      let isVerified = false;
+      let resolvedAccountName = data.accountName;
+
+      // Auto-verify bank account with provider
+      if (data.type === 'bank_account' && data.accountNumber && data.bankCode) {
+        try {
+          if (data.provider === 'paystack' && ['NG', 'GH', 'ZA', 'KE'].includes(data.country || '')) {
+            // Paystack: resolve account number to verify it exists and get account name
+            const resolved = await paystackClient.resolveAccountNumber(data.accountNumber, data.bankCode);
+            if (resolved?.data?.account_name) {
+              resolvedAccountName = resolved.data.account_name;
+              isVerified = true;
+            }
+          } else if (data.provider === 'stripe' && data.accountNumber) {
+            // Stripe: validate format (actual verification happens at transfer time)
+            const { validateBankDetails: validateBank } = await import('./utils/bankValidation');
+            const bankValidation = validateBank({
+              countryCode: data.country || 'US',
+              accountNumber: data.accountNumber,
+              accountName: data.accountName || '',
+              routingNumber: data.routingNumber,
+            });
+            if (bankValidation.valid) {
+              isVerified = true;
+            }
+          }
+        } catch (verifyErr: any) {
+          // Verification failed — save as unverified so user can still proceed
+          console.warn(`Bank verification failed: ${verifyErr.message}`);
+        }
+      }
+
+      // Create Paystack transfer recipient upfront so transfers are instant
+      let providerRecipientId = data.providerRecipientId;
+      if (isVerified && data.provider === 'paystack' && data.accountNumber && data.bankCode && !providerRecipientId) {
+        try {
+          const recipient = await paystackClient.createTransferRecipient(
+            resolvedAccountName || data.accountName || '',
+            data.accountNumber,
+            data.bankCode,
+            data.currency || 'NGN',
+            data.country || 'NG'
+          );
+          if (recipient?.data?.recipient_code) {
+            providerRecipientId = recipient.data.recipient_code;
+          }
+        } catch (recipientErr: any) {
+          console.warn(`Transfer recipient creation failed: ${recipientErr.message}`);
+        }
+      }
+
+      const destination = await storage.createPayoutDestination({
+        ...data,
+        accountName: resolvedAccountName || data.accountName,
+        isVerified,
+        providerRecipientId,
+      });
       res.status(201).json(destination);
     } catch (error: any) {
       const mapped = mapPaymentError(error, 'payout');
@@ -8721,7 +8876,7 @@ export async function registerRoutes(
   });
 
   // Payout approval (maker-checker for high-value)
-  app.post("/api/payouts/:id/approve", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/payouts/:id/approve", requireAuth, requireAdmin, requirePin, async (req, res) => {
     try {
       const userId = (req as any).user?.uid;
       const userName = await getAuditUserName(req);
@@ -8853,7 +9008,7 @@ export async function registerRoutes(
   });
 
   // Process payout (actually send money via Stripe/Paystack)
-  app.post("/api/payouts/:id/process", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/payouts/:id/process", requireAuth, requireAdmin, requirePin, async (req, res) => {
     try {
       const payout = await storage.getPayout(param(req.params.id));
       if (!payout) {
@@ -9133,7 +9288,7 @@ export async function registerRoutes(
 
   // ==================== BILL PAYMENT FROM WALLET ====================
 
-  app.post("/api/bills/:id/pay", financialLimiter, requireAuth, async (req, res) => {
+  app.post("/api/bills/:id/pay", financialLimiter, requireAuth, requirePin, async (req, res) => {
     try {
       const { walletId } = req.body;
       const company = await resolveUserCompany(req);
@@ -9268,8 +9423,58 @@ export async function registerRoutes(
     }
   });
 
+  // Request changes on an expense (reviewer sends back for revision)
+  app.post("/api/expenses/:id/request-changes", requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { comments } = req.body;
+      if (!comments || typeof comments !== 'string' || comments.trim().length === 0) {
+        return res.status(400).json({ error: "Comments are required when requesting changes" });
+      }
+
+      const userId = (req as any).user?.uid;
+      const userName = await getAuditUserName(req);
+
+      const expense = await storage.getExpense(param(req.params.id));
+      if (!expense) {
+        return res.status(404).json({ error: "Expense not found" });
+      }
+
+      if (expense.status !== 'PENDING') {
+        return res.status(400).json({ error: "Only pending expenses can have changes requested" });
+      }
+
+      const updatedExpense = await storage.updateExpense(expense.id, {
+        status: 'CHANGES_REQUESTED',
+        reviewerComments: comments.trim(),
+      });
+
+      await logAudit(
+        'expense',
+        expense.id,
+        'changes_requested',
+        userId,
+        userName,
+        { status: 'PENDING' },
+        { status: 'CHANGES_REQUESTED', reviewerComments: comments.trim() },
+        { requestedBy: userId }
+      );
+
+      // Notify the submitter
+      await notificationService.notifyExpenseRejected(expense.userId, {
+        id: expense.id,
+        merchant: expense.merchant,
+        amount: parseFloat(expense.amount),
+      }).catch(err => console.error('Failed to notify changes requested:', err));
+
+      res.json(updatedExpense);
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'payment');
+      res.status(mapped.statusCode).json({ error: mapped.userMessage });
+    }
+  });
+
   // Approve expense and initiate payout
-  app.post("/api/expenses/:id/approve-and-pay", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/expenses/:id/approve-and-pay", requireAuth, requireAdmin, requirePin, async (req, res) => {
     try {
       const { approvedBy, vendorId } = req.body;
       
@@ -9359,7 +9564,7 @@ export async function registerRoutes(
 
   // ==================== PAYROLL BATCH PAYOUT ====================
 
-  app.post("/api/payroll/batch-payout", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/payroll/batch-payout", requireAuth, requireAdmin, requirePin, async (req, res) => {
     try {
       const { payrollIds, initiatedBy } = req.body;
 
@@ -10126,7 +10331,7 @@ export async function registerRoutes(
   // ==================== BATCH DISBURSEMENT ====================
 
   // Batch disbursement (process multiple approved payouts)
-  app.post("/api/payouts/batch-process", requireAuth, requireAdmin, async (req, res) => {
+  app.post("/api/payouts/batch-process", requireAuth, requireAdmin, requirePin, async (req, res) => {
     try {
       const userId = (req as any).user?.uid;
       const userName = await getAuditUserName(req);

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
-import { apiRequest, queryClient, sanitizeErrorMessage } from "@/lib/queryClient";
+import { apiRequest, pinProtectedRequest, queryClient, sanitizeErrorMessage } from "@/lib/queryClient";
 import {
   Dialog,
   DialogContent,
@@ -64,6 +64,7 @@ import {
   Receipt,
   ShieldCheck,
   XCircle,
+  MessageSquare,
   Droplets,
   Landmark,
   GraduationCap,
@@ -75,7 +76,7 @@ import {
 import { motion } from "framer-motion";
 import type { Bill, CompanySettings, Wallet } from "@shared/schema";
 import { getCurrencySymbol, formatCurrencyAmount, PAYMENT_LIMITS } from "@/lib/constants";
-import { PinVerificationDialog, usePinVerification } from "@/components/pin-verification-dialog";
+import { usePinVerification } from "@/components/pin-verification-dialog";
 import {
   PageWrapper,
   PageHeader,
@@ -266,10 +267,12 @@ export default function Bills() {
   const { user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [confirmPayBill, setConfirmPayBill] = useState<string | null>(null);
+  const lastPayBillIdRef = useRef<string | null>(null);
   const [editingBill, setEditingBill] = useState<Bill | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("all");
   const [receiptBill, setReceiptBill] = useState<Bill | null>(null);
+  const [confirmDeleteBill, setConfirmDeleteBill] = useState<string | null>(null);
   const [utilityDialogOpen, setUtilityDialogOpen] = useState(false);
   const [utilityType, setUtilityType] = useState<"airtime" | "data" | "electricity" | "cable" | "internet" | "water" | "government" | "education" | "transport" | "insurance" | "mortgage" | "rent" | "subscriptions">("airtime");
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
@@ -293,12 +296,14 @@ export default function Bills() {
     frequency: "monthly" as string,
   });
   const [billFormErrors, setBillFormErrors] = useState<Record<string, string>>({});
+  const [requestChangesId, setRequestChangesId] = useState<string | null>(null);
+  const [requestChangesComments, setRequestChangesComments] = useState("");
 
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
   });
 
-  const { isPinRequired, isPinDialogOpen, setIsPinDialogOpen, requirePin, handlePinVerified } = usePinVerification();
+  const pin = usePinVerification();
 
   const currency = settings?.currency || "USD";
   const currencySymbol = getCurrencySymbol(currency);
@@ -371,10 +376,11 @@ export default function Bills() {
 
   const payBillMutation = useMutation({
     mutationFn: async (id: string) => {
+      lastPayBillIdRef.current = id;
       if (userWallet?.id) {
-        return apiRequest("POST", `/api/bills/${id}/pay`, { walletId: userWallet.id });
+        return pinProtectedRequest("POST", `/api/bills/${id}/pay`, { walletId: userWallet.id });
       }
-      return apiRequest("PATCH", `/api/bills/${id}`, { status: "paid" });
+      return pinProtectedRequest("PATCH", `/api/bills/${id}`, { status: "paid" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/bills"] });
@@ -384,6 +390,7 @@ export default function Bills() {
       toast({ title: "Bill paid successfully", description: "Payment has been deducted from your wallet." });
     },
     onError: (error: any) => {
+      if (lastPayBillIdRef.current && pin.handlePinError(error, () => payBillMutation.mutate(lastPayBillIdRef.current!))) return;
       toast({ title: "Failed to pay bill", description: sanitizeErrorMessage(error), variant: "destructive" });
     },
   });
@@ -400,22 +407,22 @@ export default function Bills() {
       meterNumber?: string;
       smartCardNumber?: string;
     }) => {
-      return apiRequest("POST", "/api/payments/utility", data);
+      return pinProtectedRequest("POST", "/api/payments/utility", data);
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
       queryClient.invalidateQueries({ queryKey: ["/api/wallets"] });
       queryClient.invalidateQueries({ queryKey: ["/api/balances"] });
-      toast({ 
-        title: "Payment successful!", 
+      toast({
+        title: "Payment successful!",
         description: `Your ${data?.type || 'utility'} payment has been processed via ${data?.paymentProvider || 'wallet'}.`
       });
       setUtilityDialogOpen(false);
       resetUtilityForm();
     },
     onError: (error: any) => {
+      if (pin.handlePinError(error)) return;
       const errorMessage = sanitizeErrorMessage(error);
-      // Check for specific balance error
       const isBalanceError = errorMessage.toLowerCase().includes('insufficient') ||
                             errorMessage.toLowerCase().includes('balance');
       toast({
@@ -624,7 +631,7 @@ export default function Bills() {
       ? utilityForm.smartCardNumber
       : utilityForm.phoneNumber;
     
-    requirePin(() => payUtilityMutation.mutate({
+    pin.requirePin(() => payUtilityMutation.mutate({
       type: utilityType,
       provider: utilityForm.provider,
       amount,
@@ -659,14 +666,30 @@ export default function Bills() {
   // Approval mutation for admin/manager
   const approveBillMutation = useMutation({
     mutationFn: async ({ id, action }: { id: string; action: "approved" | "rejected" }) => {
-      return apiRequest("PATCH", `/api/bills/${id}`, { status: action });
+      return pinProtectedRequest("PATCH", `/api/bills/${id}`, { status: action });
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/bills"] });
       toast({ title: `Bill ${variables.action} successfully` });
     },
-    onError: () => {
+    onError: (error: any) => {
+      if (pin.handlePinError(error)) return;
       toast({ title: "Failed to update bill status", variant: "destructive" });
+    },
+  });
+
+  const requestChangesMutation = useMutation({
+    mutationFn: async ({ id, comments }: { id: string; comments: string }) => {
+      return apiRequest("POST", `/api/bills/${id}/request-changes`, { comments });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bills"] });
+      toast({ title: "Changes requested successfully" });
+      setRequestChangesId(null);
+      setRequestChangesComments("");
+    },
+    onError: () => {
+      toast({ title: "Failed to request changes", variant: "destructive" });
     },
   });
 
@@ -678,6 +701,7 @@ export default function Bills() {
       case "overdue": return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
       case "approved": return "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400";
       case "rejected": return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
+      case "changes_requested": return "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400";
       default: return "";
     }
   };
@@ -690,6 +714,7 @@ export default function Bills() {
       case "overdue": return <AlertTriangle className="h-4 w-4" />;
       case "approved": return <ShieldCheck className="h-4 w-4" />;
       case "rejected": return <XCircle className="h-4 w-4" />;
+      case "changes_requested": return <MessageSquare className="h-4 w-4" />;
       default: return null;
     }
   };
@@ -926,8 +951,8 @@ export default function Bills() {
 
                         <StatusBadge status={bill.status} />
 
-                        {/* Approval buttons for pending bills (admin/manager only) */}
-                        {bill.status.toLowerCase() === "pending" && isAdminOrManager && (
+                        {/* Approval buttons for pending/changes_requested bills (admin/manager only) */}
+                        {(bill.status.toLowerCase() === "pending" || bill.status.toLowerCase() === "changes_requested") && isAdminOrManager && (
                           <div className="flex items-center gap-1">
                             <Button
                               size="sm"
@@ -939,6 +964,17 @@ export default function Bills() {
                               <ShieldCheck className="h-3.5 w-3.5 mr-1" />
                               Approve
                             </Button>
+                            {bill.status.toLowerCase() === "pending" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setRequestChangesId(bill.id)}
+                                className="text-orange-600 border-orange-300 hover:bg-orange-50 dark:text-orange-400 dark:border-orange-700 dark:hover:bg-orange-900/20 h-8 px-2"
+                              >
+                                <MessageSquare className="h-3.5 w-3.5 mr-1" />
+                                Changes
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               variant="outline"
@@ -997,7 +1033,7 @@ export default function Bills() {
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-rose-600 dark:text-rose-400 focus:bg-rose-50 dark:focus:bg-rose-900/20"
-                              onClick={() => deleteMutation.mutate(bill.id)}
+                              onClick={() => setConfirmDeleteBill(bill.id)}
                             >
                               <Trash2 className="h-4 w-4 mr-2" />
                               Delete
@@ -1665,11 +1701,43 @@ export default function Bills() {
         </DialogContent>
       </Dialog>
 
-      <PinVerificationDialog
-        open={isPinDialogOpen}
-        onOpenChange={setIsPinDialogOpen}
-        onVerified={handlePinVerified}
-      />
+      {pin.PinDialogs}
+
+      {/* Request Changes Dialog */}
+      <Dialog open={!!requestChangesId} onOpenChange={(open) => { if (!open) { setRequestChangesId(null); setRequestChangesComments(""); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-orange-500" />
+              Request Changes
+            </DialogTitle>
+            <DialogDescription>
+              Describe what changes are needed before this bill can be approved.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Textarea
+              value={requestChangesComments}
+              onChange={(e) => setRequestChangesComments(e.target.value)}
+              placeholder="e.g. Please verify the amount and attach supporting documents..."
+              rows={4}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setRequestChangesId(null); setRequestChangesComments(""); }}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-orange-600 hover:bg-orange-700"
+              disabled={!requestChangesComments.trim() || requestChangesMutation.isPending}
+              onClick={() => requestChangesId && requestChangesMutation.mutate({ id: requestChangesId, comments: requestChangesComments })}
+            >
+              {requestChangesMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Request Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!confirmPayBill} onOpenChange={(open) => !open && setConfirmPayBill(null)}>
         <AlertDialogContent>
@@ -1683,6 +1751,24 @@ export default function Bills() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => { payBillMutation.mutate(confirmPayBill!); setConfirmPayBill(null); }}>
               Confirm Payment
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!confirmDeleteBill} onOpenChange={(open) => !open && setConfirmDeleteBill(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Bill</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this bill? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-rose-600 hover:bg-rose-700 text-white" onClick={() => { deleteMutation.mutate(confirmDeleteBill!); setConfirmDeleteBill(null); }}>
+              Delete Bill
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

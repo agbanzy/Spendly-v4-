@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getAuthHeaders } from "@/lib/queryClient";
 import {
   Select,
   SelectContent,
@@ -46,6 +46,8 @@ import {
   Plus,
   Send,
   Clock,
+  AlertCircle,
+  CheckCircle,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import {
@@ -59,7 +61,7 @@ import {
   stagger,
 } from "@/components/ui-extended";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { isPaystackRegion } from "@/lib/constants";
+import { isPaystackRegion, SUPPORTED_COUNTRIES, getCurrencyForCountry } from "@/lib/constants";
 import { useAuth } from "@/lib/auth";
 
 interface UserSettings {
@@ -164,6 +166,22 @@ export default function Settings() {
     queryKey: ["/api/payment/keys"],
   });
 
+  // Fetch user profile for KYC status
+  const { data: userProfile } = useQuery<any>({
+    queryKey: ["/api/user-profile", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      const authHeaders = await getAuthHeaders();
+      const res = await fetch(`/api/user-profile/${user.id}`, {
+        headers: authHeaders,
+        credentials: "include",
+      });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!user?.id,
+  });
+
   // Fetch user-specific settings (uses default queryFn with auth headers)
   const { data: userSettings } = useQuery<UserSettings>({
     queryKey: [`/api/user-settings/${user?.id}`],
@@ -175,6 +193,76 @@ export default function Settings() {
   const [expenseAlerts, setExpenseAlerts] = useState(true);
   const [budgetWarnings, setBudgetWarnings] = useState(true);
   const [transactionPin, setTransactionPin] = useState(false);
+
+  // KYC Verification state
+  const [kycForm, setKycForm] = useState({
+    firstName: "",
+    lastName: "",
+    dateOfBirth: "",
+    nationality: "",
+    phoneNumber: "",
+    addressLine1: "",
+    city: "",
+    state: "",
+    country: "",
+    postalCode: "",
+    idType: "national_id",
+    idNumber: "",
+    bvnNumber: "",
+    gender: "",
+  });
+  const [kycSubmitting, setKycSubmitting] = useState(false);
+
+  // Pre-fill KYC form from user profile
+  useEffect(() => {
+    if (userProfile) {
+      setKycForm(prev => ({
+        ...prev,
+        firstName: prev.firstName || userProfile.firstName || "",
+        lastName: prev.lastName || userProfile.lastName || "",
+        phoneNumber: prev.phoneNumber || userProfile.phoneNumber || "",
+        country: prev.country || userProfile.country || "",
+        nationality: prev.nationality || userProfile.country || "",
+      }));
+    }
+  }, [userProfile]);
+
+  // Scroll to verification section if hash is #verification
+  useEffect(() => {
+    if (window.location.hash === '#verification') {
+      setTimeout(() => {
+        const el = document.getElementById('verification-section');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 500);
+    }
+  }, []);
+
+  const submitKycMutation = useMutation({
+    mutationFn: async (data: typeof kycForm) => {
+      return apiRequest("POST", "/api/kyc/submit", {
+        ...data,
+        isBusinessAccount: userProfile?.isBusinessAccount || false,
+        businessName: userProfile?.businessName || undefined,
+        businessType: userProfile?.businessType || undefined,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/user-profile"] });
+      toast({
+        title: "Verification submitted",
+        description: "Your identity verification is being reviewed. This usually takes 24-48 hours.",
+      });
+      setKycSubmitting(false);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Verification failed",
+        description: error.message || "Failed to submit verification. Please try again.",
+        variant: "destructive",
+      });
+      setKycSubmitting(false);
+    },
+  });
 
   useEffect(() => {
     if (settings) {
@@ -1165,18 +1253,9 @@ export default function Settings() {
                     <SelectValue placeholder="Select country" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="US">United States</SelectItem>
-                    <SelectItem value="CA">Canada</SelectItem>
-                    <SelectItem value="GB">United Kingdom</SelectItem>
-                    <SelectItem value="DE">Germany</SelectItem>
-                    <SelectItem value="FR">France</SelectItem>
-                    <SelectItem value="NG">Nigeria</SelectItem>
-                    <SelectItem value="GH">Ghana</SelectItem>
-                    <SelectItem value="KE">Kenya</SelectItem>
-                    <SelectItem value="ZA">South Africa</SelectItem>
-                    <SelectItem value="EG">Egypt</SelectItem>
-                    <SelectItem value="RW">Rwanda</SelectItem>
-                    <SelectItem value="CI">Côte d'Ivoire</SelectItem>
+                    {SUPPORTED_COUNTRIES.map(c => (
+                      <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -1357,46 +1436,236 @@ export default function Settings() {
         </GlassCard>
       </motion.div>
 
-      {/* Virtual Accounts */}
-      <motion.div variants={fadeUp} initial="hidden" animate="visible">
-        <GlassCard>
+      {/* Identity Verification (KYC) */}
+      <motion.div variants={fadeUp} initial="hidden" animate="visible" id="verification-section">
+        <GlassCard className={userProfile?.kycStatus === 'approved' ? 'border-emerald-500/30' : userProfile?.kycStatus === 'pending_review' ? 'border-blue-500/30' : 'border-amber-500/30'}>
           <div className="space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/10 flex items-center justify-center">
-                <Wallet className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-              </div>
-              <div>
-                <SectionLabel>Virtual Accounts</SectionLabel>
-                <p className="text-sm text-slate-600 dark:text-slate-400">
-                  Receive payments directly
-                </p>
-              </div>
-            </div>
-
-            <div className="p-4 border border-slate-500/20 rounded-xl bg-slate-500/10">
-              <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                  userProfile?.kycStatus === 'approved'
+                    ? 'bg-gradient-to-br from-emerald-500/20 to-emerald-500/10'
+                    : userProfile?.kycStatus === 'pending_review'
+                    ? 'bg-gradient-to-br from-blue-500/20 to-blue-500/10'
+                    : 'bg-gradient-to-br from-amber-500/20 to-amber-500/10'
+                }`}>
+                  <Shield className={`h-5 w-5 ${
+                    userProfile?.kycStatus === 'approved'
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : userProfile?.kycStatus === 'pending_review'
+                      ? 'text-blue-600 dark:text-blue-400'
+                      : 'text-amber-600 dark:text-amber-400'
+                  }`} />
+                </div>
                 <div>
-                  <p className="font-medium text-sm">Virtual Account Setup</p>
-                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-                    {isPaystack
-                      ? "Create a dedicated bank account for instant deposits"
-                      : "Connect your bank via Stripe Treasury"}
+                  <SectionLabel>Identity Verification</SectionLabel>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    {userProfile?.kycStatus === 'approved'
+                      ? 'Your identity has been verified'
+                      : userProfile?.kycStatus === 'pending_review'
+                      ? 'Your verification is under review'
+                      : 'Verify your identity to unlock all features'}
                   </p>
                 </div>
-                <Button
-                  variant="outline"
-                  className="border-slate-500/50 hover:bg-slate-500/10"
-                  data-testid="button-create-virtual-account"
-                >
-                  {isPaystack ? "Create Account" : "Connect Bank"}
-                </Button>
               </div>
+              <Badge variant={
+                userProfile?.kycStatus === 'approved' ? 'default'
+                : userProfile?.kycStatus === 'pending_review' ? 'secondary'
+                : 'outline'
+              } className={
+                userProfile?.kycStatus === 'approved' ? 'bg-emerald-600'
+                : userProfile?.kycStatus === 'pending_review' ? 'bg-blue-600 text-white'
+                : ''
+              }>
+                {userProfile?.kycStatus === 'approved' ? '✓ Verified'
+                  : userProfile?.kycStatus === 'pending_review' ? 'In Review'
+                  : userProfile?.kycStatus === 'rejected' ? 'Rejected'
+                  : 'Not Verified'}
+              </Badge>
             </div>
 
-            {isPaystack && (
-              <p className="text-xs text-slate-600 dark:text-slate-400">
-                Supported: Wema, Access, Providus • Instant notifications
-              </p>
+            {userProfile?.kycStatus === 'approved' ? (
+              <div className="p-4 border border-emerald-500/20 rounded-xl bg-emerald-500/5 flex items-center gap-3">
+                <CheckCircle className="h-5 w-5 text-emerald-600 shrink-0" />
+                <div>
+                  <p className="font-medium text-sm text-emerald-800 dark:text-emerald-200">Identity Verified</p>
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400">All features and transaction limits are unlocked.</p>
+                </div>
+              </div>
+            ) : userProfile?.kycStatus === 'pending_review' ? (
+              <div className="p-4 border border-blue-500/20 rounded-xl bg-blue-500/5 flex items-center gap-3">
+                <Loader2 className="h-5 w-5 text-blue-600 animate-spin shrink-0" />
+                <div>
+                  <p className="font-medium text-sm text-blue-800 dark:text-blue-200">Verification In Progress</p>
+                  <p className="text-xs text-blue-600 dark:text-blue-400">Your documents are being reviewed. This usually takes 24-48 hours.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {userProfile?.kycStatus === 'rejected' && (
+                  <div className="p-3 border border-red-500/20 rounded-xl bg-red-500/5 flex items-center gap-3">
+                    <AlertCircle className="h-5 w-5 text-red-600 shrink-0" />
+                    <div>
+                      <p className="font-medium text-sm text-red-800 dark:text-red-200">Verification Rejected</p>
+                      <p className="text-xs text-red-600 dark:text-red-400">Please correct the information below and resubmit.</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">First Name *</Label>
+                    <Input
+                      value={kycForm.firstName}
+                      onChange={(e) => setKycForm({ ...kycForm, firstName: e.target.value })}
+                      placeholder="First name"
+                      data-testid="input-kyc-first-name"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Last Name *</Label>
+                    <Input
+                      value={kycForm.lastName}
+                      onChange={(e) => setKycForm({ ...kycForm, lastName: e.target.value })}
+                      placeholder="Last name"
+                      data-testid="input-kyc-last-name"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Date of Birth *</Label>
+                    <Input
+                      type="date"
+                      value={kycForm.dateOfBirth}
+                      onChange={(e) => setKycForm({ ...kycForm, dateOfBirth: e.target.value })}
+                      data-testid="input-kyc-dob"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Nationality *</Label>
+                    <Select value={kycForm.nationality} onValueChange={(v) => setKycForm({ ...kycForm, nationality: v })}>
+                      <SelectTrigger data-testid="select-kyc-nationality">
+                        <SelectValue placeholder="Select country" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {COUNTRY_OPTIONS.map(c => (
+                          <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Phone Number *</Label>
+                    <Input
+                      value={kycForm.phoneNumber}
+                      onChange={(e) => setKycForm({ ...kycForm, phoneNumber: e.target.value })}
+                      placeholder="+1 234 567 8900"
+                      data-testid="input-kyc-phone"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Gender</Label>
+                    <Select value={kycForm.gender} onValueChange={(v) => setKycForm({ ...kycForm, gender: v })}>
+                      <SelectTrigger data-testid="select-kyc-gender">
+                        <SelectValue placeholder="Select" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="male">Male</SelectItem>
+                        <SelectItem value="female">Female</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Address *</Label>
+                  <Input
+                    value={kycForm.addressLine1}
+                    onChange={(e) => setKycForm({ ...kycForm, addressLine1: e.target.value })}
+                    placeholder="Street address"
+                    data-testid="input-kyc-address"
+                  />
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">City *</Label>
+                    <Input value={kycForm.city} onChange={(e) => setKycForm({ ...kycForm, city: e.target.value })} placeholder="City" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">State *</Label>
+                    <Input value={kycForm.state} onChange={(e) => setKycForm({ ...kycForm, state: e.target.value })} placeholder="State" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Country *</Label>
+                    <Select value={kycForm.country} onValueChange={(v) => setKycForm({ ...kycForm, country: v })}>
+                      <SelectTrigger><SelectValue placeholder="Country" /></SelectTrigger>
+                      <SelectContent>
+                        {COUNTRY_OPTIONS.map(c => (
+                          <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Postal Code</Label>
+                    <Input value={kycForm.postalCode} onChange={(e) => setKycForm({ ...kycForm, postalCode: e.target.value })} placeholder="Zip" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">ID Type *</Label>
+                    <Select value={kycForm.idType} onValueChange={(v) => setKycForm({ ...kycForm, idType: v })}>
+                      <SelectTrigger data-testid="select-kyc-id-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="national_id">National ID</SelectItem>
+                        <SelectItem value="passport">Passport</SelectItem>
+                        <SelectItem value="drivers_license">Driver's License</SelectItem>
+                        <SelectItem value="voters_card">Voter's Card</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">ID Number *</Label>
+                    <Input
+                      value={kycForm.idNumber}
+                      onChange={(e) => setKycForm({ ...kycForm, idNumber: e.target.value })}
+                      placeholder="ID number"
+                      data-testid="input-kyc-id-number"
+                    />
+                  </div>
+                </div>
+
+                {isPaystack && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">BVN (Bank Verification Number)</Label>
+                    <Input
+                      value={kycForm.bvnNumber}
+                      onChange={(e) => setKycForm({ ...kycForm, bvnNumber: e.target.value })}
+                      placeholder="11-digit BVN"
+                      maxLength={11}
+                      data-testid="input-kyc-bvn"
+                    />
+                    <p className="text-xs text-muted-foreground">Required for Nigerian accounts. Enables instant verification.</p>
+                  </div>
+                )}
+
+                <Button
+                  onClick={() => {
+                    setKycSubmitting(true);
+                    submitKycMutation.mutate(kycForm);
+                  }}
+                  disabled={kycSubmitting || !kycForm.firstName || !kycForm.lastName || !kycForm.dateOfBirth || !kycForm.country || !kycForm.idNumber || !kycForm.phoneNumber || !kycForm.addressLine1 || !kycForm.city || !kycForm.state}
+                  className="w-full"
+                  data-testid="button-submit-kyc"
+                >
+                  {kycSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                  <Shield className="h-4 w-4 mr-2" />
+                  Submit Verification
+                </Button>
+              </div>
             )}
           </div>
         </GlassCard>
@@ -1709,7 +1978,7 @@ export default function Settings() {
                 onClick={() =>
                   handleExport(
                     "/api/export/all?format=json",
-                    `spendly-export-${new Date().toISOString().slice(0, 10)}.json`
+                    `financiar-export-${new Date().toISOString().slice(0, 10)}.json`
                   )
                 }
                 data-testid="button-export-all"

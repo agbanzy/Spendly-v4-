@@ -252,3 +252,62 @@ export async function optionalAuth(req: Request, res: Response, next: NextFuncti
     next();
   }
 }
+
+/**
+ * Middleware to enforce transaction PIN on sensitive financial operations.
+ * PIN is MANDATORY — if user has no PIN set, they must set one first.
+ * Expected header: "x-transaction-pin: <4-digit-pin>"
+ * Must be used AFTER requireAuth (needs req.user).
+ */
+export async function requirePin(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const profile = await storage.getUserProfileByCognitoSub(req.user.uid);
+
+    // If no PIN is set, user must set one before performing sensitive actions
+    if (!profile?.transactionPinHash || !profile?.transactionPinEnabled) {
+      return res.status(403).json({
+        error: 'Transaction PIN setup required',
+        code: 'PIN_SETUP_REQUIRED',
+        requiresPinSetup: true,
+      });
+    }
+
+    const pin = req.headers['x-transaction-pin'] as string;
+    if (!pin) {
+      return res.status(403).json({
+        error: 'Transaction PIN required',
+        code: 'PIN_REQUIRED',
+        requiresPin: true,
+      });
+    }
+
+    // Validate PIN format
+    if (!/^\d{4}$/.test(pin)) {
+      return res.status(403).json({
+        error: 'Invalid PIN format',
+        code: 'PIN_INVALID',
+        requiresPin: true,
+      });
+    }
+
+    // Verify PIN against stored hash
+    const bcrypt = await import('bcryptjs');
+    const valid = await bcrypt.compare(pin, profile.transactionPinHash);
+    if (!valid) {
+      return res.status(403).json({
+        error: 'Invalid transaction PIN',
+        code: 'PIN_INVALID',
+        requiresPin: true,
+      });
+    }
+
+    next();
+  } catch (error) {
+    console.error('PIN verification error:', error);
+    return res.status(500).json({ error: 'PIN verification failed' });
+  }
+}

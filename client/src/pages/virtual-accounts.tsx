@@ -5,7 +5,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient, sanitizeErrorMessage } from "@/lib/queryClient";
+import { apiRequest, pinProtectedRequest, queryClient, sanitizeErrorMessage } from "@/lib/queryClient";
+import { usePinVerification } from "@/components/pin-verification-dialog";
 import { getCurrencySymbol, formatCurrencyAmount } from "@/lib/constants";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -54,6 +55,7 @@ import type { VirtualAccount, CompanySettings } from "@shared/schema";
 export default function VirtualAccounts() {
   const { toast } = useToast();
   const { user } = useAuth();
+  const pin = usePinVerification();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isDepositOpen, setIsDepositOpen] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<VirtualAccount | null>(null);
@@ -463,6 +465,8 @@ export default function VirtualAccounts() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {pin.PinDialogs}
     </PageWrapper>
   );
 }

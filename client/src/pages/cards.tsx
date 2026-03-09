@@ -12,7 +12,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient, sanitizeErrorMessage } from "@/lib/queryClient";
+import { apiRequest, pinProtectedRequest, queryClient, sanitizeErrorMessage } from "@/lib/queryClient";
+import { usePinVerification } from "@/components/pin-verification-dialog";
 import { getCurrencySymbol, formatCurrencyAmount } from "@/lib/constants";
 import {
   Dialog,
@@ -210,6 +211,7 @@ function CardTransactionHistory({
 
 export default function Cards() {
   const { toast } = useToast();
+  const pin = usePinVerification();
   const [showNumbers, setShowNumbers] = useState<Record<string, boolean>>({});
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
   const [isOpen, setIsOpen] = useState(false);
@@ -319,7 +321,7 @@ export default function Cards() {
 
   const fundCardMutation = useMutation({
     mutationFn: async ({ id, amount }: { id: string; amount: number }) => {
-      const res = await apiRequest("POST", `/api/cards/${id}/fund`, { amount });
+      const res = await pinProtectedRequest("POST", `/api/cards/${id}/fund`, { amount });
       return res.json();
     },
     onSuccess: (data) => {
@@ -330,6 +332,7 @@ export default function Cards() {
       setFundAmount("");
     },
     onError: (error: any) => {
+      if (pin.handlePinError(error, () => fundCardMutation.mutate({ id: fundingCard!.id, amount: parseFloat(fundAmount) }))) return;
       toast({ title: sanitizeErrorMessage(error) || "Failed to fund card", variant: "destructive" });
     },
   });
@@ -347,7 +350,7 @@ export default function Cards() {
       toast({ title: "Please enter a valid amount", variant: "destructive" });
       return;
     }
-    fundCardMutation.mutate({ id: fundingCard.id, amount });
+    pin.requirePin(() => fundCardMutation.mutate({ id: fundingCard.id, amount }));
   };
 
   const resetForm = () => {
@@ -1292,6 +1295,8 @@ export default function Cards() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {pin.PinDialogs}
     </PageWrapper>
   );
 }

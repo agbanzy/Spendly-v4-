@@ -66,6 +66,7 @@ export interface CognitoUserInfo {
   sub: string;
   email: string;
   name: string;
+  photoURL?: string;
 }
 
 export function getUserInfoFromSession(session: CognitoUserSession): CognitoUserInfo {
@@ -179,6 +180,23 @@ export async function checkAuthState(): Promise<CognitoUserSession | null> {
   } catch {
     return null;
   }
+}
+
+// --- Error Message Mapping ---
+
+// --- Aliases expected by auth-context.tsx ---
+
+export const signIn = signInWithEmail;
+export const signUp = signUpWithEmail;
+export const resetPassword = forgotPassword;
+
+/**
+ * Hydrate Cognito tokens from AsyncStorage on app start.
+ * The Cognito SDK auto-hydrates via the custom Storage adapter,
+ * so this essentially validates the stored session (refreshing if needed).
+ */
+export async function hydrateStorage(): Promise<void> {
+  await getSession().catch(() => null);
 }
 
 // --- Error Message Mapping ---

@@ -64,7 +64,12 @@ app.use(express.urlencoded({ extended: false }));
 
 // CORS configuration
 const allowedOrigins = process.env.NODE_ENV === 'production'
-  ? (process.env.APP_URL ? [process.env.APP_URL] : [])
+  ? [
+      ...(process.env.APP_URL ? [process.env.APP_URL] : []),
+      'https://thefinanciar.com',
+      'https://www.thefinanciar.com',
+      'https://app.thefinanciar.com',
+    ]
   : ['http://localhost:3000', 'http://localhost:5000', 'http://localhost:5001', 'http://localhost:8081'];
 
 app.use(cors({
@@ -78,7 +83,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-transaction-pin'],
 }));
 
 // Apply rate limiting to all API routes

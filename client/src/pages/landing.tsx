@@ -860,7 +860,7 @@ export default function LandingPage() {
                   </Link>
                 </li>
                 <li>
-                  <Link href="/privacy">
+                  <Link href="/cookies">
                     <span className="hover:text-foreground transition-colors cursor-pointer">
                       Cookie Policy
                     </span>

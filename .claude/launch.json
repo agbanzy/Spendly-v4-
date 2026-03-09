@@ -3,12 +3,10 @@
   "configurations": [
     {
       "name": "dev",
-      "runtimeExecutable": "/opt/homebrew/bin/npx",
-      "runtimeArgs": ["vite", "--port", "5174", "--host"],
-      "port": 5174,
-      "env": {
-        "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-      }
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--host", "127.0.0.1", "--port", "5173"],
+      "port": 5173,
+      "autoPort": false
     }
   ]
 }

@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient, getAuthHeaders, sanitizeErrorMessage } from "@/lib/queryClient";
+import { apiRequest, pinProtectedRequest, queryClient, getAuthHeaders, sanitizeErrorMessage } from "@/lib/queryClient";
 import { getCurrencySymbol, formatCurrencyAmount, PAYMENT_LIMITS } from "@/lib/constants";
 import {
   Dialog,
@@ -53,7 +53,8 @@ import { Link } from "wouter";
 import type { Expense, Transaction, CompanyBalances, AIInsight, CompanySettings, UserProfile, VirtualAccount } from "@shared/schema";
 import { isPaystackRegion } from "@/lib/constants";
 import { useAuth } from "@/lib/auth";
-import { PinVerificationDialog, usePinVerification } from "@/components/pin-verification-dialog";
+import { usePinVerification } from "@/components/pin-verification-dialog";
+import { DashboardTour } from "@/components/dashboard-tour";
 
 interface Bank {
   code: string;
@@ -70,7 +71,7 @@ export default function Dashboard() {
   const [isSendMoneyOpen, setIsSendMoneyOpen] = useState(false);
   const [fundingAmount, setFundingAmount] = useState("");
   const [withdrawalAmount, setWithdrawalAmount] = useState("");
-  const [sendMoneyData, setSendMoneyData] = useState({ recipient: "", amount: "", note: "", bankCode: "" });
+  const [sendMoneyData, setSendMoneyData] = useState({ recipient: "", amount: "", note: "", bankCode: "", accountName: "", routingNumber: "" });
   const [withdrawalData, setWithdrawalData] = useState({ accountNumber: "", bankCode: "", accountName: "" });
   const [withdrawalValidation, setWithdrawalValidation] = useState<{ name: string; validated: boolean } | null>(null);
   const [isValidatingWithdrawal, setIsValidatingWithdrawal] = useState(false);
@@ -78,7 +79,7 @@ export default function Dashboard() {
   const [isValidating, setIsValidating] = useState(false);
   const [showBalance, setShowBalance] = useState(true);
   const [fundingMethod, setFundingMethod] = useState<"card" | "bank">("card");
-  const { isPinRequired, isPinDialogOpen, setIsPinDialogOpen, requirePin, handlePinVerified } = usePinVerification();
+  const pin = usePinVerification();
 
   // Handle quick action to open funding dialog (runs once on mount)
   useEffect(() => {
@@ -265,7 +266,7 @@ export default function Dashboard() {
         throw new Error(`Amount must be between ${formatCurrencyAmount(limits.min, currency)} and ${formatCurrencyAmount(limits.max, currency)}`);
       }
       
-      return apiRequest("POST", "/api/wallet/payout", { 
+      return pinProtectedRequest("POST", "/api/wallet/payout", {
         amount: numAmount,
         countryCode,
         recipientDetails: {
@@ -286,6 +287,7 @@ export default function Dashboard() {
       setWithdrawalValidation(null);
     },
     onError: (error: any) => {
+      if (pin.handlePinError(error, () => withdrawMutation.mutate(withdrawalAmount))) return;
       toast({ title: "Failed to withdraw", description: sanitizeErrorMessage(error), variant: "destructive" });
     },
   });
@@ -294,21 +296,21 @@ export default function Dashboard() {
     mutationFn: async (data: typeof sendMoneyData) => {
       const numAmount = parseFloat(data.amount);
       const sendCurrency = settings?.currency || 'USD';
-      
+
       // Validate amount
       const limits = PAYMENT_LIMITS[sendCurrency];
       if (limits && (numAmount < limits.min || numAmount > limits.max)) {
         throw new Error(`Amount must be between ${formatCurrencyAmount(limits.min, sendCurrency)} and ${formatCurrencyAmount(limits.max, sendCurrency)}`);
       }
-      
-      return apiRequest("POST", "/api/payment/transfer", { 
+
+      return pinProtectedRequest("POST", "/api/payment/transfer", {
         amount: numAmount,
         countryCode,
         reason: data.note || "Money transfer",
         recipientDetails: {
           accountNumber: data.recipient,
-          bankCode: data.bankCode,
-          accountName: accountValidation?.name || "Recipient",
+          bankCode: data.bankCode || data.routingNumber || "",
+          accountName: accountValidation?.name || data.accountName || "Recipient",
           currency: sendCurrency,
         }
       });
@@ -318,10 +320,11 @@ export default function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
       toast({ title: "Money sent successfully", description: `${currencySymbol}${sendMoneyData.amount} sent to ${accountValidation?.name || sendMoneyData.recipient}` });
       setIsSendMoneyOpen(false);
-      setSendMoneyData({ recipient: "", amount: "", note: "", bankCode: "" });
+      setSendMoneyData({ recipient: "", amount: "", note: "", bankCode: "", accountName: "", routingNumber: "" });
       setAccountValidation(null);
     },
     onError: (error: any) => {
+      if (pin.handlePinError(error, () => sendMoneyMutation.mutate(sendMoneyData))) return;
       toast({ title: "Failed to send money", description: sanitizeErrorMessage(error), variant: "destructive" });
     },
   });
@@ -480,6 +483,7 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8 min-h-screen animate-slide-up">
+      <DashboardTour />
       {showOnboardingPrompt && (
         <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/50 dark:to-purple-950/50">
           <CardContent className="p-4 flex items-center justify-between flex-wrap gap-4">
@@ -562,10 +566,10 @@ export default function Dashboard() {
               </div>
             </div>
             {userProfile?.kycStatus !== 'pending_review' && (
-              <Link href="/onboarding">
+              <Link href="/settings#verification">
                 <Button className={`${
-                  userProfile?.kycStatus === 'rejected' 
-                    ? 'bg-red-600 hover:bg-red-700' 
+                  userProfile?.kycStatus === 'rejected'
+                    ? 'bg-red-600 hover:bg-red-700'
                     : 'bg-amber-600 hover:bg-amber-700'
                 } text-white`} data-testid="button-complete-kyc">
                   <Shield className="h-4 w-4 mr-2" />
@@ -590,7 +594,7 @@ export default function Dashboard() {
           <h1 className="text-3xl md:text-4xl font-black tracking-tight" data-testid="text-dashboard-title">Dashboard</h1>
           <p className="text-muted-foreground mt-1">Welcome back! Here's your financial overview.</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3" data-tour="quick-actions">
           <Button variant="outline" onClick={() => setIsFundingOpen(true)} className="gap-2" data-testid="button-add-funds">
             <Plus className="h-4 w-4" />Add Funds
           </Button>
@@ -600,7 +604,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <Card className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-white border-0 overflow-hidden relative shadow-2xl shadow-primary/5">
+      <Card className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-white border-0 overflow-hidden relative shadow-2xl shadow-primary/5" data-tour="balance-card">
         <div className="absolute top-0 right-0 w-96 h-96 bg-primary/10 rounded-full blur-[100px] animate-float" />
         <div className="absolute bottom-0 left-0 w-64 h-64 bg-purple-500/10 rounded-full blur-[80px] animate-float-slow" />
         <CardContent className="p-8 md:p-12">
@@ -644,7 +648,7 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4" data-tour="sub-balances">
         <Card className="glass card-hover">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
@@ -698,7 +702,7 @@ export default function Dashboard() {
       </div>
 
       {hasVirtualAccount ? (
-        <Card className="glass overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10">
+        <Card className="glass overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10" data-tour="virtual-account">
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
@@ -735,7 +739,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       ) : (
-        <Card className="glass overflow-hidden bg-gradient-to-br from-emerald-500/10 via-background to-teal-500/10 border-dashed border-2 border-primary/30">
+        <Card className="glass overflow-hidden bg-gradient-to-br from-emerald-500/10 via-background to-teal-500/10 border-dashed border-2 border-primary/30" data-tour="virtual-account">
           <CardContent className="p-6">
             <div className="flex flex-col md:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-4">
@@ -833,7 +837,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <Card className="glass overflow-hidden">
+      <Card className="glass overflow-hidden" data-tour="transactions">
         <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4 bg-muted/30">
           <CardTitle className="text-sm font-bold uppercase tracking-widest flex items-center gap-2">
             <ArrowUpRight className="h-4 w-4 text-primary" />
@@ -1138,7 +1142,7 @@ export default function Dashboard() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsWithdrawalOpen(false)}>Cancel</Button>
             <Button 
-              onClick={() => requirePin(() => withdrawMutation.mutate(withdrawalAmount))} 
+              onClick={() => pin.requirePin(() => withdrawMutation.mutate(withdrawalAmount))} 
               disabled={!withdrawalAmount || !withdrawalValidation?.validated || withdrawMutation.isPending || parseFloat(withdrawalAmount) > parseFloat(String(balances?.local || 0))} 
               data-testid="button-confirm-withdrawal"
             >
@@ -1164,67 +1168,97 @@ export default function Dashboard() {
               <p className="text-2xl font-bold">{formatCurrencyAmount(balances?.local || 0, currency)}</p>
             </div>
             
-            <div className="space-y-2">
-              <Label>Select Bank</Label>
-              <Select value={sendMoneyData.bankCode} onValueChange={(value) => {
-                setSendMoneyData({ ...sendMoneyData, bankCode: value });
-                setAccountValidation(null);
-              }}>
-                <SelectTrigger className="bg-muted/50" data-testid="select-bank">
-                  <SelectValue placeholder="Choose a bank" />
-                </SelectTrigger>
-                <SelectContent>
-                  {banks?.map((bank) => (
-                    <SelectItem key={bank.code} value={bank.code}>{bank.name}</SelectItem>
-                  )) || (
-                    <>
-                      <SelectItem value="044">Access Bank</SelectItem>
-                      <SelectItem value="058">GTBank</SelectItem>
-                      <SelectItem value="033">UBA</SelectItem>
-                      <SelectItem value="011">First Bank</SelectItem>
-                      <SelectItem value="057">Zenith Bank</SelectItem>
-                    </>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="recipient">Account Number</Label>
-              <div className="flex gap-2">
-                <Input 
-                  id="recipient" 
-                  value={sendMoneyData.recipient} 
-                  onChange={(e) => {
-                    setSendMoneyData({ ...sendMoneyData, recipient: e.target.value });
+            {isPaystack ? (
+              <>
+                <div className="space-y-2">
+                  <Label>Select Bank</Label>
+                  <Select value={sendMoneyData.bankCode} onValueChange={(value) => {
+                    setSendMoneyData({ ...sendMoneyData, bankCode: value });
                     setAccountValidation(null);
-                  }} 
-                  placeholder="Enter 10-digit account number" 
-                  className="bg-muted/50"
-                  data-testid="input-recipient" 
-                />
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={validateAccount} 
-                  disabled={isValidating || !sendMoneyData.recipient || !sendMoneyData.bankCode}
-                  className="shrink-0"
-                >
-                  {isValidating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
-                </Button>
-              </div>
-            </div>
-            
-            {accountValidation && (
-              <div className="p-3 bg-emerald-50 dark:bg-emerald-950 rounded-xl border border-emerald-200 dark:border-emerald-800">
-                <div className="flex items-center gap-2">
-                  <BadgeCheck className="h-5 w-5 text-emerald-600" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">Account Name</p>
-                    <p className="font-bold text-emerald-700 dark:text-emerald-400">{accountValidation.name}</p>
+                  }}>
+                    <SelectTrigger className="bg-muted/50" data-testid="select-bank">
+                      <SelectValue placeholder="Choose a bank" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {banks?.map((bank) => (
+                        <SelectItem key={bank.code} value={bank.code}>{bank.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="recipient">Account Number</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="recipient"
+                      value={sendMoneyData.recipient}
+                      onChange={(e) => {
+                        setSendMoneyData({ ...sendMoneyData, recipient: e.target.value });
+                        setAccountValidation(null);
+                      }}
+                      placeholder="Enter 10-digit account number"
+                      className="bg-muted/50"
+                      data-testid="input-recipient"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={validateAccount}
+                      disabled={isValidating || !sendMoneyData.recipient || !sendMoneyData.bankCode}
+                      className="shrink-0"
+                    >
+                      {isValidating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
+                    </Button>
                   </div>
                 </div>
-              </div>
+
+                {accountValidation && (
+                  <div className="p-3 bg-emerald-50 dark:bg-emerald-950 rounded-xl border border-emerald-200 dark:border-emerald-800">
+                    <div className="flex items-center gap-2">
+                      <BadgeCheck className="h-5 w-5 text-emerald-600" />
+                      <div>
+                        <p className="text-xs text-muted-foreground">Account Name</p>
+                        <p className="font-bold text-emerald-700 dark:text-emerald-400">{accountValidation.name}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label>Account Holder Name</Label>
+                  <Input
+                    value={sendMoneyData.accountName}
+                    onChange={(e) => setSendMoneyData({ ...sendMoneyData, accountName: e.target.value })}
+                    placeholder="Full name on the bank account"
+                    className="bg-muted/50"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>{countryCode === "US" || countryCode === "CA" ? "Routing Number" : countryCode === "GB" ? "Sort Code" : "IBAN / BIC"}</Label>
+                  <Input
+                    value={sendMoneyData.routingNumber}
+                    onChange={(e) => setSendMoneyData({ ...sendMoneyData, routingNumber: e.target.value })}
+                    placeholder={countryCode === "US" ? "9-digit routing number" : countryCode === "GB" ? "6-digit sort code" : "IBAN or BIC code"}
+                    className="bg-muted/50"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="recipient">Account Number</Label>
+                  <Input
+                    id="recipient"
+                    value={sendMoneyData.recipient}
+                    onChange={(e) => setSendMoneyData({ ...sendMoneyData, recipient: e.target.value })}
+                    placeholder={countryCode === "US" ? "Account number" : countryCode === "GB" ? "8-digit account number" : "Account number or IBAN"}
+                    className="bg-muted/50"
+                    data-testid="input-recipient"
+                  />
+                </div>
+              </>
             )}
             
             <div className="space-y-2">
@@ -1272,8 +1306,8 @@ export default function Dashboard() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsSendMoneyOpen(false)}>Cancel</Button>
             <Button 
-              onClick={() => requirePin(() => sendMoneyMutation.mutate(sendMoneyData))} 
-              disabled={!sendMoneyData.recipient || !sendMoneyData.amount || sendMoneyMutation.isPending} 
+              onClick={() => pin.requirePin(() => sendMoneyMutation.mutate(sendMoneyData))} 
+              disabled={!sendMoneyData.recipient || !sendMoneyData.amount || sendMoneyMutation.isPending || (isPaystack ? !accountValidation?.validated : (!sendMoneyData.accountName || !sendMoneyData.routingNumber))}
               data-testid="button-confirm-send"
             >
               {sendMoneyMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
@@ -1283,11 +1317,7 @@ export default function Dashboard() {
         </DialogContent>
       </Dialog>
 
-      <PinVerificationDialog
-        open={isPinDialogOpen}
-        onOpenChange={setIsPinDialogOpen}
-        onVerified={handlePinVerified}
-      />
+      {pin.PinDialogs}
     </div>
   );
 }

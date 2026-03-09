@@ -10,6 +10,7 @@ import {
   type CognitoUserInfo,
 } from "./cognito";
 import { apiRequest } from "./queryClient";
+import { clearPinCache } from "./pin-cache";
 
 interface User {
   id: string;
@@ -24,6 +25,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  loginWithToken: (idToken: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
   signup: (name: string, email: string, password: string, extra?: { phoneNumber?: string; country?: string }) => Promise<void>;
   logout: () => Promise<void>;
@@ -95,6 +97,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const loginWithToken = async (idToken: string) => {
+    try {
+      // Decode JWT payload (server already verified it)
+      const [, payloadBase64] = idToken.split('.');
+      const payload = JSON.parse(atob(payloadBase64));
+      const userInfo: CognitoUserInfo = {
+        sub: payload.sub,
+        email: payload.email || payload.phone_number || '',
+        name: payload.name || payload['cognito:username'] || payload.email?.split('@')[0] || 'User',
+        photoURL: payload.picture || undefined,
+      };
+      // Store token for API calls
+      localStorage.setItem('sms_id_token', idToken);
+      const serverRole = await ensureUserProfile(userInfo);
+      setUser(mapCognitoUser(userInfo, serverRole));
+    } catch (error: any) {
+      throw new Error('Failed to process SMS login token');
+    }
+  };
+
   const loginWithGoogle = async () => {
     // Redirect to Cognito Hosted UI — user returns via /auth/callback
     cognitoSignInWithGoogle();
@@ -119,6 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    clearPinCache();
     cognitoSignOut();
     setUser(null);
   };
@@ -129,6 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: !!user,
       isLoading,
       login,
+      loginWithToken,
       loginWithGoogle,
       signup,
       logout

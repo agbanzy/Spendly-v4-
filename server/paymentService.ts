@@ -2,110 +2,11 @@ import { getUncachableStripeClient, getStripeClient } from './stripeClient';
 import { paystackClient, validateTransferDetails, validateStripeBankDetails } from './paystackClient';
 import { Money, paymentLogger, validateCurrencyForProvider, mapPaymentError } from './utils/paymentUtils';
 
-export interface RegionConfig {
-  region: string;
-  countries: string[];
-  currency: string;
-  paymentProvider: 'stripe' | 'paystack';
-  currencySymbol: string;
-}
-
-export const REGION_CONFIGS: RegionConfig[] = [
-  {
-    region: 'North America',
-    countries: ['US', 'CA'],
-    currency: 'USD',
-    paymentProvider: 'stripe',
-    currencySymbol: '$',
-  },
-  {
-    region: 'Europe',
-    countries: ['DE', 'FR', 'ES', 'IT', 'NL', 'BE', 'AT', 'CH', 'SE', 'NO', 'DK', 'FI', 'IE', 'PT'],
-    currency: 'EUR',
-    paymentProvider: 'stripe',
-    currencySymbol: '€',
-  },
-  {
-    region: 'United Kingdom',
-    countries: ['GB'],
-    currency: 'GBP',
-    paymentProvider: 'stripe',
-    currencySymbol: '£',
-  },
-  {
-    region: 'Australia',
-    countries: ['AU'],
-    currency: 'AUD',
-    paymentProvider: 'stripe',
-    currencySymbol: 'A$',
-  },
-  {
-    region: 'Nigeria',
-    countries: ['NG'],
-    currency: 'NGN',
-    paymentProvider: 'paystack',
-    currencySymbol: '₦',
-  },
-  {
-    region: 'Ghana',
-    countries: ['GH'],
-    currency: 'GHS',
-    paymentProvider: 'paystack',
-    currencySymbol: 'GH₵',
-  },
-  {
-    region: 'South Africa',
-    countries: ['ZA'],
-    currency: 'ZAR',
-    paymentProvider: 'paystack',
-    currencySymbol: 'R',
-  },
-  {
-    region: 'Kenya',
-    countries: ['KE'],
-    currency: 'KES',
-    paymentProvider: 'paystack',
-    currencySymbol: 'KSh',
-  },
-  {
-    region: 'Egypt',
-    countries: ['EG'],
-    currency: 'EGP',
-    paymentProvider: 'paystack',
-    currencySymbol: 'E£',
-  },
-  {
-    region: 'Rwanda',
-    countries: ['RW'],
-    currency: 'RWF',
-    paymentProvider: 'paystack',
-    currencySymbol: 'RF',
-  },
-  {
-    region: 'Côte d\'Ivoire',
-    countries: ['CI'],
-    currency: 'XOF',
-    paymentProvider: 'paystack',
-    currencySymbol: 'CFA',
-  },
-];
-
-export function getRegionConfig(countryCode: string): RegionConfig | undefined {
-  return REGION_CONFIGS.find(config => config.countries.includes(countryCode.toUpperCase()));
-}
-
-export function getPaymentProvider(countryCode: string): 'stripe' | 'paystack' {
-  const config = getRegionConfig(countryCode);
-  return config?.paymentProvider || 'stripe';
-}
-
-export function getCurrencyForCountry(countryCode: string): { currency: string; symbol: string } {
-  const config = getRegionConfig(countryCode);
-  return {
-    currency: config?.currency || 'USD',
-    symbol: config?.currencySymbol || '$',
-  };
-}
+// Import from shared constants — single source of truth
+export { REGION_CONFIGS, getRegionConfig, getPaymentProvider, SUPPORTED_COUNTRIES, getCountryConfig, getProviderForCountry, isPaystackCountry, getBankListKey } from '../shared/constants';
+export { getCurrencyForCountry } from '../shared/constants';
+export type { RegionConfig, CountryConfig } from '../shared/constants';
+import { getRegionConfig, getPaymentProvider, getBankListKey, getCurrencyForCountry } from '../shared/constants';
 
 export const paymentService = {
   async createPaymentIntent(amount: number, currency: string, countryCode: string, metadata?: any, callbackUrl?: string) {
@@ -410,20 +311,11 @@ export const paymentService = {
 
   async getBanks(countryCode: string) {
     const provider = getPaymentProvider(countryCode);
-    
+
     if (provider === 'paystack') {
-      // Map country codes to country names for Paystack API
-      const countryNameMap: Record<string, string> = {
-        'NG': 'nigeria',
-        'GH': 'ghana',
-        'ZA': 'south africa',
-        'KE': 'kenya',
-        'EG': 'egypt',
-        'CI': 'cote d\'ivoire',
-        'RW': 'rwanda'
-      };
-      const countryName = countryNameMap[countryCode.toUpperCase()] || countryCode.toLowerCase();
-      const result = await paystackClient.getBanks(countryName);
+      const bankKey = getBankListKey(countryCode);
+      if (!bankKey) return [];
+      const result = await paystackClient.getBanks(bankKey);
       return result.data.map((bank: any) => ({
         name: bank.name,
         code: bank.code,
@@ -432,7 +324,10 @@ export const paymentService = {
         type: bank.type,
       }));
     } else {
-      return [];
+      // Stripe countries: return static bank lists (populated in Phase 4)
+      const { STATIC_BANK_LISTS } = await import('../shared/bank-lists');
+      const staticBanks = STATIC_BANK_LISTS[countryCode.toUpperCase()] || [];
+      return staticBanks;
     }
   },
 

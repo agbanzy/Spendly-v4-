@@ -14,6 +14,7 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1004.0",
     "@aws-sdk/client-ses": "^3.978.0",
     "@aws-sdk/client-sns": "^3.978.0",
     "@hookform/resolvers": "^3.10.0",
@@ -82,6 +83,7 @@
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.55.0",
     "react-icons": "^5.4.0",
+    "react-joyride": "^2.9.3",
     "react-resizable-panels": "^2.1.7",
     "recharts": "^2.15.4",
     "stripe": "^20.0.0",

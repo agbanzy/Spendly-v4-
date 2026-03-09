@@ -12,9 +12,10 @@ import { QuickActions } from "@/components/quick-actions";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { CompanyProvider } from "@/lib/company-context";
+import { TourProvider } from "@/lib/tour-context";
 import NotFound from "@/pages/not-found";
 
-import LandingPage from "@/pages/landing";
+
 import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import Dashboard from "@/pages/dashboard";
@@ -33,6 +34,7 @@ import Vendors from "@/pages/vendors";
 import ForgotPassword from "@/pages/forgot-password";
 import Terms from "@/pages/terms";
 import Privacy from "@/pages/privacy";
+import Cookies from "@/pages/cookies";
 import Onboarding from "@/pages/onboarding";
 import Admin from "@/pages/admin";
 import AdminUsers from "@/pages/admin-users";
@@ -228,7 +230,7 @@ function AppContent() {
   const { isAuthenticated, isLoading } = useAuth();
   const { isAdminVerified, isAdminVerifying } = useAdminSessionVerification();
 
-  const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/terms", "/privacy", "/onboarding", "/admin-login"];
+  const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/terms", "/privacy", "/cookies", "/onboarding", "/admin-login"];
   const isPublicRoute = publicRoutes.includes(location);
   const isAdminRoute = location.startsWith("/admin");
   const isInviteRoute = location.startsWith("/invite/");
@@ -249,12 +251,13 @@ function AppContent() {
   if (isPublicRoute) {
     return (
       <Switch>
-        <Route path="/">{() => isAuthenticated ? <Redirect to="/dashboard" /> : <LandingPage />}</Route>
+        <Route path="/">{() => <Redirect to={isAuthenticated ? "/dashboard" : "/login"} />}</Route>
         <Route path="/login">{() => <PublicRoute component={LoginPage} />}</Route>
         <Route path="/signup">{() => <PublicRoute component={SignupPage} />}</Route>
         <Route path="/forgot-password">{() => <PublicRoute component={ForgotPassword} />}</Route>
         <Route path="/terms" component={Terms} />
         <Route path="/privacy" component={Privacy} />
+        <Route path="/cookies" component={Cookies} />
         <Route path="/onboarding">{() => isAuthenticated ? <Onboarding /> : <Redirect to="/login" />}</Route>
         <Route path="/admin-login" component={AdminLogin} />
       </Switch>
@@ -276,7 +279,9 @@ function App() {
           <TooltipProvider>
             <AuthProvider>
               <CompanyProvider>
-                <AppContent />
+                <TourProvider>
+                  <AppContent />
+                </TourProvider>
               </CompanyProvider>
             </AuthProvider>
             <Toaster />

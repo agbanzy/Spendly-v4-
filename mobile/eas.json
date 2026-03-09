@@ -7,9 +7,9 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_COGNITO_USER_POOL_ID": "us-east-1_KNoYn4rzc",
-        "EXPO_PUBLIC_COGNITO_CLIENT_ID": "738dvokhefcf2p79kvur02ll7s",
-        "EXPO_PUBLIC_API_URL": "http://Spendl-Spend-wM2lvkuLuhtZ-1357750731.us-east-1.elb.amazonaws.com"
+        "EXPO_PUBLIC_COGNITO_USER_POOL_ID": "us-east-1_wgapC4XbE",
+        "EXPO_PUBLIC_COGNITO_CLIENT_ID": "6u5mpeh3ddmlvbfpd265tb7agk",
+        "EXPO_PUBLIC_API_URL": "https://app.thefinanciar.com"
       }
     },
     "preview": {
@@ -18,9 +18,9 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_COGNITO_USER_POOL_ID": "us-east-1_KNoYn4rzc",
-        "EXPO_PUBLIC_COGNITO_CLIENT_ID": "738dvokhefcf2p79kvur02ll7s",
-        "EXPO_PUBLIC_API_URL": "http://Spendl-Spend-wM2lvkuLuhtZ-1357750731.us-east-1.elb.amazonaws.com"
+        "EXPO_PUBLIC_COGNITO_USER_POOL_ID": "us-east-1_wgapC4XbE",
+        "EXPO_PUBLIC_COGNITO_CLIENT_ID": "6u5mpeh3ddmlvbfpd265tb7agk",
+        "EXPO_PUBLIC_API_URL": "https://app.thefinanciar.com"
       }
     },
     "production": {
@@ -28,9 +28,9 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_COGNITO_USER_POOL_ID": "us-east-1_KNoYn4rzc",
-        "EXPO_PUBLIC_COGNITO_CLIENT_ID": "738dvokhefcf2p79kvur02ll7s",
-        "EXPO_PUBLIC_API_URL": "http://Spendl-Spend-wM2lvkuLuhtZ-1357750731.us-east-1.elb.amazonaws.com"
+        "EXPO_PUBLIC_COGNITO_USER_POOL_ID": "us-east-1_wgapC4XbE",
+        "EXPO_PUBLIC_COGNITO_CLIENT_ID": "6u5mpeh3ddmlvbfpd265tb7agk",
+        "EXPO_PUBLIC_API_URL": "https://app.thefinanciar.com"
       }
     }
   },

@@ -42,6 +42,7 @@ export const ExpenseStatus = {
   PENDING: 'PENDING',
   APPROVED: 'APPROVED',
   REJECTED: 'REJECTED',
+  CHANGES_REQUESTED: 'CHANGES_REQUESTED',
   PAID: 'PAID',
 } as const;
 export type ExpenseStatus = typeof ExpenseStatus[keyof typeof ExpenseStatus];
@@ -223,6 +224,7 @@ export const expenses = pgTable("expenses", {
   rejectedBy: text("rejected_by"),
   rejectedAt: text("rejected_at"),
   approvalComments: text("approval_comments"),
+  reviewerComments: text("reviewer_comments"),
   vendorId: text("vendor_id").references(() => vendors.id, { onDelete: 'set null' }),
   payoutStatus: text("payout_status").default('not_started'),
   payoutId: text("payout_id"),
@@ -280,6 +282,10 @@ export const bills = pgTable("bills", {
   paymentMethod: text("payment_method"),
   paymentReference: text("payment_reference"),
   walletTransactionId: text("wallet_transaction_id").default(sql`null`),
+  // Approval tracking
+  approvedBy: text("approved_by"),
+  approvedAt: text("approved_at"),
+  reviewerComments: text("reviewer_comments"),
   createdAt: text("created_at").notNull().default(sql`now()`),
   updatedAt: text("updated_at").notNull().default(sql`now()`),
 }, (t) => [
@@ -380,6 +386,7 @@ export const payrollEntries = pgTable("payroll_entries", {
   nextPayDate: text("next_pay_date"),
   companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
   email: text("email"),
+  payoutDestinationId: text("payout_destination_id"),
 }, (t) => [
   index("payroll_entries_company_id_idx").on(t.companyId),
   index("payroll_entries_employee_id_idx").on(t.employeeId),
@@ -972,9 +979,9 @@ type OptionalFields<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 // Create-input types: select types with newly-added nullable columns made optional
 // so existing call sites that omit these fields still type-check.
 export type CreateTransaction = OptionalFields<Omit<Transaction, 'id'>, 'walletTransactionId' | 'userId' | 'reference' | 'companyId'>;
-export type CreateExpense     = OptionalFields<Omit<Expense, 'id'>,     'departmentId' | 'approvedBy' | 'approvedAt' | 'rejectedBy' | 'rejectedAt' | 'approvalComments'>;
-export type CreateBill        = OptionalFields<Omit<Bill, 'id'>,        'walletTransactionId' | 'paidAmount' | 'paidDate' | 'paidBy' | 'paymentMethod' | 'paymentReference'>;
-export type CreatePayroll     = OptionalFields<Omit<PayrollEntry, 'id'>,'departmentId'>;
+export type CreateExpense     = OptionalFields<Omit<Expense, 'id'>,     'departmentId' | 'approvedBy' | 'approvedAt' | 'rejectedBy' | 'rejectedAt' | 'approvalComments' | 'reviewerComments'>;
+export type CreateBill        = OptionalFields<Omit<Bill, 'id'>,        'walletTransactionId' | 'paidAmount' | 'paidDate' | 'paidBy' | 'paymentMethod' | 'paymentReference' | 'approvedBy' | 'approvedAt' | 'reviewerComments'>;
+export type CreatePayroll     = OptionalFields<Omit<PayrollEntry, 'id'>,'departmentId' | 'payoutDestinationId'>;
 export type CreateTeamMember  = OptionalFields<Omit<TeamMember, 'id'>,  'departmentId'>;
 
 export type InsertBudget = z.infer<typeof insertBudgetSchema>;

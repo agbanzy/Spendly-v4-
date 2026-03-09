@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, pinProtectedRequest, queryClient } from "@/lib/queryClient";
+import { usePinVerification } from "@/components/pin-verification-dialog";
 import { getCurrencySymbol, formatCurrencyAmount } from "@/lib/constants";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -76,6 +77,7 @@ const getAvatarGradient = (name: string) => {
 
 export default function PayrollPage() {
   const { toast } = useToast();
+  const pin = usePinVerification();
   const [searchQuery, setSearchQuery] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("all");
   const [isRunPayrollOpen, setIsRunPayrollOpen] = useState(false);
@@ -160,7 +162,7 @@ export default function PayrollPage() {
 
   const processPayrollMutation = useMutation({
     mutationFn: async () => {
-      return apiRequest("POST", "/api/payroll/process");
+      return pinProtectedRequest("POST", "/api/payroll/process");
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/payroll"] });
@@ -169,14 +171,15 @@ export default function PayrollPage() {
       toast({ title: "Payroll processed successfully", description: "All pending payments have been processed." });
       setIsRunPayrollOpen(false);
     },
-    onError: () => {
+    onError: (error) => {
+      if (pin.handlePinError(error)) return;
       toast({ title: "Failed to process payroll", variant: "destructive" });
     },
   });
 
   const payIndividualMutation = useMutation({
     mutationFn: async (id: string) => {
-      return apiRequest("POST", `/api/payroll/${id}/pay`);
+      return pinProtectedRequest("POST", `/api/payroll/${id}/pay`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/payroll"] });
@@ -186,7 +189,8 @@ export default function PayrollPage() {
       setIsPayIndividualOpen(false);
       setSelectedEntry(null);
     },
-    onError: () => {
+    onError: (error) => {
+      if (pin.handlePinError(error)) return;
       toast({ title: "Failed to process payment", variant: "destructive" });
     },
   });
@@ -793,7 +797,7 @@ export default function PayrollPage() {
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => processPayrollMutation.mutate()} disabled={processPayrollMutation.isPending || pendingPayroll === 0} data-testid="button-confirm-payroll">
+            <AlertDialogAction onClick={() => pin.requirePin(() => processPayrollMutation.mutate())} disabled={processPayrollMutation.isPending || pendingPayroll === 0} data-testid="button-confirm-payroll">
               {processPayrollMutation.isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -856,7 +860,7 @@ export default function PayrollPage() {
               Cancel
             </Button>
             <Button
-              onClick={() => selectedEntry && payIndividualMutation.mutate(selectedEntry.id)}
+              onClick={() => selectedEntry && pin.requirePin(() => payIndividualMutation.mutate(selectedEntry.id))}
               disabled={payIndividualMutation.isPending}
               size="sm"
               data-testid="button-confirm-pay-individual"
@@ -1155,6 +1159,8 @@ export default function PayrollPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {pin.PinDialogs}
     </PageWrapper>
   );
 }

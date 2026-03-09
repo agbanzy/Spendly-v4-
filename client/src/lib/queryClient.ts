@@ -1,5 +1,6 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { getIdToken } from "./cognito";
+import { getCachedPin } from "./pin-cache";
 
 // Active company ID — set by CompanyProvider, read by all API calls
 let _activeCompanyId: string | null = null;
@@ -48,6 +49,34 @@ export async function apiRequest(
       ...authHeaders,
       ...(data ? { "Content-Type": "application/json" } : {}),
     },
+    body: data ? JSON.stringify(data) : undefined,
+  });
+
+  await throwIfResNotOk(res);
+  return res;
+}
+
+/**
+ * Like apiRequest but injects the cached transaction PIN header.
+ * Use this for all PIN-protected mutations (payments, approvals, etc.).
+ */
+export async function pinProtectedRequest(
+  method: string,
+  url: string,
+  data?: unknown,
+): Promise<Response> {
+  const pin = getCachedPin();
+  const authHeaders = await getAuthHeaders();
+  const headers: Record<string, string> = {
+    ...authHeaders,
+    ...(data ? { "Content-Type": "application/json" } : {}),
+  };
+  if (pin) {
+    headers["x-transaction-pin"] = pin;
+  }
+  const res = await fetch(url, {
+    method,
+    headers,
     body: data ? JSON.stringify(data) : undefined,
   });
 

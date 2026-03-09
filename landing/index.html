@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Financiar — Modern Financial Management Platform</title>
+  <meta name="description" content="Financiar is the all-in-one financial management platform for businesses and individuals. Virtual cards, global payments, expense management, payroll, invoicing, and more." />
+  <link rel="icon" type="image/svg+xml" href="/financiar-logo.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'sans-serif'] },
+          colors: {
+            primary: { DEFAULT: '#6B2346', 50: '#fdf2f7', 100: '#fce7f1', 500: '#8B3A5E', 600: '#6B2346', 700: '#5A1D3B', 800: '#4a1830', 900: '#3d1428' },
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    .fade-in { opacity: 0; transform: translateY(24px); transition: opacity 0.7s ease, transform 0.7s ease; }
+    .fade-in.visible { opacity: 1; transform: translateY(0); }
+    .glass { background: rgba(255,255,255,0.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+    @media (prefers-color-scheme: dark) { .glass { background: rgba(15,23,42,0.7); } }
+  </style>
+</head>
+<body class="bg-white text-slate-900 font-sans antialiased">
+
+  <!-- ════ NAVBAR ════ -->
+  <nav class="fixed top-0 inset-x-0 z-50 glass border-b border-slate-200/60">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-16">
+      <a href="/" class="flex items-center gap-2.5">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary-500 flex items-center justify-center shadow-md">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        </div>
+        <span class="text-lg font-bold tracking-tight">Financiar</span>
+      </a>
+      <div class="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
+        <a href="#features" class="hover:text-primary transition-colors">Features</a>
+        <a href="#how-it-works" class="hover:text-primary transition-colors">How It Works</a>
+        <a href="#testimonials" class="hover:text-primary transition-colors">Testimonials</a>
+      </div>
+      <div class="hidden md:flex items-center gap-3">
+        <a href="https://app.thefinanciar.com/login" class="text-sm font-medium text-slate-600 hover:text-primary px-4 py-2 transition-colors">Log In</a>
+        <a href="https://app.thefinanciar.com/signup" class="text-sm font-semibold bg-primary text-white px-5 py-2.5 rounded-xl hover:bg-primary-700 transition-colors shadow-md shadow-primary/20">Get Started</a>
+      </div>
+      <button id="mobile-menu-btn" class="md:hidden p-2 text-slate-600" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+    </div>
+    <div id="mobile-menu" class="hidden md:hidden border-t border-slate-200 bg-white px-4 pb-4 space-y-3">
+      <a href="#features" class="block py-2 text-sm font-medium text-slate-600">Features</a>
+      <a href="#how-it-works" class="block py-2 text-sm font-medium text-slate-600">How It Works</a>
+      <a href="#testimonials" class="block py-2 text-sm font-medium text-slate-600">Testimonials</a>
+      <div class="pt-3 flex flex-col gap-2">
+        <a href="https://app.thefinanciar.com/login" class="text-center text-sm font-medium border border-slate-200 rounded-xl py-2.5">Log In</a>
+        <a href="https://app.thefinanciar.com/signup" class="text-center text-sm font-semibold bg-primary text-white rounded-xl py-2.5">Get Started Free</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ════ HERO ════ -->
+  <section class="pt-32 pb-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+    <div class="text-center max-w-4xl mx-auto fade-in">
+      <div class="inline-flex items-center gap-2 bg-primary/10 text-primary text-xs font-bold uppercase tracking-widest px-4 py-1.5 rounded-full mb-6">
+        <span class="w-1.5 h-1.5 bg-primary rounded-full animate-pulse"></span>
+        Now Available
+      </div>
+      <h1 class="text-4xl sm:text-5xl lg:text-7xl font-black tracking-tight leading-[1.08] mb-6">
+        Modern Financial<br/>Management for<br/>
+        <span class="bg-gradient-to-r from-primary to-pink-500 bg-clip-text text-transparent">Growing Teams</span>
+      </h1>
+      <p class="text-lg sm:text-xl text-slate-500 max-w-2xl mx-auto mb-10 leading-relaxed">
+        Virtual cards, global payments, expense management, payroll, and invoicing — all in one platform designed for businesses that move fast.
+      </p>
+      <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+        <a href="https://app.thefinanciar.com/signup" class="w-full sm:w-auto text-center bg-primary text-white font-semibold px-8 py-3.5 rounded-xl hover:bg-primary-700 transition shadow-lg shadow-primary/25 text-base">
+          Start Free Trial
+          <svg class="inline w-4 h-4 ml-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </a>
+        <a href="mailto:hello@thefinanciar.com" class="w-full sm:w-auto text-center border-2 border-slate-200 text-slate-700 font-semibold px-8 py-3.5 rounded-xl hover:border-primary/40 hover:text-primary transition text-base">
+          Book a Demo
+        </a>
+      </div>
+      <div class="flex items-center justify-center gap-6 mt-10 text-xs text-slate-400 font-medium">
+        <span class="flex items-center gap-1.5">
+          <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>
+          No credit card required
+        </span>
+        <span class="flex items-center gap-1.5">
+          <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>
+          Free for individuals
+        </span>
+        <span class="flex items-center gap-1.5">
+          <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>
+          Bank-grade security
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════ STATS ════ -->
+  <section class="py-16 bg-slate-50 border-y border-slate-100">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 fade-in">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
+        <div>
+          <p class="text-3xl sm:text-4xl font-black text-primary">$2B+</p>
+          <p class="text-sm text-slate-500 mt-1 font-medium">Processed</p>
+        </div>
+        <div>
+          <p class="text-3xl sm:text-4xl font-black text-primary">50+</p>
+          <p class="text-sm text-slate-500 mt-1 font-medium">Countries</p>
+        </div>
+        <div>
+          <p class="text-3xl sm:text-4xl font-black text-primary">10,000+</p>
+          <p class="text-sm text-slate-500 mt-1 font-medium">Teams</p>
+        </div>
+        <div>
+          <p class="text-3xl sm:text-4xl font-black text-primary">99.99%</p>
+          <p class="text-sm text-slate-500 mt-1 font-medium">Uptime</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════ FEATURES ════ -->
+  <section id="features" class="py-24 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+    <div class="text-center mb-16 fade-in">
+      <p class="text-xs font-bold uppercase tracking-widest text-primary mb-3">Features</p>
+      <h2 class="text-3xl sm:text-4xl font-black tracking-tight">Everything Your Finance Team Needs</h2>
+      <p class="text-slate-500 mt-4 max-w-2xl mx-auto">From virtual cards to global payroll, Financiar gives you complete control and visibility over every financial operation.</p>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div class="group p-6 rounded-2xl border border-slate-200 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 transition-all fade-in">
+        <div class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition">
+          <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+        </div>
+        <h3 class="font-bold text-lg mb-2">Virtual Cards</h3>
+        <p class="text-sm text-slate-500 leading-relaxed">Issue unlimited virtual cards with custom spending limits, merchant restrictions, and real-time controls.</p>
+      </div>
+      <div class="group p-6 rounded-2xl border border-slate-200 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 transition-all fade-in">
+        <div class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition">
+          <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 4 10 15 15 0 0 1-4 10 15 15 0 0 1-4-10A15 15 0 0 1 12 2z"/></svg>
+        </div>
+        <h3 class="font-bold text-lg mb-2">Global Payments</h3>
+        <p class="text-sm text-slate-500 leading-relaxed">Send and receive payments in 50+ currencies with competitive exchange rates and same-day settlement.</p>
+      </div>
+      <div class="group p-6 rounded-2xl border border-slate-200 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 transition-all fade-in">
+        <div class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition">
+          <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+        </div>
+        <h3 class="font-bold text-lg mb-2">Expense Management</h3>
+        <p class="text-sm text-slate-500 leading-relaxed">Automate expense tracking, receipt capture, and approval workflows to eliminate manual work.</p>
+      </div>
+      <div class="group p-6 rounded-2xl border border-slate-200 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 transition-all fade-in">
+        <div class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition">
+          <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15l3 3 3-3"/></svg>
+        </div>
+        <h3 class="font-bold text-lg mb-2">Bill Payments</h3>
+        <p class="text-sm text-slate-500 leading-relaxed">Schedule and automate vendor payments with smart due-date reminders and batch processing.</p>
+      </div>
+      <div class="group p-6 rounded-2xl border border-slate-200 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 transition-all fade-in">
+        <div class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition">
+          <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <h3 class="font-bold text-lg mb-2">Payroll</h3>
+        <p class="text-sm text-slate-500 leading-relaxed">Run payroll across multiple countries with tax compliance, deductions, and direct deposit built in.</p>
+      </div>
+      <div class="group p-6 rounded-2xl border border-slate-200 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 transition-all fade-in">
+        <div class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition">
+          <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg>
+        </div>
+        <h3 class="font-bold text-lg mb-2">Invoicing</h3>
+        <p class="text-sm text-slate-500 leading-relaxed">Create, send, and track professional invoices with automated reminders and online payment collection.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════ HOW IT WORKS ════ -->
+  <section id="how-it-works" class="py-24 bg-slate-50 border-y border-slate-100">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-16 fade-in">
+        <p class="text-xs font-bold uppercase tracking-widest text-primary mb-3">How It Works</p>
+        <h2 class="text-3xl sm:text-4xl font-black tracking-tight">Get Started in Minutes</h2>
+        <p class="text-slate-500 mt-4 max-w-xl mx-auto">Three simple steps to transform your financial operations.</p>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div class="text-center fade-in">
+          <div class="w-14 h-14 rounded-2xl bg-primary text-white text-xl font-black flex items-center justify-center mx-auto mb-5 shadow-lg shadow-primary/25">1</div>
+          <h3 class="font-bold text-lg mb-2">Sign Up & Verify</h3>
+          <p class="text-sm text-slate-500 leading-relaxed">Create your account in minutes. Complete KYC verification with our streamlined onboarding process.</p>
+        </div>
+        <div class="text-center fade-in">
+          <div class="w-14 h-14 rounded-2xl bg-primary text-white text-xl font-black flex items-center justify-center mx-auto mb-5 shadow-lg shadow-primary/25">2</div>
+          <h3 class="font-bold text-lg mb-2">Fund & Configure</h3>
+          <p class="text-sm text-slate-500 leading-relaxed">Connect your bank accounts, set spending policies, and configure approval workflows for your team.</p>
+        </div>
+        <div class="text-center fade-in">
+          <div class="w-14 h-14 rounded-2xl bg-primary text-white text-xl font-black flex items-center justify-center mx-auto mb-5 shadow-lg shadow-primary/25">3</div>
+          <h3 class="font-bold text-lg mb-2">Manage & Scale</h3>
+          <p class="text-sm text-slate-500 leading-relaxed">Issue cards, process payments, and gain real-time visibility into every dollar across your organization.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════ TESTIMONIALS ════ -->
+  <section id="testimonials" class="py-24 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+    <div class="text-center mb-16 fade-in">
+      <p class="text-xs font-bold uppercase tracking-widest text-primary mb-3">Testimonials</p>
+      <h2 class="text-3xl sm:text-4xl font-black tracking-tight">Trusted by Finance Leaders</h2>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div class="p-6 rounded-2xl border border-slate-200 fade-in">
+        <div class="flex items-center gap-1 mb-4 text-amber-400">
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+        </div>
+        <p class="text-sm text-slate-600 leading-relaxed mb-4">"Financiar transformed how we manage our treasury operations. The visibility into cash flow across entities is exceptional."</p>
+        <div>
+          <p class="font-bold text-sm">Sarah Chen</p>
+          <p class="text-xs text-slate-400">CFO, Meridian Capital</p>
+        </div>
+      </div>
+      <div class="p-6 rounded-2xl border border-slate-200 fade-in">
+        <div class="flex items-center gap-1 mb-4 text-amber-400">
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+        </div>
+        <p class="text-sm text-slate-600 leading-relaxed mb-4">"The virtual cards and approval workflows alone saved our finance team 20 hours a week. Implementation was seamless."</p>
+        <div>
+          <p class="font-bold text-sm">Michael Roberts</p>
+          <p class="text-xs text-slate-400">VP Finance, Atlas Ventures</p>
+        </div>
+      </div>
+      <div class="p-6 rounded-2xl border border-slate-200 fade-in">
+        <div class="flex items-center gap-1 mb-4 text-amber-400">
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+        </div>
+        <p class="text-sm text-slate-600 leading-relaxed mb-4">"We evaluated six platforms before choosing Financiar. The depth of controls and reporting is unmatched for our scale."</p>
+        <div>
+          <p class="font-bold text-sm">Emily Nakamura</p>
+          <p class="text-xs text-slate-400">Head of Operations, Cerulean Group</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════ CTA ════ -->
+  <section class="py-24 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
+    <div class="max-w-3xl mx-auto text-center px-4 sm:px-6 lg:px-8 fade-in">
+      <h2 class="text-3xl sm:text-4xl font-black tracking-tight mb-4">Ready to Transform Your Finances?</h2>
+      <p class="text-slate-400 text-lg mb-8 max-w-xl mx-auto">Join thousands of businesses using Financiar to streamline financial operations and gain real-time visibility.</p>
+      <a href="https://app.thefinanciar.com/signup" class="inline-flex items-center bg-white text-slate-900 font-bold px-8 py-4 rounded-xl hover:bg-slate-100 transition shadow-2xl text-base">
+        Get Started Free
+        <svg class="w-5 h-5 ml-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </a>
+      <p class="text-xs text-slate-500 mt-4">Free plan available. No credit card required.</p>
+    </div>
+  </section>
+
+  <!-- ════ FOOTER ════ -->
+  <footer class="py-16 bg-slate-950 text-slate-400 border-t border-slate-800">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-8 mb-12">
+        <div class="col-span-2 md:col-span-1">
+          <div class="flex items-center gap-2.5 mb-4">
+            <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+              <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            </div>
+            <span class="text-white font-bold">Financiar</span>
+          </div>
+          <p class="text-sm leading-relaxed">Modern financial management for businesses and individuals.</p>
+        </div>
+        <div>
+          <h4 class="text-white font-semibold text-sm mb-4">Product</h4>
+          <ul class="space-y-2 text-sm">
+            <li><a href="#features" class="hover:text-white transition">Features</a></li>
+            <li><a href="#how-it-works" class="hover:text-white transition">How It Works</a></li>
+            <li><a href="https://app.thefinanciar.com/signup" class="hover:text-white transition">Pricing</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4 class="text-white font-semibold text-sm mb-4">Company</h4>
+          <ul class="space-y-2 text-sm">
+            <li><a href="mailto:hello@thefinanciar.com" class="hover:text-white transition">About</a></li>
+            <li><a href="mailto:careers@thefinanciar.com" class="hover:text-white transition">Careers</a></li>
+            <li><a href="mailto:press@thefinanciar.com" class="hover:text-white transition">Press</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4 class="text-white font-semibold text-sm mb-4">Legal</h4>
+          <ul class="space-y-2 text-sm">
+            <li><a href="https://app.thefinanciar.com/terms" class="hover:text-white transition">Terms of Service</a></li>
+            <li><a href="https://app.thefinanciar.com/privacy" class="hover:text-white transition">Privacy Policy</a></li>
+            <li><a href="https://app.thefinanciar.com/cookies" class="hover:text-white transition">Cookie Policy</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4 class="text-white font-semibold text-sm mb-4">Support</h4>
+          <ul class="space-y-2 text-sm">
+            <li><a href="mailto:support@thefinanciar.com" class="hover:text-white transition">Help Center</a></li>
+            <li><a href="mailto:support@thefinanciar.com" class="hover:text-white transition">Contact Us</a></li>
+            <li><a href="https://status.thefinanciar.com" class="hover:text-white transition">Status</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="pt-8 border-t border-slate-800 text-center text-xs">
+        <p>&copy; 2026 Financiar. All rights reserved.</p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Scroll reveal script -->
+  <script>
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    }, { threshold: 0.08 });
+    document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+  </script>
+</body>
+</html>

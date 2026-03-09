@@ -179,6 +179,11 @@ async function runDrizzlePush(client) {
     `ALTER TABLE payroll_entries ADD COLUMN IF NOT EXISTS country text`,
     `ALTER TABLE payroll_entries ADD COLUMN IF NOT EXISTS currency text`,
     `ALTER TABLE payroll_entries ADD COLUMN IF NOT EXISTS deduction_breakdown jsonb`,
+    `ALTER TABLE payroll_entries ADD COLUMN IF NOT EXISTS payout_destination_id text`,
+    // bills approval tracking
+    `ALTER TABLE bills ADD COLUMN IF NOT EXISTS approved_by text`,
+    `ALTER TABLE bills ADD COLUMN IF NOT EXISTS approved_at text`,
+    `ALTER TABLE bills ADD COLUMN IF NOT EXISTS reviewer_comments text`,
     // user_profiles cognito_sub + user_id (rename firebase_uid if needed)
     `DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'user_profiles' AND column_name = 'firebase_uid') THEN ALTER TABLE user_profiles RENAME COLUMN firebase_uid TO cognito_sub; END IF; END $$`,
     `ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS user_id text`,

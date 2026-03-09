@@ -83,7 +83,7 @@ const financeItems = [
 
 const managementItems = [
   { title: "Team", url: "/team", icon: Users },
-  { title: "Settings", url: "/settings", icon: Settings },
+  { title: "Settings", url: "/settings", icon: Settings, dataTour: "settings-link" },
 ];
 
 const adminItems = [
@@ -104,7 +104,7 @@ function NavGroup({
   location,
 }: {
   label: string;
-  items: typeof mainMenuItems;
+  items: Array<{ title: string; url: string; icon: any; dataTour?: string }>;
   location: string;
 }) {
   return (
@@ -117,7 +117,7 @@ function NavGroup({
           {items.map((item) => {
             const isActive = location === item.url || (item.url !== '/admin' && location.startsWith(item.url + '/'));
             return (
-              <SidebarMenuItem key={item.title}>
+              <SidebarMenuItem key={item.title} {...(item.dataTour ? { "data-tour": item.dataTour } : {})}>
                 <SidebarMenuButton
                   asChild
                   isActive={isActive}
@@ -364,7 +364,7 @@ export function AppSidebar() {
         </Link>
       </SidebarHeader>
 
-      <SidebarContent className="py-2">
+      <SidebarContent className="py-2" data-tour="sidebar">
         <SidebarGroup>
           <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/60 px-4 mb-1">
             Business

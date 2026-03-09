@@ -125,7 +125,7 @@ export default function BudgetPage() {
   });
 
   const resetForm = () => {
-    setFormData({ name: "", category: "Software", limit: "", period: "monthly" });
+    setFormData({ name: "", category: "Software", limit: "", period: "monthly", rollover: false });
   };
 
   const openEditDialog = (budget: Budget) => {
@@ -135,6 +135,7 @@ export default function BudgetPage() {
       category: budget.category,
       limit: String(budget.limit),
       period: budget.period,
+      rollover: false,
     });
     setIsOpen(true);
   };

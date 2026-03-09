@@ -11,6 +11,7 @@ import { formatCurrencyAmount } from "@/lib/constants";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -54,10 +55,12 @@ import {
   X,
   CreditCard,
   FileQuestion,
+  MessageSquare,
 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest, getAuthHeaders } from "@/lib/queryClient";
+import { queryClient, apiRequest, pinProtectedRequest, getAuthHeaders } from "@/lib/queryClient";
+import { usePinVerification } from "@/components/pin-verification-dialog";
 import type { Expense, TeamMember, Vendor, CompanySettings } from "@shared/schema";
 import { motion } from "framer-motion";
 import {
@@ -127,6 +130,7 @@ export default function Expenses() {
   const [isUploading, setIsUploading] = useState(false);
   const [selectedVendorId, setSelectedVendorId] = useState<string>("");
   const { toast } = useToast();
+  const pin = usePinVerification();
 
   // Handle quick action to open new expense dialog (runs once on mount)
   useEffect(() => {
@@ -241,7 +245,7 @@ export default function Expenses() {
 
   const approveExpense = useMutation({
     mutationFn: async ({ id, vendorId }: { id: string; vendorId?: string }) => {
-      return apiRequest("POST", `/api/expenses/${id}/approve-and-pay`, { 
+      return pinProtectedRequest("POST", `/api/expenses/${id}/approve-and-pay`, {
         approvedBy: "admin",
         vendorId,
       });
@@ -249,12 +253,13 @@ export default function Expenses() {
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/expenses"] });
       queryClient.invalidateQueries({ queryKey: ["/api/payouts"] });
-      toast({ 
-        title: "Expense Approved", 
+      toast({
+        title: "Expense Approved",
         description: data.payout ? "Payout created and queued for processing" : "Expense approved"
       });
     },
-    onError: () => {
+    onError: (error) => {
+      if (pin.handlePinError(error)) return;
       toast({ title: "Failed to approve expense", variant: "destructive" });
     },
   });
@@ -272,15 +277,34 @@ export default function Expenses() {
     },
   });
 
+  const [requestChangesId, setRequestChangesId] = useState<string | null>(null);
+  const [requestChangesComments, setRequestChangesComments] = useState("");
+
+  const requestChangesMutation = useMutation({
+    mutationFn: async ({ id, comments }: { id: string; comments: string }) => {
+      return apiRequest("POST", `/api/expenses/${id}/request-changes`, { comments });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/expenses"] });
+      toast({ title: "Changes requested", description: "The submitter has been notified to revise this expense." });
+      setRequestChangesId(null);
+      setRequestChangesComments("");
+    },
+    onError: () => {
+      toast({ title: "Failed to request changes", variant: "destructive" });
+    },
+  });
+
   const markAsPaid = useMutation({
     mutationFn: async (id: string) => {
-      return apiRequest("PATCH", `/api/expenses/${id}`, { status: "PAID" });
+      return pinProtectedRequest("PATCH", `/api/expenses/${id}`, { status: "PAID" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/expenses"] });
       toast({ title: "Expense marked as paid" });
     },
-    onError: () => {
+    onError: (error) => {
+      if (pin.handlePinError(error)) return;
       toast({ title: "Failed to update expense", variant: "destructive" });
     },
   });
@@ -453,6 +477,8 @@ export default function Expenses() {
         return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
       case "PENDING":
         return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
+      case "CHANGES_REQUESTED":
+        return "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400";
       default:
         return "";
     }
@@ -908,16 +934,29 @@ export default function Expenses() {
                         </div>
                         {expense.status === "PENDING" && (
                           <div className="flex gap-1">
-                            <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }} onClick={() => approveExpense.mutate({ id: expense.id, vendorId: expense.vendorId || undefined })} disabled={approveExpense.isPending} className="p-2 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 rounded-lg transition-colors" data-testid={`button-approve-${expense.id}`}>
+                            <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }} onClick={() => pin.requirePin(() => approveExpense.mutate({ id: expense.id, vendorId: expense.vendorId || undefined }))} disabled={approveExpense.isPending} className="p-2 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 rounded-lg transition-colors" data-testid={`button-approve-${expense.id}`}>
                               <CheckCircle className="h-4 w-4 text-emerald-600" />
+                            </motion.button>
+                            <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }} onClick={() => setRequestChangesId(expense.id)} className="p-2 hover:bg-orange-100 dark:hover:bg-orange-900/30 rounded-lg transition-colors" title="Request Changes" data-testid={`button-request-changes-${expense.id}`}>
+                              <MessageSquare className="h-4 w-4 text-orange-600" />
                             </motion.button>
                             <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }} onClick={() => rejectExpense.mutate(expense.id)} disabled={rejectExpense.isPending} className="p-2 hover:bg-rose-100 dark:hover:bg-rose-900/30 rounded-lg transition-colors" data-testid={`button-reject-${expense.id}`}>
                               <XCircle className="h-4 w-4 text-rose-600" />
                             </motion.button>
                           </div>
                         )}
+                        {expense.status === "CHANGES_REQUESTED" && (
+                          <div className="flex gap-1">
+                            <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }} onClick={() => pin.requirePin(() => approveExpense.mutate({ id: expense.id, vendorId: expense.vendorId || undefined }))} disabled={approveExpense.isPending} className="p-2 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 rounded-lg transition-colors">
+                              <CheckCircle className="h-4 w-4 text-emerald-600" />
+                            </motion.button>
+                            <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }} onClick={() => rejectExpense.mutate(expense.id)} disabled={rejectExpense.isPending} className="p-2 hover:bg-rose-100 dark:hover:bg-rose-900/30 rounded-lg transition-colors">
+                              <XCircle className="h-4 w-4 text-rose-600" />
+                            </motion.button>
+                          </div>
+                        )}
                         {expense.status === "APPROVED" && (
-                          <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }} onClick={() => markAsPaid.mutate(expense.id)} disabled={markAsPaid.isPending} className="p-2 hover:bg-cyan-100 dark:hover:bg-cyan-900/30 rounded-lg transition-colors" data-testid={`button-pay-${expense.id}`}>
+                          <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }} onClick={() => pin.requirePin(() => markAsPaid.mutate(expense.id))} disabled={markAsPaid.isPending} className="p-2 hover:bg-cyan-100 dark:hover:bg-cyan-900/30 rounded-lg transition-colors" data-testid={`button-pay-${expense.id}`}>
                             <DollarSign className="h-4 w-4 text-cyan-600" />
                           </motion.button>
                         )}
@@ -1021,6 +1060,17 @@ export default function Expenses() {
                   </div>
                 )}
 
+                {/* Reviewer Comments (when changes requested) */}
+                {(selectedExpense as any).reviewerComments && (
+                  <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-2xl p-4">
+                    <p className="text-xs text-orange-600 dark:text-orange-400 uppercase font-bold tracking-wider mb-2 flex items-center gap-1">
+                      <MessageSquare className="h-3 w-3" />
+                      Reviewer Comments
+                    </p>
+                    <p className="text-sm text-orange-800 dark:text-orange-300">{(selectedExpense as any).reviewerComments}</p>
+                  </div>
+                )}
+
                 {/* Attachments Display with Image Preview */}
                 {selectedExpense.attachments && selectedExpense.attachments.length > 0 && (
                   <div>
@@ -1115,7 +1165,7 @@ export default function Expenses() {
                 )}
 
                 <DialogFooter className="flex gap-2 flex-wrap">
-                  {selectedExpense.status === "PENDING" && (
+                  {(selectedExpense.status === "PENDING" || selectedExpense.status === "CHANGES_REQUESTED") && (
                     <>
                       <Button
                         variant="outline"
@@ -1125,9 +1175,19 @@ export default function Expenses() {
                         <XCircle className="h-4 w-4 mr-2" />
                         Reject
                       </Button>
+                      {selectedExpense.status === "PENDING" && (
+                        <Button
+                          variant="outline"
+                          className="text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-xl"
+                          onClick={() => { setRequestChangesId(selectedExpense.id); setDetailOpen(false); }}
+                        >
+                          <MessageSquare className="h-4 w-4 mr-2" />
+                          Request Changes
+                        </Button>
+                      )}
                       <Button
                         className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 rounded-xl"
-                        onClick={() => { approveExpense.mutate({ id: selectedExpense.id, vendorId: selectedExpense.vendorId || undefined }); setDetailOpen(false); }}
+                        onClick={() => pin.requirePin(() => { approveExpense.mutate({ id: selectedExpense.id, vendorId: selectedExpense.vendorId || undefined }); setDetailOpen(false); })}
                       >
                         <CheckCircle className="h-4 w-4 mr-2" />
                         Approve & Pay
@@ -1137,7 +1197,7 @@ export default function Expenses() {
                   {selectedExpense.status === "APPROVED" && (
                     <Button
                       className="bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-700 hover:to-cyan-800 rounded-xl"
-                      onClick={() => { markAsPaid.mutate(selectedExpense.id); setDetailOpen(false); }}
+                      onClick={() => pin.requirePin(() => { markAsPaid.mutate(selectedExpense.id); setDetailOpen(false); })}
                     >
                       <DollarSign className="h-4 w-4 mr-2" />
                       Mark as Paid
@@ -1277,6 +1337,45 @@ export default function Expenses() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Request Changes Dialog */}
+      <Dialog open={!!requestChangesId} onOpenChange={(open) => { if (!open) { setRequestChangesId(null); setRequestChangesComments(""); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-orange-500" />
+              Request Changes
+            </DialogTitle>
+            <DialogDescription>
+              Describe what changes the submitter needs to make before this expense can be approved.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Comments</Label>
+            <Textarea
+              value={requestChangesComments}
+              onChange={(e) => setRequestChangesComments(e.target.value)}
+              placeholder="e.g. Please attach the original receipt and correct the amount..."
+              rows={4}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setRequestChangesId(null); setRequestChangesComments(""); }}>
+              Cancel
+            </Button>
+            <Button
+              variant="default"
+              className="bg-orange-600 hover:bg-orange-700"
+              disabled={!requestChangesComments.trim() || requestChangesMutation.isPending}
+              onClick={() => requestChangesId && requestChangesMutation.mutate({ id: requestChangesId, comments: requestChangesComments })}
+            >
+              {requestChangesMutation.isPending ? "Sending..." : "Request Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {pin.PinDialogs}
     </PageWrapper>
   );
 }

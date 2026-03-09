@@ -11,9 +11,9 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
-import { apiRequest, queryClient, getAuthHeaders, sanitizeErrorMessage } from "@/lib/queryClient";
+import { apiRequest, pinProtectedRequest, queryClient, getAuthHeaders, sanitizeErrorMessage } from "@/lib/queryClient";
 import { getCurrencySymbol, formatCurrencyAmount, isPaystackRegion, PAYMENT_LIMITS } from "@/lib/constants";
-import { PinVerificationDialog, usePinVerification } from "@/components/pin-verification-dialog";
+import { usePinVerification } from "@/components/pin-verification-dialog";
 import {
   Dialog,
   DialogContent,
@@ -107,7 +107,7 @@ export default function Transactions() {
   const [fundingAmount, setFundingAmount] = useState("");
   const [fundingMethod, setFundingMethod] = useState<"card" | "bank">("card");
 
-  const [transferData, setTransferData] = useState({ recipient: "", amount: "", note: "", bankCode: "" });
+  const [transferData, setTransferData] = useState({ recipient: "", amount: "", note: "", bankCode: "", accountName: "", routingNumber: "" });
   const [transferValidation, setTransferValidation] = useState<{ name: string; validated: boolean } | null>(null);
   const [isValidatingTransfer, setIsValidatingTransfer] = useState(false);
 
@@ -119,7 +119,7 @@ export default function Transactions() {
   const [recordForm, setRecordForm] = useState({ type: "Deposit", amount: "", description: "" });
 
   const searchParams = useSearch();
-  const { isPinRequired, isPinDialogOpen, setIsPinDialogOpen, requirePin, handlePinVerified } = usePinVerification();
+  const pin = usePinVerification();
 
   useEffect(() => {
     const params = new URLSearchParams(searchParams);
@@ -266,14 +266,14 @@ export default function Transactions() {
       if (limits && (numAmount < limits.min || numAmount > limits.max)) {
         throw new Error(`Amount must be between ${formatCurrencyAmount(limits.min, currency)} and ${formatCurrencyAmount(limits.max, currency)}`);
       }
-      return apiRequest("POST", "/api/payment/transfer", {
+      return pinProtectedRequest("POST", "/api/payment/transfer", {
         amount: numAmount,
         countryCode,
         reason: data.note || "Money transfer",
         recipientDetails: {
           accountNumber: data.recipient,
-          bankCode: data.bankCode,
-          accountName: transferValidation?.name || "Recipient",
+          bankCode: data.bankCode || data.routingNumber || "",
+          accountName: transferValidation?.name || data.accountName || "Recipient",
           currency,
         }
       });
@@ -283,10 +283,11 @@ export default function Transactions() {
       queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
       toast({ title: "Transfer sent successfully", description: `${currencySymbol}${transferData.amount} sent to ${transferValidation?.name || transferData.recipient}` });
       setIsTransferOpen(false);
-      setTransferData({ recipient: "", amount: "", note: "", bankCode: "" });
+      setTransferData({ recipient: "", amount: "", note: "", bankCode: "", accountName: "", routingNumber: "" });
       setTransferValidation(null);
     },
     onError: (error: any) => {
+      if (pin.handlePinError(error, () => sendTransferMutation.mutate(transferData))) return;
       toast({ title: "Transfer failed", description: sanitizeErrorMessage(error), variant: "destructive" });
     },
   });
@@ -298,7 +299,7 @@ export default function Transactions() {
       if (!withdrawValidation?.validated || !withdrawData.accountNumber || !withdrawData.bankCode) {
         throw new Error("Please verify the bank account first");
       }
-      return apiRequest("POST", "/api/wallet/payout", {
+      return pinProtectedRequest("POST", "/api/wallet/payout", {
         amount: numAmount,
         countryCode,
         recipientDetails: {
@@ -319,6 +320,7 @@ export default function Transactions() {
       setWithdrawValidation(null);
     },
     onError: (error: any) => {
+      if (pin.handlePinError(error, () => withdrawMutation.mutate(withdrawAmount))) return;
       toast({ title: "Withdrawal failed", description: sanitizeErrorMessage(error), variant: "destructive" });
     },
   });
@@ -750,50 +752,78 @@ export default function Transactions() {
               <p className="text-2xl font-bold">{formatCurrencyAmount(balances?.local || 0, currency)}</p>
             </div>
 
-            <div className="space-y-2">
-              <Label>Select Bank</Label>
-              <Select value={transferData.bankCode} onValueChange={(v) => { setTransferData({ ...transferData, bankCode: v }); setTransferValidation(null); }}>
-                <SelectTrigger data-testid="select-transfer-bank"><SelectValue placeholder="Choose a bank" /></SelectTrigger>
-                <SelectContent className="max-h-60">
-                  {banks?.map((bank) => (
-                    <SelectItem key={bank.code} value={bank.code}>{bank.name}</SelectItem>
-                  )) || (
-                    <>
-                      <SelectItem value="044">Access Bank</SelectItem>
-                      <SelectItem value="058">GTBank</SelectItem>
-                      <SelectItem value="033">UBA</SelectItem>
-                      <SelectItem value="011">First Bank</SelectItem>
-                      <SelectItem value="057">Zenith Bank</SelectItem>
-                    </>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Account Number</Label>
-              <div className="flex gap-2">
-                <Input
-                  value={transferData.recipient}
-                  onChange={(e) => { setTransferData({ ...transferData, recipient: e.target.value }); setTransferValidation(null); }}
-                  placeholder="Enter 10-digit account number"
-                  className="flex-1"
-                  data-testid="input-transfer-account"
-                />
-                <Button variant="outline" onClick={validateTransferAccount} disabled={isValidatingTransfer || !transferData.recipient || !transferData.bankCode} data-testid="button-verify-transfer">
-                  {isValidatingTransfer ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
-                </Button>
-              </div>
-            </div>
-
-            {transferValidation?.validated && (
-              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-center gap-2">
-                <BadgeCheck className="h-5 w-5 text-emerald-600 shrink-0" />
-                <div>
-                  <p className="text-xs text-muted-foreground">Account Name</p>
-                  <p className="font-bold text-emerald-700 dark:text-emerald-400">{transferValidation.name}</p>
+            {isPaystack ? (
+              <>
+                <div className="space-y-2">
+                  <Label>Select Bank</Label>
+                  <Select value={transferData.bankCode} onValueChange={(v) => { setTransferData({ ...transferData, bankCode: v }); setTransferValidation(null); }}>
+                    <SelectTrigger data-testid="select-transfer-bank"><SelectValue placeholder="Choose a bank" /></SelectTrigger>
+                    <SelectContent className="max-h-60">
+                      {banks?.map((bank) => (
+                        <SelectItem key={bank.code} value={bank.code}>{bank.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              </div>
+
+                <div className="space-y-2">
+                  <Label>Account Number</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={transferData.recipient}
+                      onChange={(e) => { setTransferData({ ...transferData, recipient: e.target.value }); setTransferValidation(null); }}
+                      placeholder="Enter 10-digit account number"
+                      className="flex-1"
+                      data-testid="input-transfer-account"
+                    />
+                    <Button variant="outline" onClick={validateTransferAccount} disabled={isValidatingTransfer || !transferData.recipient || !transferData.bankCode} data-testid="button-verify-transfer">
+                      {isValidatingTransfer ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
+                    </Button>
+                  </div>
+                </div>
+
+                {transferValidation?.validated && (
+                  <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-center gap-2">
+                    <BadgeCheck className="h-5 w-5 text-emerald-600 shrink-0" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Account Name</p>
+                      <p className="font-bold text-emerald-700 dark:text-emerald-400">{transferValidation.name}</p>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label>Account Holder Name</Label>
+                  <Input
+                    value={transferData.accountName}
+                    onChange={(e) => setTransferData({ ...transferData, accountName: e.target.value })}
+                    placeholder="Full name on the bank account"
+                    data-testid="input-transfer-holder-name"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>{countryCode === "US" || countryCode === "CA" ? "Routing Number" : countryCode === "GB" ? "Sort Code" : "IBAN / BIC"}</Label>
+                  <Input
+                    value={transferData.routingNumber}
+                    onChange={(e) => setTransferData({ ...transferData, routingNumber: e.target.value })}
+                    placeholder={countryCode === "US" ? "9-digit routing number" : countryCode === "GB" ? "6-digit sort code" : "IBAN or BIC code"}
+                    data-testid="input-transfer-routing"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Account Number</Label>
+                  <Input
+                    value={transferData.recipient}
+                    onChange={(e) => setTransferData({ ...transferData, recipient: e.target.value })}
+                    placeholder={countryCode === "US" ? "Account number" : countryCode === "GB" ? "8-digit account number" : "Account number or IBAN"}
+                    data-testid="input-transfer-account"
+                  />
+                </div>
+              </>
             )}
 
             <div className="space-y-2">
@@ -840,8 +870,8 @@ export default function Transactions() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsTransferOpen(false)}>Cancel</Button>
             <Button
-              onClick={() => requirePin(() => sendTransferMutation.mutate(transferData))}
-              disabled={!transferData.recipient || !transferData.amount || sendTransferMutation.isPending}
+              onClick={() => pin.requirePin(() => sendTransferMutation.mutate(transferData))}
+              disabled={!transferData.recipient || !transferData.amount || sendTransferMutation.isPending || (isPaystack ? !transferValidation?.validated : (!transferData.accountName || !transferData.routingNumber))}
               data-testid="button-confirm-transfer"
             >
               {sendTransferMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
@@ -940,7 +970,7 @@ export default function Transactions() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsWithdrawOpen(false)}>Cancel</Button>
             <Button
-              onClick={() => requirePin(() => withdrawMutation.mutate(withdrawAmount))}
+              onClick={() => pin.requirePin(() => withdrawMutation.mutate(withdrawAmount))}
               disabled={!withdrawAmount || !withdrawValidation?.validated || withdrawMutation.isPending || parseFloat(withdrawAmount) > parseFloat(String(balances?.local || 0))}
               data-testid="button-confirm-withdraw"
             >
@@ -1013,11 +1043,7 @@ export default function Transactions() {
         </DialogContent>
       </Dialog>
 
-      <PinVerificationDialog
-        open={isPinDialogOpen}
-        onOpenChange={setIsPinDialogOpen}
-        onVerified={handlePinVerified}
-      />
+      {pin.PinDialogs}
     </PageWrapper>
   );
 }
