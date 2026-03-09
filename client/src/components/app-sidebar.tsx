@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation, Link } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { useCompany } from "@/lib/company-context";
+import { SubscriptionBanner } from "@/components/subscription-gate";
 import { useQueryClient, useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -383,6 +384,7 @@ export function AppSidebar() {
         )}
       </SidebarContent>
 
+      <SubscriptionBanner />
       <SidebarFooter className="border-t border-sidebar-border p-3">
         <div className="flex items-center gap-3 p-2 rounded-xl hover:bg-muted/50 transition-colors group">
           <Avatar className="h-9 w-9 ring-2 ring-primary/10 transition-all group-hover:ring-primary/20">

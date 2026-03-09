@@ -15,8 +15,13 @@ import {
   User, Building2, CheckCircle2,
   ArrowRight, ArrowLeft, Shield, Globe, Loader2,
   Sparkles, LayoutDashboard, PieChart, ShieldCheck,
+  CreditCard, MapPin, Calendar, Phone, Fingerprint,
+  Landmark,
 } from "lucide-react";
-import { SUPPORTED_COUNTRIES, getCurrencyForCountry } from "@/lib/constants";
+import {
+  SUPPORTED_COUNTRIES, getCurrencyForCountry, getPrimaryIdForCountry,
+  isPaystackRegion,
+} from "@/lib/constants";
 
 const COUNTRIES = SUPPORTED_COUNTRIES.map(c => ({ code: c.code, name: c.name }));
 
@@ -46,9 +51,9 @@ const BUSINESS_INDUSTRIES = [
 
 const TEAM_SIZES = [
   { value: "1", label: "Just me" },
-  { value: "2-10", label: "2–10" },
-  { value: "11-50", label: "11–50" },
-  { value: "51-200", label: "51–200" },
+  { value: "2-10", label: "2-10" },
+  { value: "11-50", label: "11-50" },
+  { value: "51-200", label: "51-200" },
   { value: "200+", label: "200+" },
 ];
 
@@ -58,17 +63,24 @@ interface FormData {
   country: string;
   currency: string;
   phoneNumber: string;
+  dateOfBirth: string;
   isBusinessAccount: boolean;
   businessName: string;
   businessType: string;
   businessIndustry: string;
   teamSize: string;
+  idNumber: string;
+  addressLine1: string;
+  city: string;
+  state: string;
+  postalCode: string;
 }
 
 const STEPS = [
   { id: 1, title: "Account Type", icon: User, description: "Choose your account type" },
   { id: 2, title: "Profile", icon: Globe, description: "Your basic details" },
-  { id: 3, title: "You're In!", icon: CheckCircle2, description: "Start using Financiar" },
+  { id: 3, title: "Verification", icon: Fingerprint, description: "Identity & address" },
+  { id: 4, title: "All Set!", icon: CheckCircle2, description: "Start using Financiar" },
 ];
 
 export default function Onboarding() {
@@ -77,6 +89,9 @@ export default function Onboarding() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [currentStep, setCurrentStep] = useState(1);
+  const [bvnVerified, setBvnVerified] = useState(false);
+  const [bvnVerifying, setBvnVerifying] = useState(false);
+  const [onboardingResult, setOnboardingResult] = useState<any>(null);
 
   const [formData, setFormData] = useState<FormData>({
     firstName: "",
@@ -84,21 +99,27 @@ export default function Onboarding() {
     country: "",
     currency: "",
     phoneNumber: "",
+    dateOfBirth: "",
     isBusinessAccount: false,
     businessName: "",
     businessType: "",
     businessIndustry: "",
     teamSize: "",
+    idNumber: "",
+    addressLine1: "",
+    city: "",
+    state: "",
+    postalCode: "",
   });
 
-  // Persist form data to sessionStorage for resume
+  // Persist form data to sessionStorage
   useEffect(() => {
     const saved = sessionStorage.getItem("financiar_onboarding_form");
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         setFormData(prev => ({ ...prev, ...parsed }));
-        if (parsed._step && parsed._step <= 3) setCurrentStep(parsed._step);
+        if (parsed._step && parsed._step <= 4) setCurrentStep(parsed._step);
       } catch {}
     }
   }, []);
@@ -118,7 +139,7 @@ export default function Onboarding() {
     }
   }, [formData.country]);
 
-  // Pre-fill name from user account if available
+  // Pre-fill name from user account
   useEffect(() => {
     if (user?.name) {
       const parts = user.name.split(" ");
@@ -157,36 +178,37 @@ export default function Onboarding() {
     enabled: !!user?.id,
   });
 
-  const submitProfileMutation = useMutation({
+  const completeOnboardingMutation = useMutation({
     mutationFn: async (data: FormData) => {
-      const profileData = {
-        cognitoSub: user?.id,
-        email: user?.email || "",
+      const res = await apiRequest("POST", "/api/onboarding/complete", {
         firstName: data.firstName,
         lastName: data.lastName,
-        displayName: `${data.firstName} ${data.lastName}`.trim(),
         country: data.country,
-        currency: data.currency,
         phoneNumber: data.phoneNumber,
+        dateOfBirth: data.dateOfBirth,
         isBusinessAccount: data.isBusinessAccount,
         businessName: data.businessName || undefined,
         businessType: data.businessType || undefined,
         businessIndustry: data.businessIndustry || undefined,
         teamSize: data.teamSize || undefined,
-        onboardingCompleted: true,
-        onboardingStep: 3,
-      };
-      const res = await apiRequest("POST", "/api/user-profile", profileData);
+        idNumber: data.idNumber,
+        addressLine1: data.addressLine1,
+        city: data.city,
+        state: data.state,
+        postalCode: data.postalCode,
+      });
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
+      setOnboardingResult(result);
       sessionStorage.removeItem("financiar_onboarding_form");
       queryClient.invalidateQueries({ queryKey: ["/api/user-profile"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription"] });
       toast({
-        title: "Welcome to Financiar! 🎉",
-        description: "Your profile is set up. Let's get started!",
+        title: "Welcome to Financiar!",
+        description: "Your account is ready. Let's get started!",
       });
-      setCurrentStep(3);
+      setCurrentStep(4);
     },
     onError: (error: Error) => {
       toast({
@@ -209,19 +231,46 @@ export default function Onboarding() {
         }
         return true;
       case 2:
-        return !!(formData.firstName && formData.lastName && formData.country && formData.phoneNumber);
+        return !!(formData.firstName && formData.lastName && formData.country && formData.phoneNumber && formData.dateOfBirth);
+      case 3:
+        return !!(formData.idNumber && formData.addressLine1 && formData.city);
       default:
         return true;
     }
   };
 
+  const verifyBvn = async () => {
+    if (!formData.idNumber || formData.idNumber.length !== 11) {
+      toast({ title: "Invalid BVN", description: "BVN must be 11 digits", variant: "destructive" });
+      return;
+    }
+    setBvnVerifying(true);
+    try {
+      const res = await apiRequest("POST", "/api/payment/verify-account", {
+        accountNumber: formData.idNumber,
+        bankCode: "bvn",
+        type: "bvn",
+      });
+      const result = await res.json();
+      if (result.verified || result.status) {
+        setBvnVerified(true);
+        toast({ title: "BVN Verified", description: "Your identity has been confirmed" });
+      } else {
+        toast({ title: "Verification Failed", description: "Could not verify BVN. You can still continue.", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Verification Error", description: "Could not verify BVN right now. You can still continue.", variant: "destructive" });
+    } finally {
+      setBvnVerifying(false);
+    }
+  };
+
   const nextStep = () => {
     if (validateStep(currentStep)) {
-      if (currentStep === 2) {
-        // Submit profile on step 2 completion
-        submitProfileMutation.mutate(formData);
+      if (currentStep === 3) {
+        completeOnboardingMutation.mutate(formData);
       } else {
-        setCurrentStep(prev => Math.min(prev + 1, 3));
+        setCurrentStep(prev => Math.min(prev + 1, 4));
       }
     } else {
       toast({
@@ -247,44 +296,43 @@ export default function Onboarding() {
     );
   }
 
-  // Redirect to dashboard if onboarding is already complete (via useEffect to avoid render-time state update)
+  // Redirect to dashboard if onboarding is already complete
   useEffect(() => {
-    if (userProfile?.onboardingCompleted && currentStep !== 3) {
+    if (userProfile?.onboardingCompleted && currentStep !== 4) {
       setLocation("/dashboard");
     }
   }, [userProfile?.onboardingCompleted, currentStep, setLocation]);
 
-  if (userProfile?.onboardingCompleted && currentStep !== 3) {
+  if (userProfile?.onboardingCompleted && currentStep !== 4) {
     return null;
   }
 
-  const progress = (currentStep / 3) * 100;
+  const progress = (currentStep / 4) * 100;
+  const idConfig = formData.country ? getPrimaryIdForCountry(formData.country) : null;
+  const isNigeria = formData.country?.toUpperCase() === 'NG';
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-sky-50 to-white dark:from-slate-900 dark:to-slate-800">
       <div className="container max-w-3xl mx-auto px-4 py-8">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary mb-4">
-            {currentStep === 3 ? (
+            {currentStep === 4 ? (
               <Sparkles className="h-8 w-8 text-white" />
             ) : (
               <Shield className="h-8 w-8 text-white" />
             )}
           </div>
-          <h1
-            className="text-3xl font-bold font-display tracking-tight"
-            data-testid="text-onboarding-title"
-          >
-            {currentStep === 3 ? "You're All Set!" : "Let's Get You Started"}
+          <h1 className="text-3xl font-bold font-display tracking-tight">
+            {currentStep === 4 ? "You're All Set!" : "Let's Get You Started"}
           </h1>
           <p className="text-muted-foreground mt-2">
-            {currentStep === 3
+            {currentStep === 4
               ? "Your Financiar account is ready to use"
-              : "Quick setup — takes less than a minute"}
+              : "Quick setup — takes about 2 minutes"}
           </p>
         </div>
 
-        {currentStep < 3 && (
+        {currentStep < 4 && (
           <div className="mb-8">
             <div className="flex justify-between mb-2 gap-1 sm:gap-0 pb-2 sm:pb-0">
               {STEPS.map((step) => (
@@ -337,7 +385,6 @@ export default function Onboarding() {
                       !formData.isBusinessAccount ? "ring-2 ring-primary" : ""
                     }`}
                     onClick={() => updateField("isBusinessAccount", false)}
-                    data-testid="card-personal-account"
                   >
                     <CardContent className="p-6 text-center">
                       <User className="h-12 w-12 mx-auto mb-4 text-primary" />
@@ -355,7 +402,6 @@ export default function Onboarding() {
                       formData.isBusinessAccount ? "ring-2 ring-primary" : ""
                     }`}
                     onClick={() => updateField("isBusinessAccount", true)}
-                    data-testid="card-business-account"
                   >
                     <CardContent className="p-6 text-center">
                       <Building2 className="h-12 w-12 mx-auto mb-4 text-primary" />
@@ -381,7 +427,6 @@ export default function Onboarding() {
                           value={formData.businessName}
                           onChange={(e) => updateField("businessName", e.target.value)}
                           placeholder="Your company name"
-                          data-testid="input-business-name"
                         />
                       </div>
                       <div className="space-y-2">
@@ -390,7 +435,7 @@ export default function Onboarding() {
                           value={formData.businessType}
                           onValueChange={(v) => updateField("businessType", v)}
                         >
-                          <SelectTrigger data-testid="select-business-type">
+                          <SelectTrigger>
                             <SelectValue placeholder="Select type" />
                           </SelectTrigger>
                           <SelectContent>
@@ -408,7 +453,7 @@ export default function Onboarding() {
                           value={formData.businessIndustry}
                           onValueChange={(v) => updateField("businessIndustry", v)}
                         >
-                          <SelectTrigger data-testid="select-business-industry">
+                          <SelectTrigger>
                             <SelectValue placeholder="Select industry" />
                           </SelectTrigger>
                           <SelectContent>
@@ -426,7 +471,7 @@ export default function Onboarding() {
                           value={formData.teamSize}
                           onValueChange={(v) => updateField("teamSize", v)}
                         >
-                          <SelectTrigger data-testid="select-team-size">
+                          <SelectTrigger>
                             <SelectValue placeholder="How many people?" />
                           </SelectTrigger>
                           <SelectContent>
@@ -443,11 +488,7 @@ export default function Onboarding() {
                 )}
 
                 <div className="flex justify-end pt-6 border-t">
-                  <Button
-                    onClick={nextStep}
-                    disabled={!validateStep(1)}
-                    data-testid="button-next-step"
-                  >
+                  <Button onClick={nextStep} disabled={!validateStep(1)}>
                     Continue
                     <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
@@ -457,7 +498,7 @@ export default function Onboarding() {
           </Card>
         )}
 
-        {/* Step 2: Profile Basics */}
+        {/* Step 2: Profile & Location */}
         {currentStep === 2 && (
           <Card className="shadow-2xl shadow-primary/8">
             <CardHeader>
@@ -466,7 +507,7 @@ export default function Onboarding() {
                 Your Profile
               </CardTitle>
               <CardDescription>
-                A few basics so we can personalize your experience.
+                Tell us about yourself so we can personalize your experience.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -479,7 +520,6 @@ export default function Onboarding() {
                       value={formData.firstName}
                       onChange={(e) => updateField("firstName", e.target.value)}
                       placeholder="John"
-                      data-testid="input-first-name"
                     />
                   </div>
                   <div className="space-y-2">
@@ -489,7 +529,6 @@ export default function Onboarding() {
                       value={formData.lastName}
                       onChange={(e) => updateField("lastName", e.target.value)}
                       placeholder="Doe"
-                      data-testid="input-last-name"
                     />
                   </div>
                 </div>
@@ -501,7 +540,7 @@ export default function Onboarding() {
                       value={formData.country}
                       onValueChange={(v) => updateField("country", v)}
                     >
-                      <SelectTrigger data-testid="select-country">
+                      <SelectTrigger>
                         <SelectValue placeholder="Select your country" />
                       </SelectTrigger>
                       <SelectContent>
@@ -520,7 +559,6 @@ export default function Onboarding() {
                       value={formData.currency || "Auto-detected from country"}
                       disabled
                       className="bg-muted"
-                      data-testid="input-currency"
                     />
                     {formData.country && (
                       <p className="text-xs text-muted-foreground">
@@ -530,39 +568,173 @@ export default function Onboarding() {
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="phoneNumber">Phone Number *</Label>
-                  <Input
-                    id="phoneNumber"
-                    type="tel"
-                    value={formData.phoneNumber}
-                    onChange={(e) => updateField("phoneNumber", e.target.value)}
-                    placeholder="+1 (555) 123-4567"
-                    data-testid="input-phone"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Used for account security and virtual account setup
-                  </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="phoneNumber">
+                      <Phone className="h-3.5 w-3.5 inline mr-1" />
+                      Phone Number *
+                    </Label>
+                    <Input
+                      id="phoneNumber"
+                      type="tel"
+                      value={formData.phoneNumber}
+                      onChange={(e) => updateField("phoneNumber", e.target.value)}
+                      placeholder="+1 (555) 123-4567"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="dateOfBirth">
+                      <Calendar className="h-3.5 w-3.5 inline mr-1" />
+                      Date of Birth *
+                    </Label>
+                    <Input
+                      id="dateOfBirth"
+                      type="date"
+                      value={formData.dateOfBirth}
+                      onChange={(e) => updateField("dateOfBirth", e.target.value)}
+                      max={new Date(Date.now() - 18 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
+                    />
+                    <p className="text-xs text-muted-foreground">Must be 18 or older</p>
+                  </div>
                 </div>
 
                 <div className="flex justify-between pt-6 border-t">
-                  <Button
-                    variant="outline"
-                    onClick={prevStep}
-                    data-testid="button-prev-step"
-                  >
+                  <Button variant="outline" onClick={prevStep}>
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Back
+                  </Button>
+                  <Button onClick={nextStep} disabled={!validateStep(2)}>
+                    Continue
+                    <ArrowRight className="h-4 w-4 ml-2" />
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Step 3: Identity & Address */}
+        {currentStep === 3 && (
+          <Card className="shadow-2xl shadow-primary/8">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Fingerprint className="h-5 w-5" />
+                Identity & Address
+              </CardTitle>
+              <CardDescription>
+                We need to verify your identity to unlock all features and create your virtual account.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* Identity Section */}
+                <div className="space-y-2">
+                  <Label htmlFor="idNumber">
+                    <Shield className="h-3.5 w-3.5 inline mr-1" />
+                    {idConfig?.label || 'ID Number'} *
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="idNumber"
+                      value={formData.idNumber}
+                      onChange={(e) => {
+                        updateField("idNumber", e.target.value);
+                        if (bvnVerified) setBvnVerified(false);
+                      }}
+                      placeholder={idConfig?.placeholder || 'Enter ID number'}
+                      maxLength={idConfig?.maxLength || 20}
+                      className={bvnVerified ? "border-green-500" : ""}
+                    />
+                    {isNigeria && (
+                      <Button
+                        variant={bvnVerified ? "default" : "outline"}
+                        onClick={verifyBvn}
+                        disabled={bvnVerifying || bvnVerified || !formData.idNumber}
+                        className={bvnVerified ? "bg-green-600 hover:bg-green-700" : ""}
+                      >
+                        {bvnVerifying ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : bvnVerified ? (
+                          <CheckCircle2 className="h-4 w-4" />
+                        ) : (
+                          "Verify"
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                  {bvnVerified && (
+                    <p className="text-xs text-green-600 flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" /> Identity verified
+                    </p>
+                  )}
+                  {!bvnVerified && idConfig && (
+                    <p className="text-xs text-muted-foreground">
+                      Your {idConfig.label.toLowerCase()} is used for identity verification only.
+                    </p>
+                  )}
+                </div>
+
+                {/* Address Section */}
+                <div className="pt-4 border-t">
+                  <h4 className="font-medium mb-3 flex items-center gap-2">
+                    <MapPin className="h-4 w-4" />
+                    Address
+                  </h4>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="addressLine1">Street Address *</Label>
+                      <Input
+                        id="addressLine1"
+                        value={formData.addressLine1}
+                        onChange={(e) => updateField("addressLine1", e.target.value)}
+                        placeholder="123 Main Street"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="city">City *</Label>
+                        <Input
+                          id="city"
+                          value={formData.city}
+                          onChange={(e) => updateField("city", e.target.value)}
+                          placeholder="City"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="state">State / Province</Label>
+                        <Input
+                          id="state"
+                          value={formData.state}
+                          onChange={(e) => updateField("state", e.target.value)}
+                          placeholder="State"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="postalCode">Postal Code</Label>
+                        <Input
+                          id="postalCode"
+                          value={formData.postalCode}
+                          onChange={(e) => updateField("postalCode", e.target.value)}
+                          placeholder="12345"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-between pt-6 border-t">
+                  <Button variant="outline" onClick={prevStep}>
                     <ArrowLeft className="h-4 w-4 mr-2" />
                     Back
                   </Button>
                   <Button
                     onClick={nextStep}
-                    disabled={!validateStep(2) || submitProfileMutation.isPending}
-                    data-testid="button-next-step"
+                    disabled={!validateStep(3) || completeOnboardingMutation.isPending}
                   >
-                    {submitProfileMutation.isPending ? (
+                    {completeOnboardingMutation.isPending ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Setting up...
+                        Setting up your account...
                       </>
                     ) : (
                       <>
@@ -577,8 +749,8 @@ export default function Onboarding() {
           </Card>
         )}
 
-        {/* Step 3: Success */}
-        {currentStep === 3 && (
+        {/* Step 4: Success */}
+        {currentStep === 4 && (
           <Card className="shadow-2xl shadow-primary/8 overflow-hidden">
             <div className="relative bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-8 text-center">
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(107,35,70,0.15),transparent_60%)]" />
@@ -586,18 +758,63 @@ export default function Onboarding() {
                 <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-primary/10 mb-4">
                   <CheckCircle2 className="h-10 w-10 text-primary" />
                 </div>
-                <h2 className="text-2xl font-bold mb-2">Welcome to Financiar, {formData.firstName}! 🎉</h2>
+                <h2 className="text-2xl font-bold mb-2">Welcome to Financiar, {formData.firstName}!</h2>
                 <p className="text-muted-foreground max-w-md mx-auto">
-                  Your account is ready. Choose what you'd like to do first:
+                  Your account is set up with a 90-day free trial. All features are unlocked.
                 </p>
               </div>
             </div>
             <CardContent className="p-6">
+              {/* Virtual Account Details */}
+              {onboardingResult?.virtualAccount && (
+                <div className="mb-6 p-4 rounded-lg bg-primary/5 border border-primary/20">
+                  <h3 className="font-semibold flex items-center gap-2 mb-3">
+                    <Landmark className="h-4 w-4 text-primary" />
+                    Your Virtual Account
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Bank:</span>
+                      <p className="font-medium">{onboardingResult.virtualAccount.bankName}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Account Number:</span>
+                      <p className="font-medium font-mono">{onboardingResult.virtualAccount.accountNumber}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Account Name:</span>
+                      <p className="font-medium">{onboardingResult.virtualAccount.accountName}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Status:</span>
+                      <Badge variant={onboardingResult.virtualAccount.status === 'active' ? 'default' : 'secondary'}>
+                        {onboardingResult.virtualAccount.status}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Subscription Info */}
+              {onboardingResult?.subscription && (
+                <div className="mb-6 p-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+                  <h3 className="font-semibold flex items-center gap-2 mb-2">
+                    <CreditCard className="h-4 w-4 text-emerald-600" />
+                    Free Trial Active
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    Enjoy all Financiar Pro features free for 90 days. Your trial ends on{" "}
+                    <span className="font-medium text-foreground">
+                      {new Date(onboardingResult.subscription.trialEndDate).toLocaleDateString()}
+                    </span>.
+                  </p>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Card
                   className="cursor-pointer transition-all hover-elevate border-2 hover:border-primary/50"
                   onClick={() => setLocation("/budget")}
-                  data-testid="card-goto-budget"
                 >
                   <CardContent className="p-5 text-center">
                     <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 flex items-center justify-center mx-auto mb-3">
@@ -613,15 +830,14 @@ export default function Onboarding() {
                 <Card
                   className="cursor-pointer transition-all hover-elevate border-2 hover:border-primary/50"
                   onClick={() => setLocation("/settings")}
-                  data-testid="card-goto-verification"
                 >
                   <CardContent className="p-5 text-center">
                     <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500/20 to-amber-500/5 flex items-center justify-center mx-auto mb-3">
                       <ShieldCheck className="h-6 w-6 text-amber-600 dark:text-amber-400" />
                     </div>
-                    <h4 className="font-semibold text-sm">Complete Verification</h4>
+                    <h4 className="font-semibold text-sm">View Settings</h4>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Unlock all features and higher limits
+                      Manage your account and billing
                     </p>
                   </CardContent>
                 </Card>
@@ -629,7 +845,6 @@ export default function Onboarding() {
                 <Card
                   className="cursor-pointer transition-all hover-elevate border-2 border-primary/30 hover:border-primary bg-primary/5"
                   onClick={() => setLocation("/dashboard")}
-                  data-testid="card-goto-dashboard"
                 >
                   <CardContent className="p-5 text-center">
                     <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center mx-auto mb-3">
@@ -641,18 +856,6 @@ export default function Onboarding() {
                     </p>
                   </CardContent>
                 </Card>
-              </div>
-
-              <div className="mt-6 pt-4 border-t text-center">
-                <p className="text-xs text-muted-foreground">
-                  You can always complete verification later from{" "}
-                  <button
-                    onClick={() => setLocation("/settings")}
-                    className="text-primary hover:underline font-medium"
-                  >
-                    Settings → Verification
-                  </button>
-                </p>
               </div>
             </CardContent>
           </Card>

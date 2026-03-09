@@ -23,6 +23,7 @@ import { mapPaymentError, Money, paymentLogger } from './utils/paymentUtils';
 import { IdempotencyCache } from './utils/idempotencyCache';
 import { computeNextDate, runRecurringScheduler } from './recurringScheduler';
 import { registerSmsAuthRoutes } from './sms-auth';
+import { getPrimaryIdForCountry, getProviderForCountry, getCurrencyForCountry as getCountryCurrency } from '@shared/constants';
 
 // Helper to safely extract route params (Express 5 types params as string | string[])
 function param(val: string | string[]): string {
@@ -6091,6 +6092,178 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== SUBSCRIPTION MANAGEMENT ====================
+
+  // Get current subscription status
+  app.get("/api/subscription", requireAuth, async (req, res) => {
+    try {
+      const company = await resolveUserCompany(req);
+      if (!company) {
+        return res.json({ status: 'none', isActive: false, isTrialing: false, isExpired: false, trialDaysLeft: 0 });
+      }
+
+      const subscription = await storage.getSubscriptionByCompanyId(company.companyId);
+      if (!subscription) {
+        return res.json({ status: 'none', isActive: false, isTrialing: false, isExpired: false, trialDaysLeft: 0 });
+      }
+
+      const now = Date.now();
+      const trialEnd = subscription.trialEndDate ? new Date(subscription.trialEndDate).getTime() : 0;
+      const trialDaysLeft = subscription.status === 'trialing' && trialEnd > now
+        ? Math.ceil((trialEnd - now) / (24 * 60 * 60 * 1000))
+        : 0;
+
+      res.json({
+        id: subscription.id,
+        status: subscription.status,
+        isActive: subscription.status === 'trialing' || subscription.status === 'active',
+        isTrialing: subscription.status === 'trialing',
+        isExpired: subscription.status === 'expired',
+        trialDaysLeft,
+        trialEndDate: subscription.trialEndDate,
+        currentPeriodEnd: subscription.currentPeriodEnd,
+        canceledAt: subscription.canceledAt,
+        quantity: subscription.quantity,
+        unitPrice: subscription.unitPrice,
+        currency: subscription.currency,
+        provider: subscription.provider,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch subscription" });
+    }
+  });
+
+  // Activate subscription (create Stripe/Paystack subscription)
+  app.post("/api/subscription/activate", requireAuth, financialLimiter, async (req, res) => {
+    try {
+      const company = await resolveUserCompany(req);
+      if (!company) {
+        return res.status(400).json({ error: "No company context" });
+      }
+
+      const subscription = await storage.getSubscriptionByCompanyId(company.companyId);
+      if (!subscription) {
+        return res.status(404).json({ error: "No subscription found" });
+      }
+
+      if (subscription.status === 'active') {
+        return res.json({ message: "Subscription already active", subscription });
+      }
+
+      const now = new Date().toISOString();
+
+      if (subscription.provider === 'stripe') {
+        const stripe = getStripeClient();
+        if (!stripe) {
+          return res.status(503).json({ error: "Stripe not configured" });
+        }
+
+        // Create or get Stripe customer
+        let customerId = subscription.providerCustomerId;
+        if (!customerId) {
+          const settings = await storage.getCompanyAsSettings(company.companyId);
+          const customer = await stripe.customers.create({
+            email: (req as any).user?.email || settings?.companyEmail || '',
+            name: settings?.companyName || '',
+            metadata: { companyId: company.companyId },
+          });
+          customerId = customer.id;
+        }
+
+        // Create a price first, then subscription
+        const price = await stripe.prices.create({
+          currency: 'usd',
+          unit_amount: 500,
+          recurring: { interval: 'month' },
+          product_data: { name: 'Financiar Pro' },
+        });
+
+        const stripeSub = await stripe.subscriptions.create({
+          customer: customerId!,
+          items: [{ price: price.id, quantity: subscription.quantity }],
+        }) as any;
+
+        await storage.updateSubscription(subscription.id, {
+          status: 'active',
+          providerSubscriptionId: stripeSub.id,
+          providerCustomerId: customerId,
+          currentPeriodStart: new Date(stripeSub.current_period_start * 1000).toISOString(),
+          currentPeriodEnd: new Date(stripeSub.current_period_end * 1000).toISOString(),
+          updatedAt: now,
+        });
+
+        await storage.updateCompanyAsSettings(company.companyId, {
+          subscriptionStatus: 'active',
+        } as any);
+
+        res.json({ message: "Subscription activated", stripeSubscriptionId: stripeSub.id });
+      } else {
+        // Paystack subscription activation
+        const { authorizationCode, planCode } = req.body;
+        if (!authorizationCode || !planCode) {
+          return res.status(400).json({ error: "Authorization code and plan code required for Paystack" });
+        }
+
+        const profile = await storage.getUserProfileByCognitoSub((req as any).user?.cognitoSub);
+        const result = await paystackClient.createSubscription(
+          profile?.email || (req as any).user?.email || '',
+          planCode,
+          authorizationCode
+        );
+
+        await storage.updateSubscription(subscription.id, {
+          status: 'active',
+          providerSubscriptionId: result.data?.subscription_code || '',
+          updatedAt: now,
+        });
+
+        await storage.updateCompanyAsSettings(company.companyId, {
+          subscriptionStatus: 'active',
+        } as any);
+
+        res.json({ message: "Subscription activated", paystackResult: result });
+      }
+    } catch (error: any) {
+      console.error('Subscription activation error:', error);
+      res.status(500).json({ error: error.message || "Failed to activate subscription" });
+    }
+  });
+
+  // Cancel subscription
+  app.post("/api/subscription/cancel", requireAuth, async (req, res) => {
+    try {
+      const company = await resolveUserCompany(req);
+      if (!company) {
+        return res.status(400).json({ error: "No company context" });
+      }
+
+      const subscription = await storage.getSubscriptionByCompanyId(company.companyId);
+      if (!subscription) {
+        return res.status(404).json({ error: "No subscription found" });
+      }
+
+      const now = new Date().toISOString();
+
+      if (subscription.provider === 'stripe' && subscription.providerSubscriptionId) {
+        const stripe = getStripeClient();
+        if (stripe) {
+          await stripe.subscriptions.update(subscription.providerSubscriptionId, {
+            cancel_at_period_end: true,
+          });
+        }
+      }
+
+      await storage.updateSubscription(subscription.id, {
+        canceledAt: now,
+        updatedAt: now,
+      });
+
+      res.json({ message: "Subscription will be canceled at end of current period" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to cancel subscription" });
+    }
+  });
+
   app.post("/api/paystack/charge-authorization", requireAuth, financialLimiter, async (req, res) => {
     try {
       const { email, amount, authorizationCode, reference, metadata } = req.body;
@@ -6945,6 +7118,293 @@ export async function registerRoutes(
       res.status(201).json(profile);
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to create profile" });
+    }
+  });
+
+  // ==================== UNIFIED ONBOARDING ====================
+  // Handles profile, KYC, company settings, virtual account, and subscription in one call
+  app.post("/api/onboarding/complete", requireAuth, async (req, res) => {
+    try {
+      const cognitoSub = (req as any).user?.cognitoSub;
+      if (!cognitoSub) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const {
+        firstName, lastName, country, phoneNumber, dateOfBirth,
+        isBusinessAccount, businessName, businessType, businessIndustry, teamSize,
+        idNumber, addressLine1, city, state, postalCode,
+      } = req.body;
+
+      if (!firstName || !lastName || !country || !phoneNumber || !dateOfBirth || !idNumber) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+
+      // Derive currency and ID type from country
+      const currencyInfo = getCountryCurrency(country);
+      const idConfig = getPrimaryIdForCountry(country);
+      const provider = getProviderForCountry(country);
+      const now = new Date().toISOString();
+
+      // Get or create user profile
+      let profile = await storage.getUserProfileByCognitoSub(cognitoSub);
+      const userEmail = profile?.email || (req as any).user?.email || '';
+      const displayName = `${firstName} ${lastName}`.trim();
+      const fullAddress = [addressLine1, city, state, postalCode, country].filter(Boolean).join(', ');
+
+      if (profile) {
+        profile = await storage.updateUserProfile(cognitoSub, {
+          displayName,
+          phoneNumber,
+          dateOfBirth,
+          country,
+          address: fullAddress,
+          city,
+          state,
+          postalCode,
+          onboardingCompleted: true,
+          onboardingStep: 4,
+          kycStatus: 'pending_review',
+          updatedAt: now,
+        }) || profile;
+      } else {
+        profile = await storage.createUserProfile({
+          cognitoSub,
+          email: userEmail,
+          displayName,
+          phoneNumber,
+          dateOfBirth,
+          country,
+          address: fullAddress,
+          city,
+          state,
+          postalCode,
+          onboardingCompleted: true,
+          onboardingStep: 4,
+          kycStatus: 'pending_review',
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+
+      // Create KYC submission
+      let isAutoApproved = false;
+      const upperCountry = country.toUpperCase();
+
+      // For NG + BVN: auto-verify via Paystack
+      if (upperCountry === 'NG' && idConfig.key === 'bvn' && idNumber) {
+        try {
+          const bvnResult = await paystackClient.resolveBVN(idNumber);
+          if (bvnResult && bvnResult.status && bvnResult.data) {
+            const bvnFirst = (bvnResult.data.first_name || '').toLowerCase().trim();
+            const bvnLast = (bvnResult.data.last_name || '').toLowerCase().trim();
+            if (bvnFirst === firstName.toLowerCase().trim() && bvnLast === lastName.toLowerCase().trim()) {
+              isAutoApproved = true;
+            }
+          }
+        } catch (bvnErr: any) {
+          console.error('BVN verification failed (non-blocking):', bvnErr.message);
+        }
+      }
+
+      const kycStatus = isAutoApproved ? 'approved' : 'pending_review';
+
+      // Create KYC record
+      try {
+        await storage.createKycSubmission({
+          userProfileId: profile.id,
+          firstName,
+          lastName,
+          dateOfBirth,
+          nationality: upperCountry,
+          phoneNumber,
+          country: upperCountry,
+          addressLine1: addressLine1 || '',
+          city: city || '',
+          state: state || '',
+          postalCode: postalCode || '',
+          idType: idConfig.key.toUpperCase(),
+          idNumber,
+          status: kycStatus,
+          submittedAt: now,
+          ...(isBusinessAccount ? {
+            isBusinessAccount: true,
+            businessName: businessName || '',
+            businessType: businessType || '',
+          } : {}),
+          createdAt: now,
+          updatedAt: now,
+        });
+      } catch (kycErr: any) {
+        console.error('KYC submission creation failed:', kycErr.message);
+      }
+
+      // Update profile KYC status
+      if (isAutoApproved) {
+        await storage.updateUserProfile(cognitoSub, { kycStatus: 'approved' });
+      }
+
+      // Resolve company context
+      const companyContext = await resolveUserCompany(req);
+      let virtualAccountResult: any = null;
+
+      // Update company settings
+      if (companyContext?.companyId) {
+        try {
+          await storage.updateCompanyAsSettings(companyContext.companyId, {
+            currency: currencyInfo.currency,
+            countryCode: upperCountry,
+            paymentProvider: provider,
+            subscriptionStatus: 'trialing',
+            trialEndsAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+          } as any);
+        } catch (settingsErr: any) {
+          console.error('Company settings update failed:', settingsErr.message);
+        }
+
+        // Create virtual account
+        try {
+          const DVA_COUNTRIES = ['NG', 'GH'];
+          if (provider === 'paystack' && DVA_COUNTRIES.includes(upperCountry)) {
+            const dvaResult = await paymentService.createVirtualAccount(
+              userEmail, firstName, lastName, upperCountry, phoneNumber,
+              upperCountry === 'NG' ? idNumber : undefined
+            );
+            virtualAccountResult = {
+              accountNumber: dvaResult.accountNumber,
+              bankName: dvaResult.bankName || 'Wema Bank',
+              accountName: dvaResult.accountName || displayName,
+              status: dvaResult.status === 'active' || dvaResult.status === 'assigned' ? 'active' : 'pending',
+            };
+
+            // Save to DB
+            await storage.createVirtualAccount({
+              userId: cognitoSub,
+              companyId: companyContext.companyId,
+              name: `${displayName} Account`,
+              accountNumber: virtualAccountResult.accountNumber,
+              bankName: virtualAccountResult.bankName,
+              bankCode: dvaResult.bankCode || '',
+              accountName: virtualAccountResult.accountName,
+              currency: currencyInfo.currency,
+              countryCode: upperCountry,
+              provider: 'paystack',
+              providerAccountId: dvaResult.customerCode || '',
+              status: virtualAccountResult.status,
+              type: 'dedicated',
+              createdAt: now,
+            } as any);
+          } else if (provider === 'stripe') {
+            const treasuryResult = await paymentService.createStripeFinancialAccount({
+              supportedCurrencies: [currencyInfo.currency],
+            });
+            const abaAddress = (treasuryResult.financialAddresses || []).find(
+              (addr: any) => addr.type === 'aba' && addr.aba
+            );
+            virtualAccountResult = {
+              accountNumber: abaAddress?.aba?.account_number || `pending_${treasuryResult.id}`,
+              bankName: 'Stripe Treasury',
+              accountName: displayName,
+              status: treasuryResult.status === 'open' ? 'active' : 'pending',
+            };
+
+            await storage.createVirtualAccount({
+              userId: cognitoSub,
+              companyId: companyContext.companyId,
+              name: `${displayName} Account`,
+              accountNumber: virtualAccountResult.accountNumber,
+              bankName: 'Stripe Treasury',
+              bankCode: abaAddress?.aba?.routing_number || '',
+              accountName: displayName,
+              currency: currencyInfo.currency,
+              countryCode: upperCountry,
+              provider: 'stripe',
+              providerAccountId: treasuryResult.id,
+              status: virtualAccountResult.status,
+              type: 'treasury',
+              createdAt: now,
+            } as any);
+          }
+        } catch (vaErr: any) {
+          console.error('Virtual account creation failed (non-blocking):', vaErr.message);
+        }
+
+        // Create subscription (3-month trial)
+        let subscription: any = null;
+        try {
+          const trialEnd = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+          subscription = await storage.createSubscription({
+            companyId: companyContext.companyId,
+            status: 'trialing',
+            provider,
+            trialStartDate: now,
+            trialEndDate: trialEnd,
+            quantity: 1,
+            unitPrice: 500,
+            currency: 'USD',
+            createdAt: now,
+            updatedAt: now,
+          });
+        } catch (subErr: any) {
+          console.error('Subscription creation failed:', subErr.message);
+        }
+
+        // Create notification settings
+        try {
+          const existingNotif = await storage.getNotificationSettings(cognitoSub);
+          if (!existingNotif) {
+            await storage.createNotificationSettings({
+              userId: cognitoSub,
+              emailEnabled: true,
+              smsEnabled: !!phoneNumber,
+              pushEnabled: true,
+              inAppEnabled: true,
+              email: userEmail,
+              phone: phoneNumber || null,
+              pushToken: null,
+              expenseNotifications: true,
+              paymentNotifications: true,
+              billNotifications: true,
+              budgetNotifications: true,
+              securityNotifications: true,
+              marketingNotifications: false,
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
+        } catch (nsErr) {
+          console.error('Notification settings creation failed:', nsErr);
+        }
+
+        // Send welcome email
+        notificationService.sendWelcomeEmail({
+          email: userEmail,
+          name: displayName,
+        }).catch(err => console.error('Failed to send welcome email:', err));
+
+        res.json({
+          profile,
+          virtualAccount: virtualAccountResult,
+          subscription: subscription ? {
+            status: subscription.status,
+            trialEndDate: subscription.trialEndDate,
+          } : null,
+          kycStatus,
+          currency: currencyInfo,
+        });
+      } else {
+        // No company context — still return profile info
+        res.json({
+          profile,
+          virtualAccount: null,
+          subscription: null,
+          kycStatus,
+          currency: currencyInfo,
+        });
+      }
+    } catch (error: any) {
+      console.error('Onboarding complete error:', error);
+      res.status(500).json({ error: error.message || "Failed to complete onboarding" });
     }
   });
 
@@ -10475,6 +10935,53 @@ export async function registerRoutes(
       res.status(mapped.statusCode).json({ error: mapped.userMessage });
     }
   });
+
+  // ==================== TRIAL EXPIRY SCHEDULER ====================
+  // Check for expired trials every hour
+  async function checkTrialExpiry() {
+    try {
+      const { subscriptions: subTable } = await import('@shared/schema');
+      const { lt, and: andOp, eq: eqOp } = await import('drizzle-orm');
+      const { db: database } = await import('./db');
+      const now = new Date().toISOString();
+
+      // Find all trialing subscriptions where trial has ended
+      const expiredTrials = await database
+        .select()
+        .from(subTable)
+        .where(andOp(
+          eqOp(subTable.status, 'trialing'),
+          lt(subTable.trialEndDate, now)
+        ));
+
+      for (const sub of expiredTrials) {
+        await storage.updateSubscription(sub.id, {
+          status: 'expired',
+          updatedAt: now,
+        });
+        // Update company settings too
+        try {
+          await storage.updateCompanyAsSettings(sub.companyId, {
+            subscriptionStatus: 'expired',
+          } as any);
+        } catch (err) {
+          console.error(`Failed to update company settings for expired trial ${sub.companyId}:`, err);
+        }
+        console.log(`Trial expired for company ${sub.companyId}`);
+      }
+
+      if (expiredTrials.length > 0) {
+        console.log(`Processed ${expiredTrials.length} expired trials`);
+      }
+    } catch (err) {
+      console.error('Trial expiry check failed:', err);
+    }
+  }
+
+  // Run every hour
+  setInterval(checkTrialExpiry, 60 * 60 * 1000);
+  // Also run once on startup after a short delay
+  setTimeout(checkTrialExpiry, 30_000);
 
   // ==================== API 404 CATCH-ALL ====================
   // Return proper JSON 404 for any unmatched /api/* routes

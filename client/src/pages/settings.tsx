@@ -150,6 +150,164 @@ const COUNTRY_OPTIONS = [
   { code: 'CI', name: "Côte d'Ivoire", region: 'Africa' },
 ];
 
+function SubscriptionSection() {
+  const { toast } = useToast();
+  const { data: subscription, isLoading } = useQuery({
+    queryKey: ["/api/subscription"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/subscription");
+      return res.json();
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/subscription/cancel");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription"] });
+      toast({ title: "Subscription Canceled", description: "Your subscription will end at the end of the current period." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 py-4">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span className="text-sm text-muted-foreground">Loading billing info...</span>
+      </div>
+    );
+  }
+
+  if (!subscription || subscription.status === 'none') {
+    return (
+      <div className="p-4 border rounded-xl bg-slate-50 dark:bg-slate-800/50">
+        <p className="text-sm text-muted-foreground">No subscription found. Complete onboarding to start your free trial.</p>
+      </div>
+    );
+  }
+
+  const statusColors: Record<string, string> = {
+    trialing: 'bg-blue-600',
+    active: 'bg-emerald-600',
+    past_due: 'bg-amber-600',
+    canceled: 'bg-slate-500',
+    expired: 'bg-red-600',
+  };
+
+  const statusLabels: Record<string, string> = {
+    trialing: 'Free Trial',
+    active: 'Active',
+    past_due: 'Past Due',
+    canceled: 'Canceled',
+    expired: 'Expired',
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Plan Info */}
+      <div className="p-4 border rounded-xl bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-950/30 dark:to-purple-950/30">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h4 className="font-semibold">Financiar Pro</h4>
+            <p className="text-sm text-muted-foreground">$5.00 per user / month</p>
+          </div>
+          <Badge className={statusColors[subscription.status] || 'bg-slate-500'}>
+            {statusLabels[subscription.status] || subscription.status}
+          </Badge>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          {subscription.isTrialing && subscription.trialDaysLeft > 0 && (
+            <div>
+              <span className="text-muted-foreground block text-xs">Trial Ends</span>
+              <span className="font-medium">
+                {subscription.trialDaysLeft} days left
+              </span>
+            </div>
+          )}
+          <div>
+            <span className="text-muted-foreground block text-xs">Seats</span>
+            <span className="font-medium">{subscription.quantity || 1}</span>
+          </div>
+          {subscription.currentPeriodEnd && (
+            <div>
+              <span className="text-muted-foreground block text-xs">Next Billing</span>
+              <span className="font-medium">
+                {new Date(subscription.currentPeriodEnd).toLocaleDateString()}
+              </span>
+            </div>
+          )}
+          <div>
+            <span className="text-muted-foreground block text-xs">Provider</span>
+            <span className="font-medium capitalize">{subscription.provider}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Trial Warning */}
+      {subscription.isTrialing && subscription.trialDaysLeft <= 14 && (
+        <div className="p-3 border border-amber-500/20 rounded-xl bg-amber-500/5 flex items-center gap-3">
+          <Clock className="h-5 w-5 text-amber-600 shrink-0" />
+          <div className="flex-1">
+            <p className="font-medium text-sm text-amber-800 dark:text-amber-200">
+              Trial ending soon — {subscription.trialDaysLeft} days remaining
+            </p>
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              Upgrade now to avoid any interruption in service.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Expired */}
+      {subscription.isExpired && (
+        <div className="p-3 border border-red-500/20 rounded-xl bg-red-500/5 flex items-center gap-3">
+          <AlertCircle className="h-5 w-5 text-red-600 shrink-0" />
+          <div className="flex-1">
+            <p className="font-medium text-sm text-red-800 dark:text-red-200">
+              Your trial has ended
+            </p>
+            <p className="text-xs text-red-600 dark:text-red-400">
+              Subscribe to continue using all Financiar features.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex gap-3 pt-2">
+        {(subscription.isTrialing || subscription.isExpired) && (
+          <Button className="flex-1">
+            <CreditCard className="h-4 w-4 mr-2" />
+            {subscription.isExpired ? 'Subscribe Now' : 'Upgrade Now'}
+          </Button>
+        )}
+        {subscription.status === 'active' && !subscription.canceledAt && (
+          <Button
+            variant="outline"
+            onClick={() => cancelMutation.mutate()}
+            disabled={cancelMutation.isPending}
+            className="text-red-600 hover:text-red-700"
+          >
+            {cancelMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            Cancel Subscription
+          </Button>
+        )}
+        {subscription.canceledAt && (
+          <p className="text-sm text-muted-foreground py-2">
+            Subscription canceled. Access continues until end of current period.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -1436,7 +1594,7 @@ export default function Settings() {
         </GlassCard>
       </motion.div>
 
-      {/* Identity Verification (KYC) */}
+      {/* Identity Verification Status (Read-only) */}
       <motion.div variants={fadeUp} initial="hidden" animate="visible" id="verification-section">
         <GlassCard className={userProfile?.kycStatus === 'approved' ? 'border-emerald-500/30' : userProfile?.kycStatus === 'pending_review' ? 'border-blue-500/30' : 'border-amber-500/30'}>
           <div className="space-y-4">
@@ -1464,7 +1622,7 @@ export default function Settings() {
                       ? 'Your identity has been verified'
                       : userProfile?.kycStatus === 'pending_review'
                       ? 'Your verification is under review'
-                      : 'Verify your identity to unlock all features'}
+                      : 'Complete onboarding to verify your identity'}
                   </p>
                 </div>
               </div>
@@ -1477,7 +1635,7 @@ export default function Settings() {
                 : userProfile?.kycStatus === 'pending_review' ? 'bg-blue-600 text-white'
                 : ''
               }>
-                {userProfile?.kycStatus === 'approved' ? '✓ Verified'
+                {userProfile?.kycStatus === 'approved' ? 'Verified'
                   : userProfile?.kycStatus === 'pending_review' ? 'In Review'
                   : userProfile?.kycStatus === 'rejected' ? 'Rejected'
                   : 'Not Verified'}
@@ -1501,172 +1659,43 @@ export default function Settings() {
                 </div>
               </div>
             ) : (
-              <div className="space-y-4">
-                {userProfile?.kycStatus === 'rejected' && (
-                  <div className="p-3 border border-red-500/20 rounded-xl bg-red-500/5 flex items-center gap-3">
-                    <AlertCircle className="h-5 w-5 text-red-600 shrink-0" />
-                    <div>
-                      <p className="font-medium text-sm text-red-800 dark:text-red-200">Verification Rejected</p>
-                      <p className="text-xs text-red-600 dark:text-red-400">Please correct the information below and resubmit.</p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">First Name *</Label>
-                    <Input
-                      value={kycForm.firstName}
-                      onChange={(e) => setKycForm({ ...kycForm, firstName: e.target.value })}
-                      placeholder="First name"
-                      data-testid="input-kyc-first-name"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Last Name *</Label>
-                    <Input
-                      value={kycForm.lastName}
-                      onChange={(e) => setKycForm({ ...kycForm, lastName: e.target.value })}
-                      placeholder="Last name"
-                      data-testid="input-kyc-last-name"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Date of Birth *</Label>
-                    <Input
-                      type="date"
-                      value={kycForm.dateOfBirth}
-                      onChange={(e) => setKycForm({ ...kycForm, dateOfBirth: e.target.value })}
-                      data-testid="input-kyc-dob"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Nationality *</Label>
-                    <Select value={kycForm.nationality} onValueChange={(v) => setKycForm({ ...kycForm, nationality: v })}>
-                      <SelectTrigger data-testid="select-kyc-nationality">
-                        <SelectValue placeholder="Select country" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {COUNTRY_OPTIONS.map(c => (
-                          <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Phone Number *</Label>
-                    <Input
-                      value={kycForm.phoneNumber}
-                      onChange={(e) => setKycForm({ ...kycForm, phoneNumber: e.target.value })}
-                      placeholder="+1 234 567 8900"
-                      data-testid="input-kyc-phone"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Gender</Label>
-                    <Select value={kycForm.gender} onValueChange={(v) => setKycForm({ ...kycForm, gender: v })}>
-                      <SelectTrigger data-testid="select-kyc-gender">
-                        <SelectValue placeholder="Select" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="male">Male</SelectItem>
-                        <SelectItem value="female">Female</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+              <div className="p-4 border border-amber-500/20 rounded-xl bg-amber-500/5 flex items-center gap-3">
+                <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
+                <div>
+                  <p className="font-medium text-sm text-amber-800 dark:text-amber-200">
+                    {userProfile?.kycStatus === 'rejected' ? 'Verification Rejected' : 'Not Yet Verified'}
+                  </p>
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    {userProfile?.kycStatus === 'rejected'
+                      ? 'Please contact support to resubmit your verification.'
+                      : 'Identity verification is completed during onboarding.'}
+                  </p>
                 </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Address *</Label>
-                  <Input
-                    value={kycForm.addressLine1}
-                    onChange={(e) => setKycForm({ ...kycForm, addressLine1: e.target.value })}
-                    placeholder="Street address"
-                    data-testid="input-kyc-address"
-                  />
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">City *</Label>
-                    <Input value={kycForm.city} onChange={(e) => setKycForm({ ...kycForm, city: e.target.value })} placeholder="City" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">State *</Label>
-                    <Input value={kycForm.state} onChange={(e) => setKycForm({ ...kycForm, state: e.target.value })} placeholder="State" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Country *</Label>
-                    <Select value={kycForm.country} onValueChange={(v) => setKycForm({ ...kycForm, country: v })}>
-                      <SelectTrigger><SelectValue placeholder="Country" /></SelectTrigger>
-                      <SelectContent>
-                        {COUNTRY_OPTIONS.map(c => (
-                          <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Postal Code</Label>
-                    <Input value={kycForm.postalCode} onChange={(e) => setKycForm({ ...kycForm, postalCode: e.target.value })} placeholder="Zip" />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">ID Type *</Label>
-                    <Select value={kycForm.idType} onValueChange={(v) => setKycForm({ ...kycForm, idType: v })}>
-                      <SelectTrigger data-testid="select-kyc-id-type">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="national_id">National ID</SelectItem>
-                        <SelectItem value="passport">Passport</SelectItem>
-                        <SelectItem value="drivers_license">Driver's License</SelectItem>
-                        <SelectItem value="voters_card">Voter's Card</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">ID Number *</Label>
-                    <Input
-                      value={kycForm.idNumber}
-                      onChange={(e) => setKycForm({ ...kycForm, idNumber: e.target.value })}
-                      placeholder="ID number"
-                      data-testid="input-kyc-id-number"
-                    />
-                  </div>
-                </div>
-
-                {isPaystack && (
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">BVN (Bank Verification Number)</Label>
-                    <Input
-                      value={kycForm.bvnNumber}
-                      onChange={(e) => setKycForm({ ...kycForm, bvnNumber: e.target.value })}
-                      placeholder="11-digit BVN"
-                      maxLength={11}
-                      data-testid="input-kyc-bvn"
-                    />
-                    <p className="text-xs text-muted-foreground">Required for Nigerian accounts. Enables instant verification.</p>
-                  </div>
-                )}
-
-                <Button
-                  onClick={() => {
-                    setKycSubmitting(true);
-                    submitKycMutation.mutate(kycForm);
-                  }}
-                  disabled={kycSubmitting || !kycForm.firstName || !kycForm.lastName || !kycForm.dateOfBirth || !kycForm.country || !kycForm.idNumber || !kycForm.phoneNumber || !kycForm.addressLine1 || !kycForm.city || !kycForm.state}
-                  className="w-full"
-                  data-testid="button-submit-kyc"
-                >
-                  {kycSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-                  <Shield className="h-4 w-4 mr-2" />
-                  Submit Verification
-                </Button>
               </div>
             )}
+          </div>
+        </GlassCard>
+      </motion.div>
+
+      {/* Billing & Subscription */}
+      <motion.div variants={fadeUp} initial="hidden" animate="visible" id="billing-section">
+        <GlassCard>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/20 to-violet-500/10 flex items-center justify-center">
+                  <CreditCard className="h-5 w-5 text-violet-600 dark:text-violet-400" />
+                </div>
+                <div>
+                  <SectionLabel>Billing & Subscription</SectionLabel>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    Manage your Financiar Pro subscription
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <SubscriptionSection />
           </div>
         </GlassCard>
       </motion.div>

@@ -104,6 +104,64 @@ export function formatCurrencyAmount(amount: number | string, currency: string):
   return `${sym}${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// ── Primary ID per country (one ID type for verification) ───────
+
+export interface PrimaryIdConfig {
+  key: string;
+  label: string;
+  placeholder: string;
+  maxLength: number;
+  /** Pattern hint for validation (informational, not enforced on client) */
+  pattern?: string;
+}
+
+export const PRIMARY_ID_BY_COUNTRY: Record<string, PrimaryIdConfig> = {
+  // Africa — Paystack
+  NG: { key: 'bvn', label: 'Bank Verification Number (BVN)', placeholder: '22012345678', maxLength: 11, pattern: '^\\d{11}$' },
+  GH: { key: 'ghana_card', label: 'Ghana Card Number', placeholder: 'GHA-XXXXXXXXX-X', maxLength: 15 },
+  ZA: { key: 'sa_id', label: 'South African ID Number', placeholder: '13-digit ID number', maxLength: 13, pattern: '^\\d{13}$' },
+  KE: { key: 'national_id', label: 'National ID Number', placeholder: '12345678', maxLength: 8, pattern: '^\\d{6,8}$' },
+  EG: { key: 'national_id', label: 'National ID Number', placeholder: '14-digit ID number', maxLength: 14, pattern: '^\\d{14}$' },
+  RW: { key: 'national_id', label: 'National ID Number', placeholder: '1199780012345', maxLength: 16, pattern: '^\\d{16}$' },
+  CI: { key: 'cni', label: "Carte Nationale d'Identité", placeholder: 'ID number', maxLength: 12 },
+
+  // North America — Stripe
+  US: { key: 'ssn', label: 'Social Security Number (SSN)', placeholder: 'XXX-XX-XXXX', maxLength: 11, pattern: '^\\d{3}-?\\d{2}-?\\d{4}$' },
+  CA: { key: 'sin', label: 'Social Insurance Number (SIN)', placeholder: 'XXX-XXX-XXX', maxLength: 11, pattern: '^\\d{3}-?\\d{3}-?\\d{3}$' },
+
+  // Oceania
+  AU: { key: 'tfn', label: 'Tax File Number (TFN)', placeholder: '12 345 678', maxLength: 11, pattern: '^\\d{8,9}$' },
+
+  // UK
+  GB: { key: 'ni_number', label: 'National Insurance Number', placeholder: 'AB 12 34 56 C', maxLength: 13 },
+
+  // Europe — use passport or national ID
+  DE: { key: 'national_id', label: 'Personalausweisnummer (ID Number)', placeholder: 'ID or passport number', maxLength: 20 },
+  FR: { key: 'national_id', label: "Carte Nationale d'Identité", placeholder: 'ID or passport number', maxLength: 20 },
+  ES: { key: 'national_id', label: 'DNI / NIE Number', placeholder: 'ID or passport number', maxLength: 20 },
+  IT: { key: 'national_id', label: 'Carta d\'Identità Number', placeholder: 'ID or passport number', maxLength: 20 },
+  NL: { key: 'national_id', label: 'BSN / ID Number', placeholder: 'ID or passport number', maxLength: 20 },
+  BE: { key: 'national_id', label: 'National Register Number', placeholder: 'ID or passport number', maxLength: 20 },
+  AT: { key: 'national_id', label: 'Personalausweis Number', placeholder: 'ID or passport number', maxLength: 20 },
+  CH: { key: 'national_id', label: 'Identity Card / Passport Number', placeholder: 'ID or passport number', maxLength: 20 },
+  SE: { key: 'national_id', label: 'Personnummer', placeholder: 'YYYYMMDD-XXXX', maxLength: 13 },
+  NO: { key: 'national_id', label: 'Fødselsnummer', placeholder: 'DDMMYYXXXXX', maxLength: 11 },
+  DK: { key: 'national_id', label: 'CPR-nummer', placeholder: 'DDMMYY-XXXX', maxLength: 11 },
+  FI: { key: 'national_id', label: 'Henkilötunnus', placeholder: 'DDMMYY-XXXX', maxLength: 11 },
+  IE: { key: 'national_id', label: 'PPS Number', placeholder: '1234567AB', maxLength: 10 },
+  PT: { key: 'national_id', label: 'Cartão de Cidadão', placeholder: 'ID number', maxLength: 20 },
+};
+
+/** Get the primary ID config for a country code. Falls back to generic passport. */
+export function getPrimaryIdForCountry(countryCode: string): PrimaryIdConfig {
+  return PRIMARY_ID_BY_COUNTRY[countryCode.toUpperCase()] || {
+    key: 'passport',
+    label: 'Passport Number',
+    placeholder: 'Passport number',
+    maxLength: 20,
+  };
+}
+
 // ── Payment limits ──────────────────────────────────────────────
 
 export const PAYMENT_LIMITS: Record<string, { min: number; max: number }> = {

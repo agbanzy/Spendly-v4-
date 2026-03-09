@@ -542,6 +542,8 @@ export const companySettings = pgTable("company_settings", {
   invoiceTerms: text("invoice_terms").default('Payment due within 30 days'),
   showLogoOnInvoice: boolean("show_logo_on_invoice").notNull().default(true),
   showLogoOnReceipts: boolean("show_logo_on_receipts").notNull().default(true),
+  subscriptionStatus: text("subscription_status").notNull().default('trialing'),
+  trialEndsAt: text("trial_ends_at"),
 });
 
 // KYC Verification Status enum
@@ -916,6 +918,40 @@ export const adminSettings = pgTable("admin_settings", {
   updatedAt: text("updated_at").notNull().default(sql`now()`),
 });
 
+// Subscription Status enum
+export const SubscriptionStatus = {
+  TRIALING: 'trialing',
+  ACTIVE: 'active',
+  PAST_DUE: 'past_due',
+  CANCELED: 'canceled',
+  EXPIRED: 'expired',
+} as const;
+export type SubscriptionStatus = typeof SubscriptionStatus[keyof typeof SubscriptionStatus];
+
+// Subscriptions table
+export const subscriptions = pgTable("subscriptions", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  companyId: text("company_id").notNull().references(() => companies.id, { onDelete: 'cascade' }),
+  status: text("status").notNull().default('trialing'),
+  provider: text("provider").notNull().default('stripe'), // stripe | paystack
+  providerSubscriptionId: text("provider_subscription_id"),
+  providerCustomerId: text("provider_customer_id"),
+  providerPlanId: text("provider_plan_id"),
+  trialStartDate: text("trial_start_date"),
+  trialEndDate: text("trial_end_date"),
+  currentPeriodStart: text("current_period_start"),
+  currentPeriodEnd: text("current_period_end"),
+  canceledAt: text("canceled_at"),
+  quantity: integer("quantity").notNull().default(1), // seat count
+  unitPrice: integer("unit_price").notNull().default(500), // $5.00 in cents
+  currency: text("currency").notNull().default('USD'),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+}, (t) => [
+  index("subscriptions_company_id_idx").on(t.companyId),
+]);
+
 // ==================== INSERT SCHEMAS ====================
 
 export const insertUserSchema = createInsertSchema(users).pick({
@@ -958,6 +994,7 @@ export const insertAdminSettingsSchema = createInsertSchema(adminSettings).omit(
 export const insertCompanySchema = createInsertSchema(companies).omit({ id: true });
 export const insertCompanyMemberSchema = createInsertSchema(companyMembers).omit({ id: true });
 export const insertCompanyInvitationSchema = createInsertSchema(companyInvitations).omit({ id: true });
+export const insertSubscriptionSchema = createInsertSchema(subscriptions).omit({ id: true });
 
 // ==================== TYPES ====================
 
@@ -1070,6 +1107,9 @@ export type CompanyInvitation = typeof companyInvitations.$inferSelect;
 
 export type CompanyBalances = typeof companyBalances.$inferSelect;
 export type CompanySettings = typeof companySettings.$inferSelect;
+
+export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
+export type Subscription = typeof subscriptions.$inferSelect;
 
 // Legacy interface for AI Insights (computed, not stored)
 export interface AIInsight {

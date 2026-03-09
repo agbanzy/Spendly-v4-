@@ -17,8 +17,10 @@ export {
   getBankDetailFormat,
   getBankDetailLabel,
   getBankListKey,
+  PRIMARY_ID_BY_COUNTRY,
+  getPrimaryIdForCountry,
 } from '@shared/constants';
-export type { CountryConfig, RegionConfig, BankDetailFormat } from '@shared/constants';
+export type { CountryConfig, RegionConfig, BankDetailFormat, PrimaryIdConfig } from '@shared/constants';
 
 // Legacy re-exports for backward compatibility
 export const AFRICAN_COUNTRIES = ['NG', 'GH', 'KE', 'ZA', 'EG', 'RW', 'CI'] as const;

@@ -9,6 +9,7 @@ import {
   wallets, walletTransactions, exchangeRates, exchangeRateSettings, payoutDestinations, payouts, fundingSources, adminSettings,
   companies, companyMembers, companyInvitations,
   analyticsSnapshots, businessInsights,
+  subscriptions,
   type User, type InsertUser, type Expense, type Transaction, type Bill, 
   type Budget, type VirtualCard, type TeamMember, type PayrollEntry, 
   type Invoice, type Vendor, type Report, type CardTransaction, 
@@ -32,6 +33,7 @@ import {
   processedWebhooks,
   type CreateTransaction, type CreateExpense, type CreateBill,
   type CreatePayroll, type CreateTeamMember,
+  type Subscription, type InsertSubscription,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -289,6 +291,11 @@ export interface IStorage {
   getBusinessInsights(category?: string): Promise<BusinessInsight[]>;
   createBusinessInsight(insight: InsertBusinessInsight): Promise<BusinessInsight>;
   clearBusinessInsights(): Promise<void>;
+
+  // Subscriptions
+  getSubscriptionByCompanyId(companyId: string): Promise<Subscription | undefined>;
+  createSubscription(subscription: InsertSubscription): Promise<Subscription>;
+  updateSubscription(id: string, data: Partial<Subscription>): Promise<Subscription | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -2371,6 +2378,22 @@ export class DatabaseStorage implements IStorage {
 
   async clearBusinessInsights(): Promise<void> {
     await db.update(businessInsights).set({ isActive: false } as any);
+  }
+
+  // ==================== SUBSCRIPTIONS ====================
+  async getSubscriptionByCompanyId(companyId: string): Promise<Subscription | undefined> {
+    const result = await db.select().from(subscriptions).where(eq(subscriptions.companyId, companyId)).limit(1);
+    return result[0];
+  }
+
+  async createSubscription(subscription: InsertSubscription): Promise<Subscription> {
+    const result = await db.insert(subscriptions).values(subscription as any).returning();
+    return result[0];
+  }
+
+  async updateSubscription(id: string, data: Partial<Subscription>): Promise<Subscription | undefined> {
+    const result = await db.update(subscriptions).set({ ...data, updatedAt: new Date().toISOString() } as any).where(eq(subscriptions.id, id)).returning();
+    return result[0];
   }
 }
 
