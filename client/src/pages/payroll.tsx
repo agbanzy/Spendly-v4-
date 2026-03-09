@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, pinProtectedRequest, queryClient } from "@/lib/queryClient";
 import { usePinVerification } from "@/components/pin-verification-dialog";
-import { getCurrencySymbol, formatCurrencyAmount } from "@/lib/constants";
+import { getCurrencySymbol, formatCurrencyAmount, isPaystackRegion, SUPPORTED_COUNTRIES, getBankDetailFormat, getBankDetailLabel, getCountryConfig } from "@/lib/constants";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import {
@@ -47,11 +47,15 @@ import {
   Eye,
   Printer,
   TrendingUp,
+  Landmark,
+  CheckCircle,
+  ShieldCheck,
 } from "lucide-react";
-import type { PayrollEntry } from "@shared/schema";
+import type { PayrollEntry, CompanySettings } from "@shared/schema";
 
 interface Settings {
   currency: string;
+  countryCode?: string;
 }
 
 // Currency symbols are now imported from constants
@@ -95,8 +99,11 @@ export default function PayrollPage() {
     deductions: "",
     payDate: new Date().toISOString().split("T")[0],
     bankName: "",
+    bankCode: "",
     accountNumber: "",
     accountName: "",
+    routingNumber: "",
+    country: "",
   });
 
   const { data: settings } = useQuery<Settings>({
@@ -105,6 +112,49 @@ export default function PayrollPage() {
 
   const currency = settings?.currency || "USD";
   const currencySymbol = getCurrencySymbol(currency);
+  const payrollCountry = formData.country || settings?.countryCode || "NG";
+  const isPaystack = isPaystackRegion(payrollCountry);
+
+  // Fetch banks for the selected country (works for all regions)
+  const { data: bankList = [] } = useQuery<{ name: string; code: string }[]>({
+    queryKey: ["/api/payment/banks", payrollCountry],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/payment/banks/${payrollCountry}`);
+      return res.json();
+    },
+    enabled: isAddEmployeeOpen,
+  });
+
+  // Account validation for Paystack regions
+  const [accountValidation, setAccountValidation] = useState<{ validated: boolean; name: string } | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
+
+  const validateAccount = async () => {
+    if (!formData.bankCode || !formData.accountNumber || formData.bankCode === "OTHER") return;
+    setIsValidating(true);
+    setAccountValidation(null);
+    try {
+      const res = await apiRequest("POST", "/api/payment/verify-account", {
+        bankCode: formData.bankCode,
+        accountNumber: formData.accountNumber,
+        country: payrollCountry,
+      });
+      const data = await res.json();
+      if (data.verified && data.accountName) {
+        setAccountValidation({ validated: true, name: data.accountName });
+        setFormData((f) => ({ ...f, accountName: data.accountName }));
+        toast({ title: "Account verified", description: data.accountName });
+      } else {
+        setAccountValidation({ validated: false, name: "" });
+        toast({ title: "Could not verify account", variant: "destructive" });
+      }
+    } catch {
+      setAccountValidation({ validated: false, name: "" });
+      toast({ title: "Verification failed", variant: "destructive" });
+    } finally {
+      setIsValidating(false);
+    }
+  };
 
   const formatCurrency = (amount: number) => {
     return formatCurrencyAmount(amount, currency);
@@ -204,9 +254,13 @@ export default function PayrollPage() {
       deductions: "",
       payDate: new Date().toISOString().split("T")[0],
       bankName: "",
+      bankCode: "",
       accountNumber: "",
       accountName: "",
+      routingNumber: "",
+      country: "",
     });
+    setAccountValidation(null);
   };
 
   const openEditDialog = (entry: PayrollEntry) => {
@@ -219,9 +273,13 @@ export default function PayrollPage() {
       deductions: String(entry.deductions),
       payDate: entry.payDate,
       bankName: entry.bankName || "",
+      bankCode: (entry as any).bankCode || "",
       accountNumber: entry.accountNumber || "",
       accountName: entry.accountName || "",
+      routingNumber: (entry as any).routingNumber || "",
+      country: (entry as any).country || "",
     });
+    setAccountValidation(entry.accountName ? { validated: true, name: entry.accountName } : null);
     setIsAddEmployeeOpen(true);
   };
 
@@ -1068,46 +1126,149 @@ export default function PayrollPage() {
             </div>
 
             <div className="border-t border-slate-200 dark:border-slate-700 pt-4">
-              <h4 className="font-medium text-slate-900 dark:text-white mb-3">Bank Account Details</h4>
-              <div className="grid gap-3 grid-cols-2">
-                <div className="space-y-2 col-span-2">
-                  <Label htmlFor="bankName" className="text-slate-700 dark:text-slate-300 text-sm">
-                    Bank Name (Payment Channel)
-                  </Label>
-                  <Input
-                    id="bankName"
-                    value={formData.bankName}
-                    onChange={(e) => setFormData({ ...formData, bankName: e.target.value })}
-                    placeholder="e.g., First Bank, GTBank, Chase"
-                    className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"
-                    data-testid="input-bank-name"
-                  />
+              <div className="flex items-center gap-2 mb-3">
+                <Landmark className="h-4 w-4 text-slate-500" />
+                <h4 className="font-medium text-slate-900 dark:text-white">Bank Account Details</h4>
+              </div>
+              <div className="space-y-3">
+                {/* Country / Region */}
+                <div className="space-y-1">
+                  <Label className="text-slate-700 dark:text-slate-300 text-xs">Country / Region</Label>
+                  <Select
+                    value={payrollCountry}
+                    onValueChange={(val) => {
+                      const config = getCountryConfig(val);
+                      setFormData((f) => ({
+                        ...f,
+                        country: val,
+                        bankCode: "",
+                        bankName: "",
+                        routingNumber: "",
+                        accountNumber: "",
+                        accountName: "",
+                      }));
+                      setAccountValidation(null);
+                    }}
+                  >
+                    <SelectTrigger className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60">
+                      {SUPPORTED_COUNTRIES.map((c) => (
+                        <SelectItem key={c.code} value={c.code}>{c.name} ({c.currency})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="accountNumber" className="text-slate-700 dark:text-slate-300 text-sm">
-                    Account Number
-                  </Label>
-                  <Input
-                    id="accountNumber"
-                    value={formData.accountNumber}
-                    onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })}
-                    placeholder="0123456789"
-                    className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"
-                    data-testid="input-account-number"
-                  />
+
+                {/* Bank selector */}
+                <div className="space-y-1">
+                  <Label className="text-slate-700 dark:text-slate-300 text-xs">Bank</Label>
+                  <Select
+                    value={formData.bankCode}
+                    onValueChange={(val) => {
+                      const bank = bankList.find((b) => b.code === val);
+                      if (val === "OTHER") {
+                        setFormData((f) => ({ ...f, bankCode: val, bankName: "" }));
+                      } else {
+                        setFormData((f) => ({ ...f, bankCode: val, bankName: bank?.name || "" }));
+                      }
+                      setAccountValidation(null);
+                    }}
+                  >
+                    <SelectTrigger className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700" data-testid="select-bank">
+                      <SelectValue placeholder="Select bank..." />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60">
+                      {bankList.map((bank) => (
+                        <SelectItem key={bank.code} value={bank.code}>{bank.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="accountName" className="text-slate-700 dark:text-slate-300 text-sm">
-                    Account Name
-                  </Label>
+
+                {/* Manual bank name when "Other" */}
+                {formData.bankCode === "OTHER" && (
+                  <div className="space-y-1">
+                    <Label className="text-slate-700 dark:text-slate-300 text-xs">Bank Name</Label>
+                    <Input
+                      value={formData.bankName}
+                      onChange={(e) => setFormData((f) => ({ ...f, bankName: e.target.value }))}
+                      placeholder="Enter bank name"
+                      className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"
+                    />
+                  </div>
+                )}
+
+                {/* Routing number for Stripe regions */}
+                {(() => {
+                  const format = getBankDetailFormat(payrollCountry);
+                  if (format === "bank_code") return null;
+                  return (
+                    <div className="space-y-1">
+                      <Label className="text-slate-700 dark:text-slate-300 text-xs">{getBankDetailLabel(format)}</Label>
+                      <Input
+                        value={formData.routingNumber}
+                        onChange={(e) => setFormData((f) => ({ ...f, routingNumber: e.target.value }))}
+                        placeholder={`Enter ${getBankDetailLabel(format).toLowerCase()}`}
+                        className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"
+                      />
+                    </div>
+                  );
+                })()}
+
+                {/* Account number + verify button for Paystack */}
+                <div className="space-y-1">
+                  <Label className="text-slate-700 dark:text-slate-300 text-xs">Account Number</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={formData.accountNumber}
+                      onChange={(e) => {
+                        setFormData((f) => ({ ...f, accountNumber: e.target.value }));
+                        setAccountValidation(null);
+                      }}
+                      placeholder="0123456789"
+                      className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 flex-1"
+                      data-testid="input-account-number"
+                    />
+                    {isPaystack && formData.bankCode && formData.bankCode !== "OTHER" && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={validateAccount}
+                        disabled={isValidating || !formData.accountNumber || formData.accountNumber.length < 10}
+                        className="shrink-0"
+                      >
+                        {isValidating ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : accountValidation?.validated ? (
+                          <CheckCircle className="h-4 w-4 text-emerald-500" />
+                        ) : (
+                          <ShieldCheck className="h-4 w-4" />
+                        )}
+                        <span className="ml-1 text-xs">{isValidating ? "Verifying" : accountValidation?.validated ? "Verified" : "Verify"}</span>
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Account name — auto-filled on verify for Paystack, manual for Stripe */}
+                <div className="space-y-1">
+                  <Label className="text-slate-700 dark:text-slate-300 text-xs">Account Name</Label>
                   <Input
-                    id="accountName"
                     value={formData.accountName}
-                    onChange={(e) => setFormData({ ...formData, accountName: e.target.value })}
-                    placeholder="John Doe"
-                    className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"
+                    onChange={(e) => setFormData((f) => ({ ...f, accountName: e.target.value }))}
+                    placeholder="Account holder name"
+                    readOnly={isPaystack && accountValidation?.validated}
+                    className={`bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 ${isPaystack && accountValidation?.validated ? "bg-slate-50 dark:bg-slate-800" : ""}`}
                     data-testid="input-account-name"
                   />
+                  {accountValidation?.validated && (
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 mt-1">
+                      <CheckCircle className="h-3 w-3" /> Verified: {accountValidation.name}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>

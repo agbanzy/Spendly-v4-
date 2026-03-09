@@ -105,6 +105,12 @@ export default function VendorsPage() {
     paymentTerms: "net30",
     taxId: "",
     notes: "",
+    bankCountry: "NG",
+    bankCode: "",
+    bankName: "",
+    accountNumber: "",
+    accountName: "",
+    routingNumber: "",
   });
 
   const { data: settings } = useQuery<CompanySettings>({
@@ -133,36 +139,7 @@ export default function VendorsPage() {
       .map((d) => d.vendorId!)
   );
 
-  const createVendorMutation = useMutation({
-    mutationFn: async (vendorData: {
-      name: string;
-      email: string;
-      phone: string;
-      address: string;
-      category: string;
-      paymentTerms: string;
-      taxId?: string;
-      notes?: string;
-    }) => {
-      return apiRequest("POST", "/api/vendors", vendorData);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/vendors"] });
-      setIsAddOpen(false);
-      resetForm();
-      toast({
-        title: "Vendor added",
-        description: "The vendor has been added successfully."
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to add vendor. Please try again.",
-        variant: "destructive"
-      });
-    }
-  });
+  const [isAddingVendor, setIsAddingVendor] = useState(false);
 
   const updateVendorMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
@@ -188,7 +165,39 @@ export default function VendorsPage() {
   });
 
   const resetForm = () => {
-    setVendorForm({ name: "", email: "", phone: "", address: "", category: "", paymentTerms: "net30", taxId: "", notes: "" });
+    setVendorForm({ name: "", email: "", phone: "", address: "", category: "", paymentTerms: "net30", taxId: "", notes: "", bankCountry: "NG", bankCode: "", bankName: "", accountNumber: "", accountName: "", routingNumber: "" });
+    setVendorAccountValidation(null);
+  };
+
+  // Account validation for vendor bank fields
+  const [vendorAccountValidation, setVendorAccountValidation] = useState<{ validated: boolean; name: string } | null>(null);
+  const [isVendorValidating, setIsVendorValidating] = useState(false);
+
+  const validateVendorAccount = async () => {
+    if (!vendorForm.bankCode || !vendorForm.accountNumber || vendorForm.bankCode === "OTHER") return;
+    setIsVendorValidating(true);
+    setVendorAccountValidation(null);
+    try {
+      const res = await apiRequest("POST", "/api/payment/verify-account", {
+        bankCode: vendorForm.bankCode,
+        accountNumber: vendorForm.accountNumber,
+        country: vendorForm.bankCountry,
+      });
+      const data = await res.json();
+      if (data.verified && data.accountName) {
+        setVendorAccountValidation({ validated: true, name: data.accountName });
+        setVendorForm((f) => ({ ...f, accountName: data.accountName }));
+        toast({ title: "Account verified", description: data.accountName });
+      } else {
+        setVendorAccountValidation({ validated: false, name: "" });
+        toast({ title: "Could not verify account", variant: "destructive" });
+      }
+    } catch {
+      setVendorAccountValidation({ validated: false, name: "" });
+      toast({ title: "Verification failed", variant: "destructive" });
+    } finally {
+      setIsVendorValidating(false);
+    }
   };
 
   const totalVendors = vendors.length;
@@ -201,21 +210,55 @@ export default function VendorsPage() {
     vendor.category.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleAddVendor = () => {
+  const handleAddVendor = async () => {
     if (!vendorForm.name || !vendorForm.email) {
       toast({ title: "Name and email are required", variant: "destructive" });
       return;
     }
-    createVendorMutation.mutate({
-      name: vendorForm.name,
-      email: vendorForm.email,
-      phone: vendorForm.phone,
-      address: vendorForm.address,
-      category: vendorForm.category || "Other",
-      paymentTerms: vendorForm.paymentTerms || "net30",
-      taxId: vendorForm.taxId || undefined,
-      notes: vendorForm.notes || undefined,
-    });
+    setIsAddingVendor(true);
+    try {
+      const res = await apiRequest("POST", "/api/vendors", {
+        name: vendorForm.name,
+        email: vendorForm.email,
+        phone: vendorForm.phone,
+        address: vendorForm.address,
+        category: vendorForm.category || "Other",
+        paymentTerms: vendorForm.paymentTerms || "net30",
+        taxId: vendorForm.taxId || undefined,
+        notes: vendorForm.notes || undefined,
+      });
+      const newVendor = await res.json();
+      // If bank details were provided, create a payout destination
+      if (vendorForm.bankCode && vendorForm.accountNumber) {
+        const countryConfig = getCountryConfig(vendorForm.bankCountry);
+        try {
+          await apiRequest("POST", "/api/payout-destinations", {
+            vendorId: newVendor.id,
+            type: "bank_account",
+            bankName: vendorForm.bankName,
+            bankCode: vendorForm.bankCode,
+            accountNumber: vendorForm.accountNumber,
+            accountName: vendorForm.accountName || vendorForm.name,
+            routingNumber: vendorForm.routingNumber,
+            provider: countryConfig?.provider || "stripe",
+            currency: countryConfig?.currency || "USD",
+            country: vendorForm.bankCountry,
+          });
+        } catch {
+          // Vendor was created but bank failed — user can add bank later from detail dialog
+          toast({ title: "Vendor added, but bank account could not be saved", description: "You can add it from the vendor detail page.", variant: "destructive" });
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/vendors"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/payout-destinations"] });
+      setIsAddOpen(false);
+      resetForm();
+      toast({ title: "Vendor added", description: "The vendor has been added successfully." });
+    } catch {
+      toast({ title: "Error", description: "Failed to add vendor. Please try again.", variant: "destructive" });
+    } finally {
+      setIsAddingVendor(false);
+    }
   };
 
   const handleEditVendor = () => {
@@ -250,7 +293,14 @@ export default function VendorsPage() {
       paymentTerms: vendor.paymentTerms || "net30",
       taxId: vendor.taxId || "",
       notes: vendor.notes || "",
+      bankCountry: "NG",
+      bankCode: "",
+      bankName: "",
+      accountNumber: "",
+      accountName: "",
+      routingNumber: "",
     });
+    setVendorAccountValidation(null);
     setIsEditOpen(true);
   };
 
@@ -318,13 +368,17 @@ export default function VendorsPage() {
               <VendorFormFields
                 vendorForm={vendorForm}
                 setVendorForm={setVendorForm}
+                accountValidation={vendorAccountValidation}
+                setAccountValidation={setVendorAccountValidation}
+                isValidating={isVendorValidating}
+                onValidateAccount={validateVendorAccount}
               />
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsAddOpen(false)} className="border-slate-200 dark:border-slate-700">
                   Cancel
                 </Button>
-                <Button onClick={handleAddVendor} disabled={createVendorMutation.isPending} data-testid="button-save-vendor" className="bg-violet-600 hover:bg-violet-700">
-                  {createVendorMutation.isPending ? (
+                <Button onClick={handleAddVendor} disabled={isAddingVendor} data-testid="button-save-vendor" className="bg-violet-600 hover:bg-violet-700">
+                  {isAddingVendor ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Adding...
@@ -500,6 +554,10 @@ export default function VendorsPage() {
             <VendorFormFields
               vendorForm={vendorForm}
               setVendorForm={setVendorForm}
+              accountValidation={vendorAccountValidation}
+              setAccountValidation={setVendorAccountValidation}
+              isValidating={isVendorValidating}
+              onValidateAccount={validateVendorAccount}
             />
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsEditOpen(false)} className="border-slate-200 dark:border-slate-700">
@@ -538,22 +596,52 @@ export default function VendorsPage() {
 
 // ── Shared form fields component ─────────────────────────────
 
+interface VendorFormState {
+  name: string;
+  email: string;
+  phone: string;
+  address: string;
+  category: string;
+  paymentTerms: string;
+  taxId: string;
+  notes: string;
+  bankCountry: string;
+  bankCode: string;
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  routingNumber: string;
+}
+
 function VendorFormFields({
   vendorForm,
   setVendorForm,
+  accountValidation,
+  setAccountValidation,
+  isValidating,
+  onValidateAccount,
 }: {
-  vendorForm: {
-    name: string;
-    email: string;
-    phone: string;
-    address: string;
-    category: string;
-    paymentTerms: string;
-    taxId: string;
-    notes: string;
-  };
-  setVendorForm: React.Dispatch<React.SetStateAction<typeof vendorForm>>;
+  vendorForm: VendorFormState;
+  setVendorForm: React.Dispatch<React.SetStateAction<VendorFormState>>;
+  accountValidation: { validated: boolean; name: string } | null;
+  setAccountValidation: React.Dispatch<React.SetStateAction<{ validated: boolean; name: string } | null>>;
+  isValidating: boolean;
+  onValidateAccount: () => void;
 }) {
+  const isPaystack = (() => {
+    const africanCountries = ['NG', 'GH', 'KE', 'ZA', 'EG', 'RW', 'CI'];
+    return africanCountries.includes(vendorForm.bankCountry);
+  })();
+
+  // Fetch banks for the selected country
+  const { data: bankList = [] } = useQuery<{ name: string; code: string }[]>({
+    queryKey: ["/api/payment/banks", vendorForm.bankCountry],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/payment/banks/${vendorForm.bankCountry}`);
+      return res.json();
+    },
+  });
+
   return (
     <div className="space-y-4 py-4">
       <div className="space-y-2">
@@ -631,6 +719,153 @@ function VendorFormFields({
         <p className="text-xs text-slate-500 dark:text-slate-400">
           These notes are only visible to your team.
         </p>
+      </div>
+
+      {/* Bank Account Details */}
+      <div className="border-t border-slate-200 dark:border-slate-700 pt-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Landmark className="h-4 w-4 text-slate-500" />
+          <h4 className="font-medium text-slate-900 dark:text-white text-sm">Payout Bank Account</h4>
+          <span className="text-xs text-slate-400">(optional)</span>
+        </div>
+        <div className="space-y-3">
+          {/* Country / Region */}
+          <div className="space-y-1">
+            <Label className="text-slate-700 dark:text-slate-300 text-xs">Country / Region</Label>
+            <Select
+              value={vendorForm.bankCountry}
+              onValueChange={(val) => {
+                setVendorForm((f) => ({
+                  ...f,
+                  bankCountry: val,
+                  bankCode: "",
+                  bankName: "",
+                  routingNumber: "",
+                  accountNumber: "",
+                  accountName: "",
+                }));
+                setAccountValidation(null);
+              }}
+            >
+              <SelectTrigger className="border-slate-200 dark:border-slate-700">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="max-h-60">
+                {SUPPORTED_COUNTRIES.map((c) => (
+                  <SelectItem key={c.code} value={c.code}>{c.name} ({c.currency})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Bank selector */}
+          <div className="space-y-1">
+            <Label className="text-slate-700 dark:text-slate-300 text-xs">Bank</Label>
+            <Select
+              value={vendorForm.bankCode}
+              onValueChange={(val) => {
+                const bank = bankList.find((b) => b.code === val);
+                if (val === "OTHER") {
+                  setVendorForm((f) => ({ ...f, bankCode: val, bankName: "" }));
+                } else {
+                  setVendorForm((f) => ({ ...f, bankCode: val, bankName: bank?.name || "" }));
+                }
+                setAccountValidation(null);
+              }}
+            >
+              <SelectTrigger className="border-slate-200 dark:border-slate-700">
+                <SelectValue placeholder="Select bank..." />
+              </SelectTrigger>
+              <SelectContent className="max-h-60">
+                {bankList.map((bank) => (
+                  <SelectItem key={bank.code} value={bank.code}>{bank.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Manual bank name when "Other" */}
+          {vendorForm.bankCode === "OTHER" && (
+            <div className="space-y-1">
+              <Label className="text-slate-700 dark:text-slate-300 text-xs">Bank Name</Label>
+              <Input
+                value={vendorForm.bankName}
+                onChange={(e) => setVendorForm((f) => ({ ...f, bankName: e.target.value }))}
+                placeholder="Enter bank name"
+                className="border-slate-200 dark:border-slate-700"
+              />
+            </div>
+          )}
+
+          {/* Routing number for Stripe regions */}
+          {(() => {
+            const format = getBankDetailFormat(vendorForm.bankCountry);
+            if (format === "bank_code") return null;
+            return (
+              <div className="space-y-1">
+                <Label className="text-slate-700 dark:text-slate-300 text-xs">{getBankDetailLabel(format)}</Label>
+                <Input
+                  value={vendorForm.routingNumber}
+                  onChange={(e) => setVendorForm((f) => ({ ...f, routingNumber: e.target.value }))}
+                  placeholder={`Enter ${getBankDetailLabel(format).toLowerCase()}`}
+                  className="border-slate-200 dark:border-slate-700"
+                />
+              </div>
+            );
+          })()}
+
+          {/* Account number + verify button */}
+          <div className="space-y-1">
+            <Label className="text-slate-700 dark:text-slate-300 text-xs">Account Number</Label>
+            <div className="flex gap-2">
+              <Input
+                value={vendorForm.accountNumber}
+                onChange={(e) => {
+                  setVendorForm((f) => ({ ...f, accountNumber: e.target.value }));
+                  setAccountValidation(null);
+                }}
+                placeholder="0123456789"
+                className="border-slate-200 dark:border-slate-700 flex-1"
+              />
+              {isPaystack && vendorForm.bankCode && vendorForm.bankCode !== "OTHER" && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onValidateAccount}
+                  disabled={isValidating || !vendorForm.accountNumber || vendorForm.accountNumber.length < 10}
+                  className="shrink-0"
+                >
+                  {isValidating ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : accountValidation?.validated ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  ) : (
+                    <ShieldCheck className="h-4 w-4" />
+                  )}
+                  <span className="ml-1 text-xs">{isValidating ? "Verifying" : accountValidation?.validated ? "Verified" : "Verify"}</span>
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Account name */}
+          <div className="space-y-1">
+            <Label className="text-slate-700 dark:text-slate-300 text-xs">Account Name</Label>
+            <Input
+              value={vendorForm.accountName}
+              onChange={(e) => setVendorForm((f) => ({ ...f, accountName: e.target.value }))}
+              placeholder="Account holder name"
+              readOnly={isPaystack && accountValidation?.validated}
+              className={`border-slate-200 dark:border-slate-700 ${isPaystack && accountValidation?.validated ? "bg-slate-50 dark:bg-slate-800" : ""}`}
+            />
+            {accountValidation?.validated && (
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 mt-1">
+                <CheckCircle2 className="h-3 w-3" /> Verified: {accountValidation.name}
+              </p>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
