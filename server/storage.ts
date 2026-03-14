@@ -149,6 +149,7 @@ export interface IStorage {
   updateUserProfile(cognitoSub: string, profile: Partial<UserProfile>): Promise<UserProfile | undefined>;
   
   getKycSubmission(userProfileId: string): Promise<KycSubmission | undefined>;
+  getKycSubmissionHistory(userProfileId: string): Promise<KycSubmission[]>;
   createKycSubmission(submission: InsertKycSubmission): Promise<KycSubmission>;
   updateKycSubmission(id: string, submission: Partial<KycSubmission>): Promise<KycSubmission | undefined>;
   
@@ -1148,8 +1149,17 @@ export class DatabaseStorage implements IStorage {
 
   // ==================== KYC SUBMISSIONS ====================
   async getKycSubmission(userProfileId: string): Promise<KycSubmission | undefined> {
-    const result = await db.select().from(kycSubmissions).where(eq(kycSubmissions.userProfileId, userProfileId)).limit(1);
+    const result = await db.select().from(kycSubmissions)
+      .where(eq(kycSubmissions.userProfileId, userProfileId))
+      .orderBy(desc(kycSubmissions.createdAt))
+      .limit(1);
     return result[0];
+  }
+
+  async getKycSubmissionHistory(userProfileId: string): Promise<KycSubmission[]> {
+    return db.select().from(kycSubmissions)
+      .where(eq(kycSubmissions.userProfileId, userProfileId))
+      .orderBy(desc(kycSubmissions.createdAt));
   }
 
   async createKycSubmission(submission: InsertKycSubmission): Promise<KycSubmission> {
@@ -2295,7 +2305,7 @@ export class DatabaseStorage implements IStorage {
 
       if (teamMemberResult.length > 0) {
         await tx.update(teamMembers)
-          .set({ status: 'Active', userId: params.userId, companyId: params.companyId } as any)
+          .set({ status: 'active', userId: params.userId, companyId: params.companyId } as any)
           .where(eq(teamMembers.id, teamMemberResult[0].id));
       }
 

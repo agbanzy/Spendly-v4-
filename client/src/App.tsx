@@ -49,6 +49,7 @@ import AdminLogin from "@/pages/admin-login";
 import InvitePage from "@/pages/invite";
 import PayInvoice from "@/pages/pay-invoice";
 import VirtualAccounts from "@/pages/virtual-accounts";
+import AuthCallback from "@/pages/auth-callback";
 
 function AuthLoading() {
   return (
@@ -56,7 +57,7 @@ function AuthLoading() {
       <div className="flex flex-col items-center gap-4 animate-scale-in">
         <div className="relative">
           <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-[#6B2346] to-[#8B3A5E] flex items-center justify-center shadow-lg shadow-primary/25 animate-pulse-glow">
-            <img src="/financiar-logo.svg" alt="Financiar" className="h-8 w-8 rounded-lg" />
+            <img src="/financiar-logo.png" alt="Financiar" className="h-12 w-12 rounded-lg" />
           </div>
           <div className="absolute -inset-2 bg-primary/10 rounded-3xl blur-xl" />
         </div>
@@ -230,7 +231,7 @@ function AppContent() {
   const { isAuthenticated, isLoading } = useAuth();
   const { isAdminVerified, isAdminVerifying } = useAdminSessionVerification();
 
-  const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/terms", "/privacy", "/cookies", "/onboarding", "/admin-login"];
+  const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/terms", "/privacy", "/cookies", "/onboarding", "/admin-login", "/auth/callback"];
   const isPublicRoute = publicRoutes.includes(location);
   const isAdminRoute = location.startsWith("/admin");
   const isInviteRoute = location.startsWith("/invite/");
@@ -259,6 +260,7 @@ function AppContent() {
         <Route path="/privacy" component={Privacy} />
         <Route path="/cookies" component={Cookies} />
         <Route path="/onboarding">{() => isAuthenticated ? <Onboarding /> : <Redirect to="/login" />}</Route>
+        <Route path="/auth/callback" component={AuthCallback} />
         <Route path="/admin-login" component={AdminLogin} />
       </Switch>
     );

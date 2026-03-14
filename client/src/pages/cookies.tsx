@@ -10,7 +10,7 @@ export default function CookiePolicyPage() {
           <Link href="/">
             <div className="flex items-center gap-2 cursor-pointer group">
               <ArrowLeft className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-              <img src="/financiar-logo.svg" alt="Financiar" className="h-8 w-8 rounded-lg" />
+              <img src="/financiar-logo.png" alt="Financiar" className="h-14 w-14 rounded-lg" />
               <span className="font-bold text-lg">Financiar</span>
             </div>
           </Link>

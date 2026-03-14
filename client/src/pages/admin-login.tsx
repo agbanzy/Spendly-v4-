@@ -74,7 +74,7 @@ export default function AdminLogin() {
           <Link href="/">
             <div className="flex items-center gap-3 text-white cursor-pointer group">
               <div className="relative">
-                <img src="/financiar-logo.svg" alt="Financiar" className="h-10 w-10 rounded-xl shadow-lg" />
+                <img src="/financiar-logo.png" alt="Financiar" className="h-14 w-14 rounded-xl shadow-lg" />
                 <div className="absolute -inset-1 bg-white/20 rounded-xl blur-sm opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
               <span className="font-bold text-2xl tracking-tight">Financiar</span>
@@ -121,7 +121,7 @@ export default function AdminLogin() {
         <div className="w-full max-w-md relative z-10">
           <Link href="/">
             <div className="lg:hidden flex items-center gap-2.5 justify-center mb-8 cursor-pointer">
-              <img src="/financiar-logo.svg" alt="Financiar" className="h-10 w-10 rounded-xl shadow-md" />
+              <img src="/financiar-logo.png" alt="Financiar" className="h-14 w-14 rounded-xl shadow-md" />
               <span className="font-bold text-2xl tracking-tight">Financiar</span>
             </div>
           </Link>

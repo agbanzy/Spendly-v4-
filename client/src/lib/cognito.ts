@@ -11,10 +11,12 @@ const poolData = {
   ClientId: import.meta.env.VITE_COGNITO_CLIENT_ID || '',
 };
 
+export const isCognitoConfigured = !!(poolData.UserPoolId && poolData.ClientId);
+
 let userPool: CognitoUserPool;
 try {
-  if (!poolData.UserPoolId || !poolData.ClientId) {
-    console.error('Cognito environment variables missing. Auth will not work.');
+  if (!isCognitoConfigured) {
+    console.error('Cognito environment variables missing (VITE_COGNITO_USER_POOL_ID, VITE_COGNITO_CLIENT_ID). Auth will not work.');
   }
   userPool = new CognitoUserPool(poolData);
 } catch (e) {
@@ -72,7 +74,14 @@ export function getUserInfoFromSession(session: CognitoUserSession): CognitoUser
 
 // --- Sign In ---
 
+function assertConfigured() {
+  if (!isCognitoConfigured || !userPool) {
+    throw new Error('Authentication service is not configured. Please contact support.');
+  }
+}
+
 export function signInWithEmail(email: string, password: string): Promise<CognitoUserSession> {
+  assertConfigured();
   const user = new CognitoUser({ Username: email, Pool: userPool });
   const authDetails = new AuthenticationDetails({ Username: email, Password: password });
   return new Promise((resolve, reject) => {
@@ -93,6 +102,7 @@ export function signUpWithEmail(
   password: string,
   displayName: string
 ): Promise<CognitoUser> {
+  assertConfigured();
   const attributes = [
     new CognitoUserAttribute({ Name: 'email', Value: email }),
     new CognitoUserAttribute({ Name: 'name', Value: displayName }),
@@ -169,8 +179,79 @@ export function signOut(): void {
 export function signInWithGoogle(): void {
   const domain = import.meta.env.VITE_COGNITO_DOMAIN;
   const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID;
+  if (!domain || !clientId) {
+    throw new Error('Google sign-in is not configured. Please contact support.');
+  }
   const redirectUri = encodeURIComponent(window.location.origin + '/auth/callback');
   window.location.href = `https://${domain}/oauth2/authorize?identity_provider=Google&response_type=code&client_id=${clientId}&redirect_uri=${redirectUri}&scope=openid+email+profile`;
+}
+
+// --- OAuth Token Exchange (for Hosted UI callback) ---
+
+export interface OAuthTokens {
+  id_token: string;
+  access_token: string;
+  refresh_token?: string;
+  token_type: string;
+  expires_in: number;
+}
+
+export async function exchangeCodeForTokens(code: string): Promise<OAuthTokens> {
+  const domain = import.meta.env.VITE_COGNITO_DOMAIN;
+  const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID;
+  if (!domain || !clientId) {
+    throw new Error('Authentication service is not configured. Please contact support.');
+  }
+  const redirectUri = window.location.origin + '/auth/callback';
+
+  const params = new URLSearchParams({
+    grant_type: 'authorization_code',
+    client_id: clientId,
+    code,
+    redirect_uri: redirectUri,
+  });
+
+  const res = await fetch(`https://${domain}/oauth2/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Token exchange failed: ${errBody}`);
+  }
+
+  return res.json();
+}
+
+export function storeOAuthSession(tokens: OAuthTokens): CognitoUserInfo {
+  // Decode the ID token to get user info
+  const [, payloadBase64] = tokens.id_token.split('.');
+  const payload = JSON.parse(atob(payloadBase64.replace(/-/g, '+').replace(/_/g, '/')));
+
+  const userInfo: CognitoUserInfo = {
+    sub: payload.sub,
+    email: payload.email || '',
+    name: payload.name || payload['cognito:username'] || payload.email?.split('@')[0] || 'User',
+    photoURL: payload.picture || undefined,
+  };
+
+  // Store tokens in localStorage so CognitoUserPool can find the session
+  // Cognito JS SDK stores sessions under a specific key pattern
+  const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID;
+  const username = payload['cognito:username'] || payload.sub;
+  const keyPrefix = `CognitoIdentityServiceProvider.${clientId}`;
+
+  localStorage.setItem(`${keyPrefix}.LastAuthUser`, username);
+  localStorage.setItem(`${keyPrefix}.${username}.idToken`, tokens.id_token);
+  localStorage.setItem(`${keyPrefix}.${username}.accessToken`, tokens.access_token);
+  if (tokens.refresh_token) {
+    localStorage.setItem(`${keyPrefix}.${username}.refreshToken`, tokens.refresh_token);
+  }
+  localStorage.setItem(`${keyPrefix}.${username}.clockDrift`, '0');
+
+  return userInfo;
 }
 
 // --- Auth State Check ---

@@ -64,6 +64,7 @@ export const TransactionStatus = {
   PROCESSING: 'processing',
   FAILED: 'failed',
   PENDING: 'pending',
+  REVERSED: 'reversed',
 } as const;
 export type TransactionStatus = typeof TransactionStatus[keyof typeof TransactionStatus];
 
@@ -71,12 +72,17 @@ export const BillStatus = {
   PAID: 'paid',
   UNPAID: 'unpaid',
   OVERDUE: 'overdue',
+  PENDING: 'pending',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+  CHANGES_REQUESTED: 'changes_requested',
 } as const;
 export type BillStatus = typeof BillStatus[keyof typeof BillStatus];
 
 export const CardStatus = {
   ACTIVE: 'active',
   FROZEN: 'frozen',
+  CANCELLED: 'cancelled',
 } as const;
 export type CardStatus = typeof CardStatus[keyof typeof CardStatus];
 

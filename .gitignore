@@ -28,3 +28,9 @@ AUDIT_AND_PRD.md
 # Dev scripts
 dev.sh
 start-local.sh
+
+# Mobile build artifacts
+mobile/*.aab
+
+# Test results
+test-results/

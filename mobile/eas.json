@@ -35,6 +35,11 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "/Users/godwinagbane/Downloads/financiar-490019-b3fb2b8e5863.json",
+        "track": "internal"
+      }
+    }
   }
 }

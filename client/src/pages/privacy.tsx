@@ -9,7 +9,7 @@ export default function PrivacyPage() {
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
           <Link href="/">
             <div className="flex items-center gap-2 cursor-pointer" data-testid="link-privacy-home">
-              <img src="/financiar-logo.svg" alt="Financiar" className="h-10 w-10 rounded-xl" />
+              <img src="/financiar-logo.png" alt="Financiar" className="h-14 w-14 rounded-xl" />
               <span className="font-bold text-xl">Financiar</span>
             </div>
           </Link>

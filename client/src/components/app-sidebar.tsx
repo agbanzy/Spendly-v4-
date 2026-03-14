@@ -351,7 +351,7 @@ export function AppSidebar() {
         <Link href="/dashboard">
           <div className="flex items-center gap-3 cursor-pointer group">
             <div className="relative">
-              <img src="/financiar-logo.svg" alt="Financiar" className="w-9 h-9 rounded-xl shadow-md transition-shadow group-hover:shadow-lg" />
+              <img src="/financiar-logo.png" alt="Financiar" className="w-12 h-12 rounded-xl shadow-md transition-shadow group-hover:shadow-lg" />
               <div className="absolute -inset-0.5 bg-gradient-to-br from-primary/20 to-cyan-500/20 rounded-xl blur opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
             <div>

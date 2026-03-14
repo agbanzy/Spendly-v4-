@@ -63,6 +63,7 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle";
 import { isPaystackRegion, SUPPORTED_COUNTRIES, getCurrencyForCountry } from "@/lib/constants";
 import { useAuth } from "@/lib/auth";
+import { KycVerificationForm } from "@/components/kyc-verification-form";
 
 interface UserSettings {
   emailNotifications: boolean;
@@ -352,39 +353,6 @@ export default function Settings() {
   const [budgetWarnings, setBudgetWarnings] = useState(true);
   const [transactionPin, setTransactionPin] = useState(false);
 
-  // KYC Verification state
-  const [kycForm, setKycForm] = useState({
-    firstName: "",
-    lastName: "",
-    dateOfBirth: "",
-    nationality: "",
-    phoneNumber: "",
-    addressLine1: "",
-    city: "",
-    state: "",
-    country: "",
-    postalCode: "",
-    idType: "national_id",
-    idNumber: "",
-    bvnNumber: "",
-    gender: "",
-  });
-  const [kycSubmitting, setKycSubmitting] = useState(false);
-
-  // Pre-fill KYC form from user profile
-  useEffect(() => {
-    if (userProfile) {
-      setKycForm(prev => ({
-        ...prev,
-        firstName: prev.firstName || userProfile.firstName || "",
-        lastName: prev.lastName || userProfile.lastName || "",
-        phoneNumber: prev.phoneNumber || userProfile.phoneNumber || "",
-        country: prev.country || userProfile.country || "",
-        nationality: prev.nationality || userProfile.country || "",
-      }));
-    }
-  }, [userProfile]);
-
   // Scroll to verification section if hash is #verification
   useEffect(() => {
     if (window.location.hash === '#verification') {
@@ -394,33 +362,6 @@ export default function Settings() {
       }, 500);
     }
   }, []);
-
-  const submitKycMutation = useMutation({
-    mutationFn: async (data: typeof kycForm) => {
-      return apiRequest("POST", "/api/kyc/submit", {
-        ...data,
-        isBusinessAccount: userProfile?.isBusinessAccount || false,
-        businessName: userProfile?.businessName || undefined,
-        businessType: userProfile?.businessType || undefined,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/user-profile"] });
-      toast({
-        title: "Verification submitted",
-        description: "Your identity verification is being reviewed. This usually takes 24-48 hours.",
-      });
-      setKycSubmitting(false);
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Verification failed",
-        description: error.message || "Failed to submit verification. Please try again.",
-        variant: "destructive",
-      });
-      setKycSubmitting(false);
-    },
-  });
 
   useEffect(() => {
     if (settings) {
@@ -1659,19 +1600,12 @@ export default function Settings() {
                 </div>
               </div>
             ) : (
-              <div className="p-4 border border-amber-500/20 rounded-xl bg-amber-500/5 flex items-center gap-3">
-                <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
-                <div>
-                  <p className="font-medium text-sm text-amber-800 dark:text-amber-200">
-                    {userProfile?.kycStatus === 'rejected' ? 'Verification Rejected' : 'Not Yet Verified'}
-                  </p>
-                  <p className="text-xs text-amber-600 dark:text-amber-400">
-                    {userProfile?.kycStatus === 'rejected'
-                      ? 'Please contact support to resubmit your verification.'
-                      : 'Identity verification is completed during onboarding.'}
-                  </p>
-                </div>
-              </div>
+              <KycVerificationForm
+                userProfile={userProfile}
+                onSuccess={() => {
+                  queryClient.invalidateQueries({ queryKey: ["/api/user-profile"] });
+                }}
+              />
             )}
           </div>
         </GlassCard>

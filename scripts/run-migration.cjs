@@ -83,12 +83,16 @@ async function runSQL(client, sqlFile, label) {
     } catch (err) {
       // Some errors are expected (IF NOT EXISTS, already exists, etc.)
       const msg = err.message || '';
-      if (
+      const isExpected =
         msg.includes('already exists') ||
-        msg.includes('does not exist') ||
         msg.includes('duplicate key') ||
-        msg.includes('relation') && msg.includes('already exists')
-      ) {
+        // Only skip "does not exist" for DROP/ALTER on missing objects, not for missing columns in SELECT/INSERT
+        (msg.includes('does not exist') && (cleanStmt.match(/^(DROP|ALTER)\s/i) || msg.includes('constraint'))) ||
+        // Column already exists when using ADD COLUMN without IF NOT EXISTS
+        msg.includes('column') && msg.includes('already exists') ||
+        // Type already correct
+        msg.includes('already has type');
+      if (isExpected) {
         skipped++;
       } else {
         failed++;
@@ -105,8 +109,17 @@ async function runSQL(client, sqlFile, label) {
 async function runDrizzlePush(client) {
   console.log('\n=== Applying Schema Changes via Direct SQL ===\n');
 
+  // Phase 0: Create missing tables
+  const phase0 = [
+    `CREATE TABLE IF NOT EXISTS processed_webhooks (id SERIAL PRIMARY KEY, event_id TEXT NOT NULL UNIQUE, provider TEXT NOT NULL, event_type TEXT NOT NULL, processed_at TEXT NOT NULL DEFAULT now(), metadata JSONB)`,
+    `CREATE TABLE IF NOT EXISTS subscriptions (id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(), company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE, status TEXT NOT NULL DEFAULT 'trialing', provider TEXT NOT NULL DEFAULT 'stripe', provider_subscription_id TEXT, provider_customer_id TEXT, provider_plan_id TEXT, trial_start_date TEXT, trial_end_date TEXT, current_period_start TEXT, current_period_end TEXT, canceled_at TEXT, quantity INTEGER NOT NULL DEFAULT 1, unit_price INTEGER NOT NULL DEFAULT 500, currency TEXT NOT NULL DEFAULT 'USD', metadata JSONB, created_at TEXT NOT NULL DEFAULT now(), updated_at TEXT NOT NULL DEFAULT now())`,
+    `CREATE INDEX IF NOT EXISTS subscriptions_company_id_idx ON subscriptions(company_id)`,
+  ];
+
   // Phase 1: Add missing columns
   const phase1 = [
+    // budgets.company_id (missing from base migration)
+    `ALTER TABLE budgets ADD COLUMN IF NOT EXISTS company_id text`,
     // card_transactions.company_id
     `ALTER TABLE card_transactions ADD COLUMN IF NOT EXISTS company_id text`,
     // transactions new columns
@@ -213,7 +226,27 @@ async function runDrizzlePush(client) {
     // payouts audit fields
     `ALTER TABLE payouts ADD COLUMN IF NOT EXISTS company_id text`,
     `ALTER TABLE payouts ADD COLUMN IF NOT EXISTS approved_at text`,
+    `ALTER TABLE payouts ADD COLUMN IF NOT EXISTS first_approved_by text`,
     `ALTER TABLE payouts ADD COLUMN IF NOT EXISTS first_approved_at text`,
+    `ALTER TABLE payouts ADD COLUMN IF NOT EXISTS approval_status text DEFAULT 'none'`,
+    `ALTER TABLE payouts ADD COLUMN IF NOT EXISTS recurring boolean DEFAULT false`,
+    `ALTER TABLE payouts ADD COLUMN IF NOT EXISTS frequency text DEFAULT 'monthly'`,
+    `ALTER TABLE payouts ADD COLUMN IF NOT EXISTS next_run_date text`,
+    // vendors additional columns
+    `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS tax_id text`,
+    `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS notes text`,
+    // expenses additional columns
+    `ALTER TABLE expenses ADD COLUMN IF NOT EXISTS reviewer_comments text`,
+    `ALTER TABLE expenses ADD COLUMN IF NOT EXISTS vendor_id text`,
+    `ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payout_status text DEFAULT 'not_started'`,
+    `ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payout_id text`,
+    // company_settings billing
+    `ALTER TABLE company_settings ADD COLUMN IF NOT EXISTS subscription_status text NOT NULL DEFAULT 'trialing'`,
+    `ALTER TABLE company_settings ADD COLUMN IF NOT EXISTS trial_ends_at text`,
+    // user_profiles.user_id
+    `ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS user_id text`,
+    // team_members.department_id
+    `ALTER TABLE team_members ADD COLUMN IF NOT EXISTS department_id text`,
   ];
 
   // Phase 2: Convert timestamp columns to text
@@ -392,6 +425,7 @@ async function runDrizzlePush(client) {
 
   // Execute all phases
   const allStmts = [
+    ...phase0,
     ...phase1,
     ...phase2,
     ...phase3,
@@ -408,7 +442,12 @@ async function runDrizzlePush(client) {
       success++;
     } catch (err) {
       const msg = err.message || '';
-      if (msg.includes('already exists') || msg.includes('does not exist') || msg.includes('duplicate')) {
+      const isExpected =
+        msg.includes('already exists') ||
+        msg.includes('duplicate') ||
+        (msg.includes('does not exist') && (stmt.match(/^(DROP|ALTER)\s/i) || stmt.match(/^DO\s/i) || msg.includes('constraint'))) ||
+        msg.includes('already has type');
+      if (isExpected) {
         skipped++;
       } else {
         failed++;

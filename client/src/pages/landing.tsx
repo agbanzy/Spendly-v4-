@@ -211,7 +211,7 @@ export default function LandingPage() {
             <Link href="/">
               <span className="flex items-center">
                 <img
-                  src="/financiar-logo.svg"
+                  src="/financiar-logo.png"
                   className="h-9"
                   alt="Financiar"
                 />
@@ -756,7 +756,7 @@ export default function LandingPage() {
             <div className="col-span-2 md:col-span-1">
               <div className="mb-4">
                 <img
-                  src="/financiar-logo.svg"
+                  src="/financiar-logo.png"
                   className="h-7"
                   alt="Financiar"
                 />

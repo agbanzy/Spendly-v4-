@@ -7,7 +7,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 
 console.log("Building client...");
-execSync("npx vite build", { cwd: rootDir, stdio: "inherit" });
+
+// Log VITE_ env vars status so build failures are diagnosable
+const viteVars = Object.keys(process.env).filter(k => k.startsWith('VITE_'));
+if (viteVars.length > 0) {
+  console.log(`  VITE env vars available: ${viteVars.join(', ')}`);
+} else {
+  console.warn("  WARNING: No VITE_ environment variables found. Client auth may not work in production.");
+}
+
+execSync("npx vite build", { cwd: rootDir, stdio: "inherit", env: process.env });
 
 console.log("Building server...");
 await esbuild.build({

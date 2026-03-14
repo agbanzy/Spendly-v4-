@@ -1259,7 +1259,7 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Access denied" });
       }
 
-      if (!['Pending', 'Overdue', 'changes_requested'].includes(bill.status)) {
+      if (!['pending', 'overdue', 'changes_requested'].includes(bill.status.toLowerCase())) {
         return res.status(400).json({ error: "Bill is not in a state that can be approved" });
       }
 
@@ -1267,7 +1267,7 @@ export async function registerRoutes(
       const userName = await getAuditUserName(req);
 
       const updatedBill = await storage.updateBill(bill.id, {
-        status: 'Approved',
+        status: 'approved',
         approvedBy: userId,
         approvedAt: new Date().toISOString(),
         reviewerComments: null,
@@ -1275,7 +1275,7 @@ export async function registerRoutes(
 
       await logAudit('bill', bill.id, 'approved', userId, userName,
         { status: bill.status },
-        { status: 'Approved' },
+        { status: 'approved' },
         { approvedBy: userId, billName: bill.name, amount: bill.amount }
       );
 
@@ -1298,7 +1298,7 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Access denied" });
       }
 
-      if (!['Pending', 'changes_requested'].includes(bill.status)) {
+      if (!['pending', 'changes_requested'].includes(bill.status.toLowerCase())) {
         return res.status(400).json({ error: "Only pending bills can be rejected" });
       }
 
@@ -1306,12 +1306,12 @@ export async function registerRoutes(
       const userName = await getAuditUserName(req);
 
       const updatedBill = await storage.updateBill(bill.id, {
-        status: 'Rejected',
+        status: 'rejected',
       });
 
       await logAudit('bill', bill.id, 'rejected', userId, userName,
         { status: bill.status },
-        { status: 'Rejected' },
+        { status: 'rejected' },
         { reason: reason || 'No reason', rejectedBy: userId }
       );
 
@@ -1337,7 +1337,7 @@ export async function registerRoutes(
       if (company && !await verifyCompanyAccess(bill.companyId, company.companyId)) {
         return res.status(403).json({ error: "Access denied" });
       }
-      if (bill.status !== 'Pending') {
+      if (bill.status.toLowerCase() !== 'pending') {
         return res.status(400).json({ error: "Only pending bills can have changes requested" });
       }
 
@@ -2567,7 +2567,7 @@ export async function registerRoutes(
         department: (department || 'General') as any,
         departmentId: null,
         avatar: null,
-        status: 'Invited',
+        status: 'invited',
         companyId,
         userId: null,
         joinedAt: new Date().toISOString().split('T')[0],
@@ -4287,7 +4287,7 @@ export async function registerRoutes(
 
       try {
         await paymentService.updateCardStatus(card.stripeCardId, 'canceled');
-        const updatedCard = await storage.updateCard(param(req.params.id), { status: 'Cancelled' });
+        const updatedCard = await storage.updateCard(param(req.params.id), { status: 'cancelled' });
         res.json(updatedCard);
       } catch (stripeError: any) {
         const mapped = mapPaymentError(stripeError, 'stripe');
@@ -5809,7 +5809,7 @@ export async function registerRoutes(
         
         // Update transaction status
         await storage.updateTransactionByReference(reference, {
-          status: 'Reversed',
+          status: 'reversed',
         });
 
         // Find and update payout if exists
@@ -7620,8 +7620,8 @@ export async function registerRoutes(
     bvnNumber: optionalString,
   });
 
-  // Submit KYC
-  app.post("/api/kyc", sensitiveLimiter, requireAuth, async (req, res) => {
+  // Submit KYC (also aliased as /api/kyc/submit)
+  const handleKycSubmission = async (req: any, res: any) => {
     try {
       const parseResult = kycSubmissionSchema.safeParse(req.body);
       if (!parseResult.success) {
@@ -7638,6 +7638,21 @@ export async function registerRoutes(
       const cognitoSub = (req as any).user?.cognitoSub;
       if (!cognitoSub) {
         return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // Prevent duplicate submissions — check for existing active KYC
+      const existingProfile = await storage.getUserProfileByCognitoSub(cognitoSub);
+      if (existingProfile) {
+        const existingKyc = await storage.getKycSubmission(existingProfile.id);
+        if (existingKyc) {
+          if (existingKyc.status === 'approved') {
+            return res.status(409).json({ error: 'Your identity is already verified. No resubmission needed.' });
+          }
+          if (existingKyc.status === 'pending_review') {
+            return res.status(409).json({ error: 'You already have a verification in review. Please wait for the result before resubmitting.' });
+          }
+          // If rejected or other status, allow resubmission — we'll update the existing record
+        }
       }
 
       // SERVER-SIDE VALIDATION: ID type, expiry, age
@@ -7761,8 +7776,8 @@ export async function registerRoutes(
       }
 
       const kycStatus = isAutoApproved ? 'approved' : 'pending_review';
-      
-      const submission = await storage.createKycSubmission({
+
+      const kycData = {
         userProfileId: userProfile.id,
         firstName: data.firstName,
         lastName: data.lastName,
@@ -7796,9 +7811,20 @@ export async function registerRoutes(
         reviewedBy: isAutoApproved ? 'system' : null,
         reviewedAt: isAutoApproved ? now : null,
         submittedAt: now,
-        createdAt: now,
         updatedAt: now,
-      });
+      };
+
+      // If there's a rejected submission, update it instead of creating a new one
+      const existingKyc = await storage.getKycSubmission(userProfile.id);
+      let submission;
+      if (existingKyc && existingKyc.status === 'rejected') {
+        submission = await storage.updateKycSubmission(existingKyc.id, kycData);
+      } else {
+        submission = await storage.createKycSubmission({
+          ...kycData,
+          createdAt: now,
+        });
+      }
 
       // Update user profile KYC status using cognitoSub
       await storage.updateUserProfile(cognitoSub, {
@@ -7940,15 +7966,18 @@ export async function registerRoutes(
         }
       }
 
-      res.status(201).json({ 
-        ...submission, 
+      res.status(201).json({
+        ...submission,
         virtualAccount,
-        autoApproved: isAutoApproved 
+        autoApproved: isAutoApproved
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message || "Failed to submit KYC" });
     }
-  });
+  };
+
+  app.post("/api/kyc", sensitiveLimiter, requireAuth, handleKycSubmission);
+  app.post("/api/kyc/submit", sensitiveLimiter, requireAuth, handleKycSubmission);
 
   // Update KYC submission
   app.patch("/api/kyc/:id", requireAuth, async (req, res) => {

@@ -7,6 +7,8 @@ import {
   checkAuthState,
   getUserInfoFromSession,
   getCognitoErrorMessage,
+  exchangeCodeForTokens,
+  storeOAuthSession,
   type CognitoUserInfo,
 } from "./cognito";
 import { apiRequest } from "./queryClient";
@@ -27,6 +29,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   loginWithToken: (idToken: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
+  handleOAuthCallback: (code: string) => Promise<{ isNewUser: boolean }>;
   signup: (name: string, email: string, password: string, extra?: { phoneNumber?: string; country?: string }) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -122,6 +125,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     cognitoSignInWithGoogle();
   };
 
+  const handleOAuthCallback = async (code: string): Promise<{ isNewUser: boolean }> => {
+    const tokens = await exchangeCodeForTokens(code);
+    const userInfo = storeOAuthSession(tokens);
+
+    // Sync with server — check if profile already exists
+    let isNewUser = false;
+    try {
+      const res = await fetch(`/api/user-profile/${userInfo.sub}`, {
+        headers: { Authorization: `Bearer ${tokens.id_token}` },
+        credentials: 'include',
+      });
+      if (res.status === 404) {
+        isNewUser = true;
+      }
+    } catch {
+      isNewUser = true;
+    }
+
+    const serverRole = await ensureUserProfile(userInfo);
+    setUser(mapCognitoUser(userInfo, serverRole));
+    return { isNewUser };
+  };
+
   const signup = async (
     name: string,
     email: string,
@@ -154,6 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       loginWithToken,
       loginWithGoogle,
+      handleOAuthCallback,
       signup,
       logout
     }}>

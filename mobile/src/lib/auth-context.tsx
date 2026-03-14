@@ -169,7 +169,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = async (email: string, password: string, fullName?: string) => {
     try {
-      await signUp(email, password, fullName);
+      await signUp(email, password, fullName || email.split('@')[0]);
       // Auto-confirm Lambda auto-verifies, so sign in immediately
       const session = await signIn(email, password);
       // Ensure token is stored in AsyncStorage before any API calls

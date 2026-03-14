@@ -74,16 +74,18 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, server-to-server)
+    // Allow requests with no origin (same-origin, mobile apps, curl, server-to-server)
     if (!origin) return callback(null, true);
     // In development, allow all origins
     if (process.env.NODE_ENV !== 'production') return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
+    // Log blocked origin for debugging
+    console.warn(`CORS blocked origin: ${origin}. Allowed: ${allowedOrigins.join(', ')}`);
     callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-transaction-pin'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-transaction-pin', 'X-Company-Id'],
 }));
 
 // Apply rate limiting to all API routes
