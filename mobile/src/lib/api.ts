@@ -16,6 +16,10 @@ async function refreshAuthToken(): Promise<string | null> {
   refreshPromise = (async () => {
     try {
       const newToken = await getIdToken();
+      if (newToken) {
+        // Persist the refreshed token so subsequent requests can use it
+        await AsyncStorage.setItem('authToken', newToken);
+      }
       return newToken;
     } catch {
       return null;
@@ -50,8 +54,24 @@ export async function apiRequest<T>(
     token = await refreshAuthToken();
   }
 
+  // Proactively refresh if token looks expired (JWT exp check)
+  if (token) {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      const expiresIn = (payload.exp * 1000) - Date.now();
+      // Refresh if token expires within 2 minutes
+      if (expiresIn < 120_000) {
+        const freshToken = await refreshAuthToken();
+        if (freshToken) token = freshToken;
+      }
+    } catch {
+      // Token decode failed — let the request proceed, 401 handler will catch it
+    }
+  }
+
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest', // CSRF protection
   };
 
   if (token) {

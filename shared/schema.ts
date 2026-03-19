@@ -240,6 +240,8 @@ export const expenses = pgTable("expenses", {
   index("expenses_date_idx").on(t.date),
   index("expenses_status_idx").on(t.status),
   index("expenses_company_id_status_idx").on(t.companyId, t.status),
+  index("expenses_department_id_idx").on(t.departmentId),
+  index("expenses_vendor_id_idx").on(t.vendorId),
 ]);
 
 // Transactions table — external-facing transaction records
@@ -264,6 +266,7 @@ export const transactions = pgTable("transactions", {
   index("transactions_type_idx").on(t.type),
   index("transactions_company_id_idx").on(t.companyId),
   index("transactions_reference_idx").on(t.reference),
+  index("transactions_user_id_idx").on(t.userId),
 ]);
 
 // Bills table

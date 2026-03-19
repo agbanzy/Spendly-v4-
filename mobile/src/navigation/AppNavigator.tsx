@@ -1,13 +1,14 @@
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useEffect, useRef } from 'react';
+import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Alert, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../lib/auth-context';
 import { useTheme } from '../lib/theme-context';
+import { setOnAuthExpired } from '../lib/api';
 import OfflineBanner from '../components/OfflineBanner';
 import LoginScreen from '../screens/LoginScreen';
 import SignupScreen from '../screens/SignupScreen';
@@ -144,12 +145,41 @@ function AuthStack() {
 
 function OnboardingWrapper() {
   const { completeOnboarding } = useAuth();
-  return <OnboardingScreen onComplete={completeOnboarding} />;
+  return <OnboardingScreen onComplete={(startKYC) => completeOnboarding(startKYC)} />;
 }
 
 export default function AppNavigator() {
-  const { user, loading, onboardingComplete } = useAuth();
+  const { user, loading, onboardingComplete, logout, pendingKYCNavigation, clearPendingKYCNavigation } = useAuth();
   const { colors } = useTheme();
+  const navigationRef = useRef<NavigationContainerRef<any>>(null);
+
+  // Wire up session expiration handler — forces logout on 401
+  useEffect(() => {
+    setOnAuthExpired(() => {
+      Alert.alert(
+        'Session Expired',
+        'Your session has expired. Please sign in again.',
+        [{ text: 'OK', onPress: () => logout() }],
+      );
+    });
+  }, [logout]);
+
+  // Handle deferred KYC navigation after onboarding completes
+  // When user taps "Verify Now" on onboarding, the navigator remounts
+  // from Onboarding → MainTabs, so we defer the KYC navigation here
+  useEffect(() => {
+    if (pendingKYCNavigation && onboardingComplete && user && navigationRef.current) {
+      const timer = setTimeout(() => {
+        try {
+          navigationRef.current?.navigate('More', { screen: 'KYC' });
+        } catch {
+          // Navigation might not be ready yet, ignore
+        }
+        clearPendingKYCNavigation();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [pendingKYCNavigation, onboardingComplete, user, clearPendingKYCNavigation]);
 
   if (loading) {
     return (
@@ -178,7 +208,7 @@ export default function AppNavigator() {
       <SafeAreaView edges={['top']} style={{ backgroundColor: colors.background }}>
         <OfflineBanner />
       </SafeAreaView>
-      <NavigationContainer>
+      <NavigationContainer ref={navigationRef}>
         {content}
       </NavigationContainer>
     </>

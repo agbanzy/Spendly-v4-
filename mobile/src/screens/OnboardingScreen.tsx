@@ -61,7 +61,7 @@ const TEAM_SIZES = [
 ];
 
 interface OnboardingScreenProps {
-  onComplete: () => void;
+  onComplete: (startKYC?: boolean) => void;
   navigation?: any;
 }
 
@@ -148,12 +148,9 @@ export default function OnboardingScreen({ onComplete, navigation }: OnboardingS
         onboardingCompleted: true,
       });
 
-      onComplete();
-
-      if (startKYC && navigation) {
-        // Small delay to let navigation update
-        setTimeout(() => navigation.navigate('KYC'), 300);
-      }
+      // Pass startKYC flag to auth context — the navigator will handle
+      // deferred KYC navigation after the screen tree remounts to MainTabs
+      onComplete(startKYC);
     } catch (error: any) {
       Alert.alert('Error', error?.message || 'Failed to save profile. Please try again.');
     } finally {

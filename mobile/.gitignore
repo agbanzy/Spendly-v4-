@@ -1,0 +1,19 @@
+# Build artifacts
+*.aab
+*.apk
+*.ipa
+*.tar.gz
+
+# Expo
+.expo/
+dist/
+web-build/
+
+# Node
+node_modules/
+
+# Store screenshots (large binaries)
+store-screenshots/
+
+# OS files
+.DS_Store

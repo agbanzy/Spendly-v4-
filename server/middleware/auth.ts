@@ -23,8 +23,6 @@ declare global {
   }
 }
 
-const isDevelopment = process.env.NODE_ENV === 'development';
-
 /**
  * Middleware to verify Cognito ID token from Authorization header
  * Expected header format: "Authorization: Bearer <cognito_id_token>"
@@ -45,39 +43,12 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
     // Verify Cognito ID token
     if (!idTokenVerifier || !isCognitoConfigured) {
-      // SECURITY: In production, fail-closed if Cognito not configured
-      if (!isDevelopment) {
-        console.error('SECURITY: Cognito not configured in production - rejecting request');
-        return res.status(503).json({
-          error: 'Service Unavailable',
-          message: 'Authentication service not configured'
-        });
-      }
-      // Only in development: bypass with warning and extract user from token payload
-      console.warn('DEV MODE: Cognito not configured - bypassing token verification');
-
-      // Try to decode the token payload (not verified, but useful for dev)
-      try {
-        const [, payloadBase64] = token.split('.');
-        if (payloadBase64) {
-          const payload = JSON.parse(Buffer.from(payloadBase64, 'base64').toString());
-          req.user = {
-            uid: payload.sub || payload.user_id || 'dev-user',
-            cognitoSub: payload.sub || payload.user_id || 'dev-user',
-            email: payload.email || 'dev@example.com',
-            displayName: payload.name || payload['cognito:username'] || 'Dev User',
-          };
-        }
-      } catch (e) {
-        // If token parsing fails, set a default dev user
-        req.user = {
-          uid: 'dev-user',
-          cognitoSub: 'dev-user',
-          email: 'dev@example.com',
-          displayName: 'Dev User',
-        };
-      }
-      return next();
+      // SECURITY: Fail-closed — reject all requests if Cognito is not configured
+      console.error('SECURITY: Cognito not configured - rejecting request');
+      return res.status(503).json({
+        error: 'Service Unavailable',
+        message: 'Authentication service not configured'
+      });
     }
 
     try {
@@ -127,8 +98,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
         // Look up user by Cognito sub
         const userProfile = await storage.getUserProfileByCognitoSub(payload.sub);
         if (userProfile) {
-          const users = await storage.getUsers();
-          const adminUser = users.find(u => u.email === userProfile.email || u.id === userProfile.id?.toString());
+          const adminUser = await storage.getUserByEmail(userProfile.email);
           if (adminUser && ['OWNER', 'ADMIN'].includes(adminUser.role)) {
             req.adminUser = {
               id: adminUser.id,
@@ -144,43 +114,11 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
       }
     }
 
-    // SECURITY: Header-based admin auth ONLY in development
-    if (!isDevelopment) {
-      return res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Admin authentication requires a valid Cognito token'
-      });
-    }
-
-    // DEV ONLY: Fallback to header-based auth for local testing
-    console.warn('DEV MODE: Using x-admin-user-id header for admin auth');
-    const adminUserId = req.headers['x-admin-user-id'] as string;
-
-    if (!adminUserId) {
-      return res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Admin authentication required'
-      });
-    }
-
-    const users = await storage.getUsers();
-    const adminUser = users.find(u => u.id === adminUserId);
-
-    if (!adminUser || !['OWNER', 'ADMIN'].includes(adminUser.role)) {
-      return res.status(403).json({
-        error: 'Forbidden',
-        message: 'Admin privileges required'
-      });
-    }
-
-    req.adminUser = {
-      id: adminUser.id,
-      username: adminUser.username,
-      email: adminUser.email,
-      role: adminUser.role,
-    };
-
-    next();
+    // SECURITY: No valid admin token found — reject
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Admin authentication requires a valid Cognito token'
+    });
   } catch (error) {
     console.error('Admin authentication error:', error);
     return res.status(500).json({
@@ -256,7 +194,7 @@ export async function optionalAuth(req: Request, res: Response, next: NextFuncti
 /**
  * Middleware to enforce transaction PIN on sensitive financial operations.
  * PIN is MANDATORY — if user has no PIN set, they must set one first.
- * Expected header: "x-transaction-pin: <4-digit-pin>"
+ * Expected header: "x-transaction-pin: <6-digit-pin>"
  * Must be used AFTER requireAuth (needs req.user).
  */
 export async function requirePin(req: Request, res: Response, next: NextFunction) {
@@ -286,7 +224,7 @@ export async function requirePin(req: Request, res: Response, next: NextFunction
     }
 
     // Validate PIN format
-    if (!/^\d{4}$/.test(pin)) {
+    if (!/^\d{4,6}$/.test(pin)) {
       return res.status(403).json({
         error: 'Invalid PIN format',
         code: 'PIN_INVALID',

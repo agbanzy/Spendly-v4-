@@ -170,8 +170,17 @@ export function confirmForgotPassword(
 export function signOut(): void {
   const user = getCurrentUser();
   if (user) {
-    user.signOut();
+    // Global sign-out: invalidates all tokens server-side via Cognito
+    user.globalSignOut({
+      onSuccess: () => {},
+      onFailure: () => {
+        // Fall back to local sign-out if global fails (e.g. network error)
+        user.signOut();
+      },
+    });
   }
+  // Clear SMS login token
+  localStorage.removeItem('sms_id_token');
 }
 
 // --- Google OAuth (Cognito Hosted UI redirect) ---

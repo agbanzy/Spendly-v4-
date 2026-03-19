@@ -175,7 +175,7 @@ export default function SignupPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 text-white/40 text-sm">
+          <div className="flex items-center gap-4 text-white/60 text-sm">
             <span>Free 14-day trial</span>
             <span className="w-1 h-1 rounded-full bg-white/30" />
             <span>No credit card required</span>
@@ -294,6 +294,7 @@ export default function SignupPage() {
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label={showPassword ? "Hide password" : "Show password"}
                       >
                         {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>

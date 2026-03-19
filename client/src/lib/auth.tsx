@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { queryClient } from "./queryClient";
 import {
   signInWithEmail,
   signUpWithEmail,
@@ -169,6 +170,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     clearPinCache();
     cognitoSignOut();
+    queryClient.clear();
     setUser(null);
   };
 

@@ -20,9 +20,13 @@ import { requireAuth, requireAdmin, requireOwnership, requirePin } from "./middl
 import { verifyPaystackSignature, PaystackWebhookHandler } from './paystackWebhook';
 import { registerStripeWebhooks } from './webhookHandlers';
 import { mapPaymentError, Money, paymentLogger } from './utils/paymentUtils';
+import { validateUploadedFile } from './utils/fileValidation';
 import { IdempotencyCache } from './utils/idempotencyCache';
 import { computeNextDate, runRecurringScheduler } from './recurringScheduler';
 import { registerSmsAuthRoutes } from './sms-auth';
+import { db } from './db';
+import { companyBalances, transactions as transactionsTable } from '@shared/schema';
+import { eq } from 'drizzle-orm';
 import { getPrimaryIdForCountry, getProviderForCountry, getCurrencyForCountry as getCountryCurrency } from '@shared/constants';
 
 // Helper to safely extract route params (Express 5 types params as string | string[])
@@ -4200,8 +4204,8 @@ export async function registerRoutes(
     }
   });
 
-  // Get sensitive card details (card number, CVV) - Rate limited
-  app.get("/api/cards/:id/details", sensitiveLimiter, requireAuth, async (req, res) => {
+  // Get sensitive card details (card number, CVV) - Rate limited + PIN required
+  app.get("/api/cards/:id/details", sensitiveLimiter, requireAuth, requirePin, async (req, res) => {
     try {
       const card = await storage.getCard(param(req.params.id));
       if (!card) {
@@ -4218,7 +4222,15 @@ export async function registerRoutes(
 
       try {
         const details = await paymentService.getCardDetails(card.stripeCardId);
-        res.json(details);
+        // Mask card number — show only last 4 digits for security
+        const maskedNumber = details.number
+          ? `${'*'.repeat(details.number.length - 4)}${details.number.slice(-4)}`
+          : undefined;
+        res.json({
+          ...details,
+          number: maskedNumber,
+          // CVC is intentionally returned (PIN-protected) for card usage
+        });
       } catch (stripeError: any) {
         const mapped = mapPaymentError(stripeError, 'stripe');
         return res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
@@ -4228,8 +4240,8 @@ export async function registerRoutes(
     }
   });
 
-  // Update spending controls
-  app.patch("/api/cards/:id/controls", requireAuth, async (req, res) => {
+  // Update spending controls - PIN required (changes financial limits)
+  app.patch("/api/cards/:id/controls", requireAuth, requirePin, async (req, res) => {
     try {
       const { spendingLimit, spendingLimitInterval, allowedCategories, blockedCategories } = req.body;
       const card = await storage.getCard(param(req.params.id));
@@ -5134,23 +5146,26 @@ export async function registerRoutes(
         reason
       );
 
-      // Deduct from correct currency balance
-      if (currency === 'USD' || ['US', 'CA'].includes(countryCode)) {
-        await storage.updateBalances({ usd: String(currentBalance - amount) });
-      } else {
-        await storage.updateBalances({ local: String(currentBalance - amount) });
-      }
+      // Wrap balance deduction + transaction record in a DB transaction
+      // to prevent balance/ledger mismatch if either step fails
+      await db.transaction(async (tx) => {
+        // Deduct from correct currency balance
+        const balanceUpdate = (currency === 'USD' || ['US', 'CA'].includes(countryCode))
+          ? { usd: String(currentBalance - amount) }
+          : { local: String(currentBalance - amount) };
+        await tx.update(companyBalances).set(balanceUpdate as any);
 
-      await storage.createTransaction({
-        type: 'payout',
-        amount: String(amount),
-        fee: "0",
-        status: 'processing',
-        date: new Date().toISOString().split('T')[0],
-        description: reason,
-        currency,
-        reference: null,
-        userId: (req as any).user?.uid || null,
+        await tx.insert(transactionsTable).values({
+          type: 'payout',
+          amount: String(amount),
+          fee: "0",
+          status: 'processing',
+          date: new Date().toISOString().split('T')[0],
+          description: reason,
+          currency,
+          reference: null,
+          userId: (req as any).user?.uid || null,
+        } as any);
       });
 
       const userId = (req as any).user?.uid || 'system';
@@ -8046,7 +8061,13 @@ export async function registerRoutes(
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
-      
+
+      // Validate magic bytes to prevent MIME spoofing
+      if (!validateUploadedFile(req.file.path, req.file.mimetype)) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ error: "Invalid file content. Only JPEG, PNG, and PDF files are allowed." });
+      }
+
       const fileUrl = `/uploads/${req.file.filename}`;
       res.json({ url: fileUrl, filename: req.file.filename });
     });
@@ -10071,27 +10092,31 @@ export async function registerRoutes(
           const settings = await getSettingsForRequest(req);
           const currency = settings.currency || 'USD';
 
-          // Create payout
-          const payout = await storage.createPayout({
-            type: 'payroll',
-            amount: entry.netPay || entry.salary,
-            currency,
-            status: 'pending',
-            recipientType: 'employee',
-            recipientId: entry.employeeId,
-            recipientName: entry.employeeName,
-            destinationId: defaultDestination?.id,
-            provider: defaultDestination?.provider || 'stripe',
-            relatedEntityType: 'payroll',
-            relatedEntityId: entry.id,
-            initiatedBy,
-          });
+          // Wrap payout creation + payroll update in a DB transaction
+          // to prevent orphaned payouts without payroll linkage
+          const payout = await db.transaction(async () => {
+            const payout = await storage.createPayout({
+              type: 'payroll',
+              amount: entry.netPay || entry.salary,
+              currency,
+              status: 'pending',
+              recipientType: 'employee',
+              recipientId: entry.employeeId,
+              recipientName: entry.employeeName,
+              destinationId: defaultDestination?.id,
+              provider: defaultDestination?.provider || 'stripe',
+              relatedEntityType: 'payroll',
+              relatedEntityId: entry.id,
+              initiatedBy,
+            });
 
-          // Update payroll entry
-          await storage.updatePayrollEntry(entry.id, {
-            status: 'processing',
-            payoutId: payout.id,
-          } as any);
+            await storage.updatePayrollEntry(entry.id, {
+              status: 'processing',
+              payoutId: payout.id,
+            } as any);
+
+            return payout;
+          });
 
           results.push({ payrollId, payoutId: payout.id, status: 'created' });
         } catch (err: any) {
@@ -10153,7 +10178,7 @@ export async function registerRoutes(
 
   // ==================== VIRTUAL ACCOUNT CREATION ON SIGNUP ====================
   
-  app.post("/api/virtual-accounts/create", requireAuth, async (req, res) => {
+  app.post("/api/virtual-accounts/create", requireAuth, requirePin, async (req, res) => {
     try {
       // SECURITY: Use authenticated user's ID
       const userId = req.user!.cognitoSub;

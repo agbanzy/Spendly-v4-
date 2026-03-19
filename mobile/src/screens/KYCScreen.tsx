@@ -214,8 +214,15 @@ export default function KYCScreen({ navigation }: KYCScreenProps) {
   };
 
   const handleBack = () => {
-    if (step > 1) animateTransition(step - 1);
-    else if (navigation?.canGoBack()) navigation.goBack();
+    if (step > 1) {
+      animateTransition(step - 1);
+    } else if (navigation?.canGoBack()) {
+      navigation.goBack();
+    } else if (navigation) {
+      // Fallback: navigate to Settings (root of MoreStack) when canGoBack is false
+      // This happens when KYC is opened via deferred navigation from onboarding
+      navigation.navigate('Settings');
+    }
   };
 
   const handleSubmit = async () => {
@@ -262,7 +269,11 @@ export default function KYCScreen({ navigation }: KYCScreenProps) {
           {
             text: 'OK',
             onPress: () => {
-              if (navigation?.canGoBack()) navigation.goBack();
+              if (navigation?.canGoBack()) {
+                navigation.goBack();
+              } else if (navigation) {
+                navigation.navigate('Settings');
+              }
             },
           },
         ]

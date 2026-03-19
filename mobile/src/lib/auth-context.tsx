@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   signIn,
   signUp,
@@ -36,12 +37,14 @@ interface AuthContextType {
   profileSyncError: boolean;
   onboardingComplete: boolean;
   userProfile: UserProfile | null;
+  pendingKYCNavigation: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, fullName?: string) => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   retrySyncProfile: () => Promise<void>;
-  completeOnboarding: () => void;
+  completeOnboarding: (startKYC?: boolean) => void;
+  clearPendingKYCNavigation: () => void;
   refreshProfile: () => Promise<void>;
 }
 
@@ -85,6 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profileSyncError, setProfileSyncError] = useState(false);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [pendingKYCNavigation, setPendingKYCNavigation] = useState(false);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -144,8 +148,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [user]);
 
-  const completeOnboarding = useCallback(() => {
+  const completeOnboarding = useCallback((startKYC?: boolean) => {
+    if (startKYC) {
+      setPendingKYCNavigation(true);
+    }
     setOnboardingComplete(true);
+  }, []);
+
+  const clearPendingKYCNavigation = useCallback(() => {
+    setPendingKYCNavigation(false);
   }, []);
 
   const login = async (email: string, password: string) => {
@@ -192,7 +203,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     setProfileSyncError(false);
     setOnboardingComplete(false);
+    setPendingKYCNavigation(false);
     setUserProfile(null);
+    await AsyncStorage.removeItem('authToken');
     await signOut();
     setUser(null);
   };
@@ -212,12 +225,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profileSyncError,
       onboardingComplete,
       userProfile,
+      pendingKYCNavigation,
       login,
       register,
       logout,
       resetPassword: resetPasswordHandler,
       retrySyncProfile,
       completeOnboarding,
+      clearPendingKYCNavigation,
       refreshProfile,
     }}>
       {children}

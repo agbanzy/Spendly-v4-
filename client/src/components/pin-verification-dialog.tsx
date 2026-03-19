@@ -19,7 +19,7 @@ import {
 } from "@/lib/pin-cache";
 
 // ── PIN Verification Dialog ────────────────────────────────────
-// Collects a 4-digit PIN. No separate verify-pin API call — the
+// Collects a 6-digit PIN. No separate verify-pin API call — the
 // actual verification happens server-side when the protected
 // endpoint is called with the x-transaction-pin header.
 
@@ -37,12 +37,14 @@ export function PinVerificationDialog({
   onOpenChange,
   onVerified,
   title = "Enter Transaction PIN",
-  description = "Please enter your 4-digit transaction PIN to authorize this action.",
+  description = "Please enter your 6-digit transaction PIN to authorize this action.",
   error: externalError,
 }: PinVerificationDialogProps) {
-  const [pin, setPin] = useState(["", "", "", ""]);
+  const [pin, setPin] = useState(["", "", "", "", "", ""]);
   const [error, setError] = useState("");
   const inputRefs = [
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
@@ -51,7 +53,7 @@ export function PinVerificationDialog({
 
   useEffect(() => {
     if (open) {
-      setPin(["", "", "", ""]);
+      setPin(["", "", "", "", "", ""]);
       setError("");
       setTimeout(() => inputRefs[0].current?.focus(), 100);
     }
@@ -69,13 +71,13 @@ export function PinVerificationDialog({
     setPin(newPin);
     setError("");
 
-    if (value && index < 3) {
+    if (value && index < 5) {
       inputRefs[index + 1].current?.focus();
     }
 
-    if (value && index === 3) {
+    if (value && index === 5) {
       const fullPin = newPin.join("");
-      if (fullPin.length === 4) {
+      if (fullPin.length === 6) {
         onVerified(fullPin);
       }
     }
@@ -89,8 +91,8 @@ export function PinVerificationDialog({
 
   const handlePaste = (e: React.ClipboardEvent) => {
     e.preventDefault();
-    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 4);
-    if (pasted.length === 4) {
+    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (pasted.length === 6) {
       setPin(pasted.split(""));
       onVerified(pasted);
     }
@@ -120,7 +122,7 @@ export function PinVerificationDialog({
               value={digit}
               onChange={(e) => handleDigitChange(i, e.target.value)}
               onKeyDown={(e) => handleKeyDown(i, e)}
-              className="w-14 h-14 text-center text-2xl font-bold"
+              className="w-12 h-12 text-center text-xl font-bold"
               data-testid={`input-pin-digit-${i}`}
               autoComplete="off"
             />
@@ -163,12 +165,14 @@ export function PinSetupDialog({
   onSetupComplete,
 }: PinSetupDialogProps) {
   const [step, setStep] = useState<"create" | "confirm">("create");
-  const [createPin, setCreatePin] = useState(["", "", "", ""]);
-  const [confirmPin, setConfirmPin] = useState(["", "", "", ""]);
+  const [createPin, setCreatePin] = useState(["", "", "", "", "", ""]);
+  const [confirmPin, setConfirmPin] = useState(["", "", "", "", "", ""]);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const createRefs = [
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
@@ -179,13 +183,15 @@ export function PinSetupDialog({
     useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
   ];
 
   useEffect(() => {
     if (open) {
       setStep("create");
-      setCreatePin(["", "", "", ""]);
-      setConfirmPin(["", "", "", ""]);
+      setCreatePin(["", "", "", "", "", ""]);
+      setConfirmPin(["", "", "", "", "", ""]);
       setError("");
       setTimeout(() => createRefs[0].current?.focus(), 100);
     }
@@ -205,12 +211,12 @@ export function PinSetupDialog({
     setPins(newPin);
     setError("");
 
-    if (value && index < 3) {
+    if (value && index < 5) {
       refs[index + 1].current?.focus();
     }
-    if (value && index === 3) {
+    if (value && index === 5) {
       const fullPin = newPin.join("");
-      if (fullPin.length === 4) onComplete?.(fullPin);
+      if (fullPin.length === 6) onComplete?.(fullPin);
     }
   };
 
@@ -227,7 +233,7 @@ export function PinSetupDialog({
 
   const handleCreateComplete = () => {
     setStep("confirm");
-    setConfirmPin(["", "", "", ""]);
+    setConfirmPin(["", "", "", "", "", ""]);
     setTimeout(() => confirmRefs[0].current?.focus(), 100);
   };
 
@@ -235,7 +241,7 @@ export function PinSetupDialog({
     const createdPin = createPin.join("");
     if (fullPin !== createdPin) {
       setError("PINs do not match. Please try again.");
-      setConfirmPin(["", "", "", ""]);
+      setConfirmPin(["", "", "", "", "", ""]);
       setTimeout(() => confirmRefs[0].current?.focus(), 100);
       return;
     }
@@ -275,7 +281,7 @@ export function PinSetupDialog({
           </div>
           <DialogDescription>
             {step === "create"
-              ? "Create a 4-digit PIN to authorize sensitive financial actions. This PIN is required for all payments, transfers, and approvals."
+              ? "Create a 6-digit PIN to authorize sensitive financial actions. This PIN is required for all payments, transfers, and approvals."
               : "Enter your PIN again to confirm."}
           </DialogDescription>
         </DialogHeader>
@@ -300,7 +306,7 @@ export function PinSetupDialog({
                 )
               }
               onKeyDown={(e) => handleKeyDown(activeRefs, activePins, i, e)}
-              className="w-14 h-14 text-center text-2xl font-bold"
+              className="w-12 h-12 text-center text-xl font-bold"
               disabled={isSubmitting}
               autoComplete="off"
             />
@@ -327,7 +333,7 @@ export function PinSetupDialog({
               size="sm"
               onClick={() => {
                 setStep("create");
-                setCreatePin(["", "", "", ""]);
+                setCreatePin(["", "", "", "", "", ""]);
                 setError("");
                 setTimeout(() => createRefs[0].current?.focus(), 100);
               }}

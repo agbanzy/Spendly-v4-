@@ -199,43 +199,80 @@ export function validateStripeBankDetails(
   return { valid: true };
 }
 
+const MAX_RETRIES = 2;
+const RETRY_BASE_DELAY_MS = 1000;
+
+function isRetryable(error: any, statusCode?: number): boolean {
+  // Network errors and timeouts
+  if (error.name === 'AbortError' || error.code === 'ECONNRESET' || error.code === 'ECONNREFUSED') return true;
+  if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) return true;
+  // Server errors (5xx) are transient
+  if (statusCode && statusCode >= 500) return true;
+  return false;
+}
+
 async function paystackRequest(endpoint: string, method: string = 'GET', body?: any) {
   const secretKey = getPaystackSecretKey();
+  let lastError: any;
 
-  // AbortController for request timeout
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), PAYSTACK_TIMEOUT_MS);
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), PAYSTACK_TIMEOUT_MS);
 
-  try {
-    const options: RequestInit = {
-      method,
-      headers: {
-        'Authorization': `Bearer ${secretKey}`,
-        'Content-Type': 'application/json',
-      },
-      signal: controller.signal,
-    };
+    try {
+      const options: RequestInit = {
+        method,
+        headers: {
+          'Authorization': `Bearer ${secretKey}`,
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+      };
 
-    if (body) {
-      options.body = JSON.stringify(body);
+      if (body) {
+        options.body = JSON.stringify(body);
+      }
+
+      const response = await fetch(`${PAYSTACK_BASE_URL}${endpoint}`, options);
+      const data = await response.json();
+
+      if (!response.ok) {
+        const err = new Error(data.message || `Paystack API error (${response.status})`);
+        (err as any).statusCode = response.status;
+
+        // Only retry on 5xx; 4xx errors are permanent
+        if (isRetryable(err, response.status) && attempt < MAX_RETRIES) {
+          lastError = err;
+          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+        throw err;
+      }
+
+      return data;
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+
+      if (error.name === 'AbortError') {
+        lastError = new Error(`Paystack API request to ${endpoint} timed out after ${PAYSTACK_TIMEOUT_MS / 1000}s`);
+      } else {
+        lastError = error;
+      }
+
+      if (isRetryable(error) && attempt < MAX_RETRIES) {
+        const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+
+      throw lastError;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    const response = await fetch(`${PAYSTACK_BASE_URL}${endpoint}`, options);
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.message || `Paystack API error (${response.status})`);
-    }
-
-    return data;
-  } catch (error: any) {
-    if (error.name === 'AbortError') {
-      throw new Error(`Paystack API request to ${endpoint} timed out after ${PAYSTACK_TIMEOUT_MS / 1000}s`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
   }
+
+  throw lastError;
 }
 
 export const paystackClient = {

@@ -89,7 +89,7 @@ function useAdminSessionVerification() {
   const [isAdminVerifying, setIsAdminVerifying] = useState(true);
 
   const verifyAdminSession = useCallback(async () => {
-    const stored = localStorage.getItem("adminUser");
+    const stored = sessionStorage.getItem("adminUser");
     if (!stored) {
       setIsAdminVerified(false);
       setIsAdminVerifying(false);
@@ -109,7 +109,7 @@ function useAdminSessionVerification() {
         const data = await res.json();
         if (data.valid) {
           // Refresh stored admin data with verified server data
-          localStorage.setItem("adminUser", JSON.stringify(data.user));
+          sessionStorage.setItem("adminUser", JSON.stringify(data.user));
           setIsAdminVerified(true);
           setIsAdminVerifying(false);
           return true;
@@ -117,13 +117,13 @@ function useAdminSessionVerification() {
       }
 
       // Server rejected the session - clear invalid data
-      localStorage.removeItem("adminUser");
+      sessionStorage.removeItem("adminUser");
       setIsAdminVerified(false);
       setIsAdminVerifying(false);
       return false;
     } catch {
       // Network error - clear potentially stale data for safety
-      localStorage.removeItem("adminUser");
+      sessionStorage.removeItem("adminUser");
       setIsAdminVerified(false);
       setIsAdminVerifying(false);
       return false;
@@ -191,18 +191,21 @@ function AppLayout() {
 
   return (
     <SidebarProvider style={style as React.CSSProperties}>
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-3 focus:bg-primary focus:text-primary-foreground focus:rounded-md focus:m-2">
+        Skip to main content
+      </a>
       <div className="flex h-screen w-full overflow-hidden">
         <AppSidebar />
         <SidebarInset className="flex flex-col flex-1 overflow-hidden">
           <header className="flex items-center justify-between gap-4 h-14 px-4 border-b bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10">
             <div className="flex items-center gap-3">
-              <SidebarTrigger className="hover:bg-muted/50 transition-colors" data-testid="button-sidebar-toggle" />
+              <SidebarTrigger className="hover:bg-muted/50 transition-colors" data-testid="button-sidebar-toggle" aria-label="Toggle sidebar" />
             </div>
             <div className="flex items-center gap-2">
               <ThemeToggle />
             </div>
           </header>
-          <main className="flex-1 overflow-auto texture-mesh">
+          <main id="main-content" className="flex-1 overflow-auto texture-mesh">
             <AppRouter />
           </main>
         </SidebarInset>

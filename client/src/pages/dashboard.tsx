@@ -612,11 +612,12 @@ export default function Dashboard() {
             <div className="space-y-3">
               <div className="flex items-center gap-3">
                 <p className="text-xs font-bold text-primary uppercase tracking-widest">Total Balance ({currency})</p>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
+                <Button
+                  variant="ghost"
+                  size="icon"
                   className="h-6 w-6 text-slate-400 hover:text-white"
                   onClick={() => setShowBalance(!showBalance)}
+                  aria-label={showBalance ? "Hide balance" : "Show balance"}
                 >
                   {showBalance ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                 </Button>
@@ -725,7 +726,7 @@ export default function Dashboard() {
                 <p className="text-xs text-muted-foreground mb-1">Account Number</p>
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-bold font-mono">{primaryVirtualAccount!.accountNumber}</p>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(primaryVirtualAccount!.accountNumber)} data-testid="button-copy-account">
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(primaryVirtualAccount!.accountNumber)} data-testid="button-copy-account" aria-label="Copy account number">
                     <Copy className="h-3 w-3" />
                   </Button>
                 </div>

@@ -1,4 +1,5 @@
-import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { QueryClient, QueryFunction, MutationCache } from "@tanstack/react-query";
+import { toast } from "@/hooks/use-toast";
 import { getIdToken } from "./cognito";
 import { getCachedPin } from "./pin-cache";
 
@@ -14,7 +15,9 @@ export function getActiveCompanyId(): string | null {
 }
 
 export async function getAuthHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    "X-Requested-With": "XMLHttpRequest", // CSRF protection
+  };
   try {
     const token = await getIdToken();
     if (token) {
@@ -115,14 +118,41 @@ export function sanitizeErrorMessage(error: unknown): string {
   return cleaned.length > 200 ? cleaned.substring(0, 200) + '...' : cleaned || 'An unexpected error occurred';
 }
 
+/** Determine if a failed request is retryable (network/5xx only, not auth/client errors) */
+function isRetryableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const msg = error.message;
+    // Network failures
+    if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('ECONNREFUSED')) return true;
+    // 5xx server errors are transient
+    const status = parseInt(msg);
+    if (status >= 500 && status < 600) return true;
+  }
+  return false;
+}
+
 export const queryClient = new QueryClient({
+  mutationCache: new MutationCache({
+    onError(error) {
+      toast({
+        title: "Error",
+        description: sanitizeErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  }),
   defaultOptions: {
     queries: {
       queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
       refetchOnWindowFocus: false,
-      staleTime: 30000, // 30 seconds - financial data should not be cached indefinitely
-      retry: false,
+      staleTime: 30000,
+      retry(failureCount, error) {
+        // Only retry transient errors, max 2 attempts
+        if (failureCount >= 2) return false;
+        return isRetryableError(error);
+      },
+      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 5000),
     },
     mutations: {
       retry: false,
