@@ -1,0 +1,4770 @@
+openapi: 3.1.0
+info:
+  title: Financiar API
+  version: 4.0.0
+  description: |
+    Financiar (formerly Spendly) is a full-stack fintech platform for business
+    finance management. It supports dual payment processors (Stripe + Paystack),
+    virtual cards, multi-currency wallets, payroll, invoicing, and more.
+
+    ## Authentication
+    Most endpoints require a Bearer JWT token issued by Firebase Auth, sent via
+    the `Authorization` header.
+
+    ## Common Headers
+    | Header | Purpose |
+    |--------|---------|
+    | `Authorization` | `Bearer <jwt>` |
+    | `X-Company-Id` | Active company context |
+    | `x-transaction-pin` | 4-digit PIN for sensitive operations |
+
+    ## Response Shape
+    All responses follow a consistent envelope:
+    ```json
+    { "success": true, "data": <T> }
+    { "success": false, "error": "message" }
+    ```
+
+    ## Monetary Values
+    All monetary amounts are integers in the smallest currency unit (cents, kobo, etc.).
+  contact:
+    name: Financiar Support
+    email: lami.george@onesourceitsolutions.co.uk
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:5000
+    description: Local development
+  - url: https://api.financiar.app
+    description: Production
+
+tags:
+  - name: Health
+    description: Service health checks
+  - name: Expenses
+    description: Expense tracking and approval workflows
+  - name: Transactions
+    description: Financial transaction records
+  - name: Balances
+    description: Company balance management
+  - name: Bills
+    description: Bill management and payment
+  - name: Budgets
+    description: Budget planning and tracking
+  - name: Cards
+    description: Virtual card issuing and management (Stripe Issuing)
+  - name: Virtual Accounts
+    description: Virtual bank accounts and funding sources
+  - name: Payments
+    description: Payment processing, regions, and exchange rates
+  - name: Companies
+    description: Company management and team invitations
+  - name: Team
+    description: Team members and departments
+  - name: Invoices
+    description: Invoice creation and public payment
+  - name: Vendors
+    description: Vendor management and payments
+  - name: Payroll
+    description: Payroll processing and batch payouts
+  - name: Reports
+    description: Financial reports and AI insights
+  - name: Analytics
+    description: Dashboards, KPIs, and analytics snapshots
+  - name: KYC
+    description: User profiles and KYC verification
+  - name: Settings
+    description: Application settings
+  - name: Notifications
+    description: Notifications and push tokens
+  - name: Wallets
+    description: Multi-currency wallets and exchange rates
+  - name: Payouts
+    description: Payout destinations and processing
+  - name: Admin
+    description: Administrative operations (requires admin role)
+  - name: Webhooks
+    description: Payment processor webhook handlers
+  - name: Scheduled Payments
+    description: Recurring and scheduled payment management
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Firebase Auth JWT token
+
+  parameters:
+    CompanyId:
+      name: X-Company-Id
+      in: header
+      required: true
+      schema:
+        type: string
+      description: Active company context
+    TransactionPin:
+      name: x-transaction-pin
+      in: header
+      required: true
+      schema:
+        type: string
+        pattern: '^\d{4}$'
+      description: 4-digit transaction PIN
+    IdParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: Resource ID
+    PaginationLimit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 50
+    PaginationOffset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        default: 0
+
+  schemas:
+    SuccessResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          const: true
+        data: {}
+
+    ErrorResponse:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          const: false
+        error:
+          type: string
+
+    Expense:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        userId:
+          type: integer
+        description:
+          type: string
+        amount:
+          type: integer
+          description: Amount in cents/kobo
+        currency:
+          type: string
+        category:
+          type: string
+        status:
+          type: string
+          enum: [pending, approved, rejected, changes_requested, paid]
+        receiptUrl:
+          type: string
+          format: uri
+        createdAt:
+          type: string
+          format: date-time
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        type:
+          type: string
+          enum: [credit, debit]
+        amount:
+          type: integer
+        currency:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Bill:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        vendorId:
+          type: integer
+        description:
+          type: string
+        amount:
+          type: integer
+        currency:
+          type: string
+        dueDate:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [pending, approved, rejected, changes_requested, paid]
+        createdAt:
+          type: string
+          format: date-time
+
+    Budget:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        name:
+          type: string
+        amount:
+          type: integer
+        spent:
+          type: integer
+        period:
+          type: string
+        category:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Card:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        userId:
+          type: integer
+        last4:
+          type: string
+        brand:
+          type: string
+        status:
+          type: string
+          enum: [active, frozen, cancelled]
+        balance:
+          type: integer
+        spendingLimit:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    VirtualAccount:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        accountName:
+          type: string
+        accountNumber:
+          type: string
+        bankName:
+          type: string
+        currency:
+          type: string
+        balance:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    Company:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        industry:
+          type: string
+        country:
+          type: string
+        currency:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    TeamMember:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        userId:
+          type: integer
+        role:
+          type: string
+          enum: [owner, admin, member, viewer]
+        departmentId:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    Department:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Invoice:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        clientName:
+          type: string
+        clientEmail:
+          type: string
+        amount:
+          type: integer
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [draft, sent, paid, overdue, cancelled]
+        dueDate:
+          type: string
+          format: date
+        createdAt:
+          type: string
+          format: date-time
+
+    Vendor:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        category:
+          type: string
+        bankDetails:
+          type: object
+        createdAt:
+          type: string
+          format: date-time
+
+    PayrollEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        employeeId:
+          type: integer
+        grossPay:
+          type: integer
+        netPay:
+          type: integer
+        deductions:
+          type: integer
+        taxes:
+          type: integer
+        status:
+          type: string
+          enum: [pending, processed, paid, failed]
+        payPeriod:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Wallet:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        currency:
+          type: string
+        balance:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    PayoutDestination:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        name:
+          type: string
+        bankName:
+          type: string
+        accountNumber:
+          type: string
+        currency:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Payout:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        destinationId:
+          type: integer
+        amount:
+          type: integer
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [pending, approved, processing, completed, rejected, failed]
+        createdAt:
+          type: string
+          format: date-time
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        title:
+          type: string
+        message:
+          type: string
+        type:
+          type: string
+        read:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+        cognitoSub:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        country:
+          type: string
+        kycStatus:
+          type: string
+          enum: [not_started, pending, approved, rejected]
+        createdAt:
+          type: string
+          format: date-time
+
+    ScheduledPayment:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        amount:
+          type: integer
+        currency:
+          type: string
+        frequency:
+          type: string
+          enum: [daily, weekly, biweekly, monthly, quarterly, yearly]
+        status:
+          type: string
+          enum: [active, paused, completed, cancelled]
+        nextRunAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    HealthCheck:
+      type: object
+      properties:
+        status:
+          type: string
+        database:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+paths:
+  # ─── Health ──────────────────────────────────────────────
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Health check with DB status
+      security: []
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/HealthCheck'
+
+  # ─── Expenses ────────────────────────────────────────────
+  /api/expenses:
+    get:
+      tags: [Expenses]
+      summary: List expenses
+      operationId: listExpenses
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/PaginationLimit'
+        - $ref: '#/components/parameters/PaginationOffset'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, rejected, changes_requested, paid]
+        - name: category
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of expenses
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Expense'
+    post:
+      tags: [Expenses]
+      summary: Create expense
+      operationId: createExpense
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description, amount, currency, category]
+              properties:
+                description:
+                  type: string
+                amount:
+                  type: integer
+                currency:
+                  type: string
+                category:
+                  type: string
+                receiptUrl:
+                  type: string
+      responses:
+        '201':
+          description: Expense created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Expense'
+
+  /api/expenses/{id}:
+    get:
+      tags: [Expenses]
+      summary: Get expense by ID
+      operationId: getExpense
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Expense details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Expense'
+        '404':
+          description: Expense not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      tags: [Expenses]
+      summary: Update expense (PIN required for approval)
+      operationId: updateExpense
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                description:
+                  type: string
+                amount:
+                  type: integer
+                category:
+                  type: string
+                status:
+                  type: string
+      responses:
+        '200':
+          description: Expense updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Expense'
+    delete:
+      tags: [Expenses]
+      summary: Delete expense
+      operationId: deleteExpense
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Expense deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/upload/receipt:
+    post:
+      tags: [Expenses]
+      summary: Upload receipt image
+      operationId: uploadReceipt
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                receipt:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Receipt uploaded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          url:
+                            type: string
+                            format: uri
+
+  /api/expenses/batch-approve:
+    post:
+      tags: [Expenses]
+      summary: Batch approve expenses (admin, PIN required)
+      operationId: batchApproveExpenses
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expenseIds]
+              properties:
+                expenseIds:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: Expenses approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/expenses/{id}/reject:
+    post:
+      tags: [Expenses]
+      summary: Reject expense (admin)
+      operationId: rejectExpense
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Expense rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/expenses/{id}/request-changes:
+    post:
+      tags: [Expenses]
+      summary: Request changes on expense (admin)
+      operationId: requestExpenseChanges
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comments:
+                  type: string
+      responses:
+        '200':
+          description: Changes requested
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/expenses/{id}/approve-and-pay:
+    post:
+      tags: [Expenses]
+      summary: Approve and pay out expense (admin, PIN required)
+      operationId: approveAndPayExpense
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      responses:
+        '200':
+          description: Expense approved and paid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Transactions ────────────────────────────────────────
+  /api/transactions:
+    get:
+      tags: [Transactions]
+      summary: List transactions
+      operationId: listTransactions
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/PaginationLimit'
+        - $ref: '#/components/parameters/PaginationOffset'
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [credit, debit]
+      responses:
+        '200':
+          description: List of transactions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Transaction'
+    post:
+      tags: [Transactions]
+      summary: Create transaction
+      operationId: createTransaction
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, amount, currency, description]
+              properties:
+                type:
+                  type: string
+                  enum: [credit, debit]
+                amount:
+                  type: integer
+                currency:
+                  type: string
+                description:
+                  type: string
+                category:
+                  type: string
+      responses:
+        '201':
+          description: Transaction created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Transaction'
+
+  /api/transactions/{id}:
+    get:
+      tags: [Transactions]
+      summary: Get transaction by ID
+      operationId: getTransaction
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Transaction details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Transaction'
+    patch:
+      tags: [Transactions]
+      summary: Update transaction
+      operationId: updateTransaction
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                description:
+                  type: string
+                category:
+                  type: string
+      responses:
+        '200':
+          description: Transaction updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Transaction'
+    delete:
+      tags: [Transactions]
+      summary: Delete transaction
+      operationId: deleteTransaction
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Transaction deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Balances ────────────────────────────────────────────
+  /api/balances:
+    get:
+      tags: [Balances]
+      summary: Get company balance
+      operationId: getBalances
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Company balance
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          balance:
+                            type: integer
+                          currency:
+                            type: string
+    patch:
+      tags: [Balances]
+      summary: Update balances (admin)
+      operationId: updateBalances
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                balance:
+                  type: integer
+      responses:
+        '200':
+          description: Balances updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/balances/fund:
+    post:
+      tags: [Balances]
+      summary: Fund company balance
+      operationId: fundBalance
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, currency]
+              properties:
+                amount:
+                  type: integer
+                currency:
+                  type: string
+                paymentMethodId:
+                  type: string
+      responses:
+        '200':
+          description: Balance funded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/balances/withdraw:
+    post:
+      tags: [Balances]
+      summary: Withdraw from balance (PIN required)
+      operationId: withdrawBalance
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, currency]
+              properties:
+                amount:
+                  type: integer
+                currency:
+                  type: string
+                destinationId:
+                  type: integer
+      responses:
+        '200':
+          description: Withdrawal initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/balances/send:
+    post:
+      tags: [Balances]
+      summary: Send money (PIN required)
+      operationId: sendMoney
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, currency, recipientId]
+              properties:
+                amount:
+                  type: integer
+                currency:
+                  type: string
+                recipientId:
+                  type: integer
+                description:
+                  type: string
+      responses:
+        '200':
+          description: Money sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Bills ──────────────────────────────────────────────
+  /api/bills:
+    get:
+      tags: [Bills]
+      summary: List bills
+      operationId: listBills
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/PaginationLimit'
+        - $ref: '#/components/parameters/PaginationOffset'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, rejected, changes_requested, paid]
+      responses:
+        '200':
+          description: List of bills
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Bill'
+    post:
+      tags: [Bills]
+      summary: Create bill
+      operationId: createBill
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description, amount, currency, dueDate]
+              properties:
+                vendorId:
+                  type: integer
+                description:
+                  type: string
+                amount:
+                  type: integer
+                currency:
+                  type: string
+                dueDate:
+                  type: string
+                  format: date
+      responses:
+        '201':
+          description: Bill created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Bill'
+
+  /api/bills/{id}:
+    get:
+      tags: [Bills]
+      summary: Get bill by ID
+      operationId: getBill
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Bill details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Bill'
+    patch:
+      tags: [Bills]
+      summary: Update bill
+      operationId: updateBill
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                description:
+                  type: string
+                amount:
+                  type: integer
+                dueDate:
+                  type: string
+                  format: date
+      responses:
+        '200':
+          description: Bill updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Bill'
+    delete:
+      tags: [Bills]
+      summary: Delete bill
+      operationId: deleteBill
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Bill deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/bills/{id}/approve:
+    post:
+      tags: [Bills]
+      summary: Approve bill (admin, PIN required)
+      operationId: approveBill
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      responses:
+        '200':
+          description: Bill approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/bills/{id}/reject:
+    post:
+      tags: [Bills]
+      summary: Reject bill (admin)
+      operationId: rejectBill
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Bill rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/bills/{id}/request-changes:
+    post:
+      tags: [Bills]
+      summary: Request changes on bill (admin)
+      operationId: requestBillChanges
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comments:
+                  type: string
+      responses:
+        '200':
+          description: Changes requested
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/bills/pay:
+    post:
+      tags: [Bills]
+      summary: Pay bill (PIN required)
+      operationId: payBill
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [billId]
+              properties:
+                billId:
+                  type: integer
+                paymentMethodId:
+                  type: string
+      responses:
+        '200':
+          description: Bill paid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/bills/{id}/pay:
+    post:
+      tags: [Bills]
+      summary: Pay specific bill (PIN required)
+      operationId: paySpecificBill
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      responses:
+        '200':
+          description: Bill paid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Budgets ─────────────────────────────────────────────
+  /api/budgets:
+    get:
+      tags: [Budgets]
+      summary: List budgets
+      operationId: listBudgets
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: List of budgets
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Budget'
+    post:
+      tags: [Budgets]
+      summary: Create budget
+      operationId: createBudget
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, amount, period]
+              properties:
+                name:
+                  type: string
+                amount:
+                  type: integer
+                period:
+                  type: string
+                category:
+                  type: string
+      responses:
+        '201':
+          description: Budget created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Budget'
+
+  /api/budgets/{id}:
+    get:
+      tags: [Budgets]
+      summary: Get budget by ID
+      operationId: getBudget
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Budget details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Budget'
+    patch:
+      tags: [Budgets]
+      summary: Update budget
+      operationId: updateBudget
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                amount:
+                  type: integer
+                period:
+                  type: string
+                category:
+                  type: string
+      responses:
+        '200':
+          description: Budget updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Budget'
+    delete:
+      tags: [Budgets]
+      summary: Delete budget
+      operationId: deleteBudget
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Budget deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Cards ──────────────────────────────────────────────
+  /api/cards:
+    get:
+      tags: [Cards]
+      summary: List virtual cards
+      operationId: listCards
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: List of cards
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Card'
+    post:
+      tags: [Cards]
+      summary: Issue virtual card (Stripe Issuing)
+      operationId: issueCard
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currency]
+              properties:
+                currency:
+                  type: string
+                spendingLimit:
+                  type: integer
+                label:
+                  type: string
+      responses:
+        '201':
+          description: Card issued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Card'
+
+  /api/cards/{id}:
+    get:
+      tags: [Cards]
+      summary: Get card by ID
+      operationId: getCard
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Card details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Card'
+    patch:
+      tags: [Cards]
+      summary: Update card
+      operationId: updateCard
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:
+                  type: string
+                spendingLimit:
+                  type: integer
+      responses:
+        '200':
+          description: Card updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Card'
+    delete:
+      tags: [Cards]
+      summary: Delete card
+      operationId: deleteCard
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Card deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/cards/{id}/fund:
+    post:
+      tags: [Cards]
+      summary: Fund card (PIN required)
+      operationId: fundCard
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  type: integer
+      responses:
+        '200':
+          description: Card funded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/cards/{id}/pay:
+    post:
+      tags: [Cards]
+      summary: Pay with card (PIN required)
+      operationId: payWithCard
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, description]
+              properties:
+                amount:
+                  type: integer
+                description:
+                  type: string
+      responses:
+        '200':
+          description: Payment processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/cards/{id}/transactions:
+    get:
+      tags: [Cards]
+      summary: Get card transactions
+      operationId: getCardTransactions
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/PaginationLimit'
+        - $ref: '#/components/parameters/PaginationOffset'
+      responses:
+        '200':
+          description: Card transaction list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Transaction'
+
+  /api/cards/{id}/freeze:
+    post:
+      tags: [Cards]
+      summary: Freeze card
+      operationId: freezeCard
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Card frozen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/cards/{id}/unfreeze:
+    post:
+      tags: [Cards]
+      summary: Unfreeze card
+      operationId: unfreezeCard
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Card unfrozen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/cards/{id}/details:
+    get:
+      tags: [Cards]
+      summary: Get card number and CVV (PIN required, rate limited)
+      operationId: getCardDetails
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      responses:
+        '200':
+          description: Card sensitive details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          number:
+                            type: string
+                          cvv:
+                            type: string
+                          expMonth:
+                            type: integer
+                          expYear:
+                            type: integer
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/cards/{id}/controls:
+    patch:
+      tags: [Cards]
+      summary: Update card spending limits (PIN required)
+      operationId: updateCardControls
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                spendingLimit:
+                  type: integer
+                allowedCategories:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Card controls updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/cards/{id}/cancel:
+    post:
+      tags: [Cards]
+      summary: Cancel card permanently
+      operationId: cancelCard
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Card cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Virtual Accounts ───────────────────────────────────
+  /api/virtual-accounts:
+    get:
+      tags: [Virtual Accounts]
+      summary: List virtual accounts
+      operationId: listVirtualAccounts
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: List of virtual accounts
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/VirtualAccount'
+    post:
+      tags: [Virtual Accounts]
+      summary: Create virtual account
+      operationId: createVirtualAccount
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currency]
+              properties:
+                currency:
+                  type: string
+                accountName:
+                  type: string
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/VirtualAccount'
+
+  /api/virtual-accounts/{id}:
+    get:
+      tags: [Virtual Accounts]
+      summary: Get virtual account
+      operationId: getVirtualAccount
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Account details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/VirtualAccount'
+    delete:
+      tags: [Virtual Accounts]
+      summary: Delete virtual account
+      operationId: deleteVirtualAccount
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Account deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/virtual-accounts/{id}/deposit:
+    post:
+      tags: [Virtual Accounts]
+      summary: Fund virtual account
+      operationId: depositToVirtualAccount
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  type: integer
+      responses:
+        '200':
+          description: Deposit successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/virtual-accounts/{id}/withdraw:
+    post:
+      tags: [Virtual Accounts]
+      summary: Withdraw from virtual account (PIN required)
+      operationId: withdrawFromVirtualAccount
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  type: integer
+      responses:
+        '200':
+          description: Withdrawal successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/virtual-accounts/create:
+    post:
+      tags: [Virtual Accounts]
+      summary: Create virtual account on signup (PIN required)
+      operationId: createVirtualAccountOnSignup
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currency]
+              properties:
+                currency:
+                  type: string
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/VirtualAccount'
+
+  /api/funding-sources:
+    get:
+      tags: [Virtual Accounts]
+      summary: List funding sources
+      operationId: listFundingSources
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Funding sources
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: integer
+                            type:
+                              type: string
+                            name:
+                              type: string
+                            last4:
+                              type: string
+    post:
+      tags: [Virtual Accounts]
+      summary: Add funding source
+      operationId: addFundingSource
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, token]
+              properties:
+                type:
+                  type: string
+                token:
+                  type: string
+      responses:
+        '201':
+          description: Funding source added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/funding-sources/{id}:
+    delete:
+      tags: [Virtual Accounts]
+      summary: Remove funding source
+      operationId: removeFundingSource
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Funding source removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Payments ────────────────────────────────────────────
+  /api/regions:
+    get:
+      tags: [Payments]
+      summary: List payment regions
+      operationId: listRegions
+      security: []
+      responses:
+        '200':
+          description: Supported payment regions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            code:
+                              type: string
+                            name:
+                              type: string
+                            currencies:
+                              type: array
+                              items:
+                                type: string
+                            processor:
+                              type: string
+
+  /api/region/{countryCode}:
+    get:
+      tags: [Payments]
+      summary: Get region config by country code
+      operationId: getRegion
+      security: []
+      parameters:
+        - name: countryCode
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 2
+      responses:
+        '200':
+          description: Region configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/payment-intent:
+    post:
+      tags: [Payments]
+      summary: Create payment intent
+      operationId: createPaymentIntent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, currency]
+              properties:
+                amount:
+                  type: integer
+                currency:
+                  type: string
+      responses:
+        '200':
+          description: Payment intent created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          clientSecret:
+                            type: string
+
+  /api/payment-methods:
+    get:
+      tags: [Payments]
+      summary: List payment methods
+      operationId: listPaymentMethods
+      responses:
+        '200':
+          description: Payment methods
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+
+  /api/charge:
+    post:
+      tags: [Payments]
+      summary: Charge payment method
+      operationId: chargePaymentMethod
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, currency, paymentMethodId]
+              properties:
+                amount:
+                  type: integer
+                currency:
+                  type: string
+                paymentMethodId:
+                  type: string
+      responses:
+        '200':
+          description: Charge processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/transfers:
+    post:
+      tags: [Payments]
+      summary: Initiate transfer (admin, PIN required)
+      operationId: initiateTransfer
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, currency, destinationId]
+              properties:
+                amount:
+                  type: integer
+                currency:
+                  type: string
+                destinationId:
+                  type: integer
+                description:
+                  type: string
+      responses:
+        '200':
+          description: Transfer initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/exchange-rates/{base}/{target}:
+    get:
+      tags: [Payments]
+      summary: Get exchange rate
+      operationId: getExchangeRate
+      parameters:
+        - name: base
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: target
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Exchange rate
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          rate:
+                            type: number
+                          base:
+                            type: string
+                          target:
+                            type: string
+
+  # ─── Companies ───────────────────────────────────────────
+  /api/companies:
+    post:
+      tags: [Companies]
+      summary: Create company
+      operationId: createCompany
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, country, currency]
+              properties:
+                name:
+                  type: string
+                industry:
+                  type: string
+                country:
+                  type: string
+                currency:
+                  type: string
+      responses:
+        '201':
+          description: Company created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Company'
+    get:
+      tags: [Companies]
+      summary: List user's companies
+      operationId: listCompanies
+      responses:
+        '200':
+          description: List of companies
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Company'
+
+  /api/companies/{id}:
+    get:
+      tags: [Companies]
+      summary: Get company
+      operationId: getCompany
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Company details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Company'
+
+  /api/companies/{id}/members:
+    get:
+      tags: [Companies]
+      summary: List company members
+      operationId: listCompanyMembers
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Company members
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TeamMember'
+
+  /api/companies/{id}/invitations:
+    post:
+      tags: [Companies]
+      summary: Invite member to company
+      operationId: inviteMember
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email:
+                  type: string
+                  format: email
+                role:
+                  type: string
+                  enum: [admin, member, viewer]
+      responses:
+        '201':
+          description: Invitation sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+    get:
+      tags: [Companies]
+      summary: List company invitations
+      operationId: listInvitations
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Pending invitations
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: integer
+                            email:
+                              type: string
+                            role:
+                              type: string
+                            token:
+                              type: string
+                            status:
+                              type: string
+
+  /api/invitations/{token}:
+    get:
+      tags: [Companies]
+      summary: Validate invitation token (public)
+      operationId: validateInvitation
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Invitation details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/invitations/{token}/accept:
+    post:
+      tags: [Companies]
+      summary: Accept invitation
+      operationId: acceptInvitation
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Invitation accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/companies/{companyId}/invitations/{invitationId}:
+    delete:
+      tags: [Companies]
+      summary: Revoke invitation (admin)
+      operationId: revokeInvitation
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: invitationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Invitation revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Team ───────────────────────────────────────────────
+  /api/team:
+    get:
+      tags: [Team]
+      summary: List team members
+      operationId: listTeamMembers
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Team members
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TeamMember'
+    post:
+      tags: [Team]
+      summary: Create team member (admin)
+      operationId: createTeamMember
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, role]
+              properties:
+                userId:
+                  type: integer
+                role:
+                  type: string
+                  enum: [admin, member, viewer]
+                departmentId:
+                  type: integer
+      responses:
+        '201':
+          description: Team member created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/TeamMember'
+
+  /api/team/{id}:
+    get:
+      tags: [Team]
+      summary: Get team member
+      operationId: getTeamMember
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Team member details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/TeamMember'
+    patch:
+      tags: [Team]
+      summary: Update team member (admin)
+      operationId: updateTeamMember
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  type: string
+                  enum: [admin, member, viewer]
+                departmentId:
+                  type: integer
+      responses:
+        '200':
+          description: Team member updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/TeamMember'
+    delete:
+      tags: [Team]
+      summary: Delete team member (admin)
+      operationId: deleteTeamMember
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Team member removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/departments:
+    get:
+      tags: [Team]
+      summary: List departments
+      operationId: listDepartments
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Departments
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Department'
+    post:
+      tags: [Team]
+      summary: Create department
+      operationId: createDepartment
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        '201':
+          description: Department created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Department'
+
+  /api/departments/{id}:
+    get:
+      tags: [Team]
+      summary: Get department
+      operationId: getDepartment
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Department details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Department'
+    patch:
+      tags: [Team]
+      summary: Update department
+      operationId: updateDepartment
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Department updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Department'
+    delete:
+      tags: [Team]
+      summary: Delete department
+      operationId: deleteDepartment
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Department deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Invoices ────────────────────────────────────────────
+  /api/public/invoices/{id}:
+    get:
+      tags: [Invoices]
+      summary: Public invoice page
+      operationId: getPublicInvoice
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Invoice for public viewing
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Invoice'
+
+  /api/public/invoices/{id}/pay:
+    post:
+      tags: [Invoices]
+      summary: Pay invoice via Stripe checkout (public)
+      operationId: payPublicInvoice
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Checkout session URL
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          checkoutUrl:
+                            type: string
+                            format: uri
+
+  /api/invoices:
+    get:
+      tags: [Invoices]
+      summary: List invoices
+      operationId: listInvoices
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/PaginationLimit'
+        - $ref: '#/components/parameters/PaginationOffset'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, sent, paid, overdue, cancelled]
+      responses:
+        '200':
+          description: List of invoices
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Invoice'
+    post:
+      tags: [Invoices]
+      summary: Create invoice
+      operationId: createInvoice
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientName, clientEmail, amount, currency, dueDate]
+              properties:
+                clientName:
+                  type: string
+                clientEmail:
+                  type: string
+                  format: email
+                amount:
+                  type: integer
+                currency:
+                  type: string
+                dueDate:
+                  type: string
+                  format: date
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      description:
+                        type: string
+                      quantity:
+                        type: integer
+                      unitPrice:
+                        type: integer
+      responses:
+        '201':
+          description: Invoice created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Invoice'
+
+  /api/invoices/{id}:
+    get:
+      tags: [Invoices]
+      summary: Get invoice
+      operationId: getInvoice
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Invoice details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Invoice'
+    patch:
+      tags: [Invoices]
+      summary: Update invoice
+      operationId: updateInvoice
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                clientName:
+                  type: string
+                clientEmail:
+                  type: string
+                amount:
+                  type: integer
+                dueDate:
+                  type: string
+                  format: date
+                status:
+                  type: string
+      responses:
+        '200':
+          description: Invoice updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Invoice'
+    delete:
+      tags: [Invoices]
+      summary: Delete invoice
+      operationId: deleteInvoice
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Invoice deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Vendors ─────────────────────────────────────────────
+  /api/vendors:
+    get:
+      tags: [Vendors]
+      summary: List vendors
+      operationId: listVendors
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: List of vendors
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Vendor'
+    post:
+      tags: [Vendors]
+      summary: Create vendor
+      operationId: createVendor
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                category:
+                  type: string
+                bankDetails:
+                  type: object
+      responses:
+        '201':
+          description: Vendor created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Vendor'
+
+  /api/vendors/{id}:
+    get:
+      tags: [Vendors]
+      summary: Get vendor
+      operationId: getVendor
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Vendor details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Vendor'
+    patch:
+      tags: [Vendors]
+      summary: Update vendor
+      operationId: updateVendor
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                category:
+                  type: string
+                bankDetails:
+                  type: object
+      responses:
+        '200':
+          description: Vendor updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Vendor'
+    delete:
+      tags: [Vendors]
+      summary: Delete vendor
+      operationId: deleteVendor
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Vendor deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/vendors/{id}/pay:
+    post:
+      tags: [Vendors]
+      summary: Pay vendor
+      operationId: payVendor
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, currency]
+              properties:
+                amount:
+                  type: integer
+                currency:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '200':
+          description: Payment sent to vendor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Payroll ─────────────────────────────────────────────
+  /api/payroll:
+    get:
+      tags: [Payroll]
+      summary: List payroll entries (admin)
+      operationId: listPayroll
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/PaginationLimit'
+        - $ref: '#/components/parameters/PaginationOffset'
+      responses:
+        '200':
+          description: Payroll entries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/PayrollEntry'
+    post:
+      tags: [Payroll]
+      summary: Create payroll entry (admin)
+      operationId: createPayroll
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [employeeId, grossPay, payPeriod]
+              properties:
+                employeeId:
+                  type: integer
+                grossPay:
+                  type: integer
+                deductions:
+                  type: integer
+                payPeriod:
+                  type: string
+      responses:
+        '201':
+          description: Payroll entry created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/PayrollEntry'
+
+  /api/payroll/tax-estimate:
+    get:
+      tags: [Payroll]
+      summary: Estimate taxes for payroll
+      operationId: estimatePayrollTaxes
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - name: grossPay
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: country
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tax estimate
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          grossPay:
+                            type: integer
+                          taxes:
+                            type: integer
+                          netPay:
+                            type: integer
+
+  /api/payroll/{id}:
+    get:
+      tags: [Payroll]
+      summary: Get payroll entry (admin)
+      operationId: getPayroll
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Payroll entry details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/PayrollEntry'
+    patch:
+      tags: [Payroll]
+      summary: Update payroll entry (admin)
+      operationId: updatePayroll
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grossPay:
+                  type: integer
+                deductions:
+                  type: integer
+                payPeriod:
+                  type: string
+      responses:
+        '200':
+          description: Payroll entry updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/PayrollEntry'
+    delete:
+      tags: [Payroll]
+      summary: Delete payroll entry (admin)
+      operationId: deletePayroll
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Payroll entry deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/payroll/process:
+    post:
+      tags: [Payroll]
+      summary: Process all pending payroll (admin, PIN required)
+      operationId: processPayroll
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      responses:
+        '200':
+          description: Payroll processed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          processed:
+                            type: integer
+                          totalAmount:
+                            type: integer
+
+  /api/payroll/{id}/pay:
+    post:
+      tags: [Payroll]
+      summary: Pay individual payroll entry (admin)
+      operationId: payIndividualPayroll
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Individual paid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/payroll/batch-payout:
+    post:
+      tags: [Payroll]
+      summary: Batch payout payroll (admin, PIN required)
+      operationId: batchPayoutPayroll
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payrollIds:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: Batch payout processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Reports ─────────────────────────────────────────────
+  /api/insights:
+    get:
+      tags: [Reports]
+      summary: Get AI-generated financial insights
+      operationId: getInsights
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: AI insights
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: object
+
+  /api/reports:
+    get:
+      tags: [Reports]
+      summary: List reports
+      operationId: listReports
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Reports list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: integer
+                            name:
+                              type: string
+                            type:
+                              type: string
+                            createdAt:
+                              type: string
+                              format: date-time
+    post:
+      tags: [Reports]
+      summary: Create report
+      operationId: createReport
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                name:
+                  type: string
+                type:
+                  type: string
+                dateRange:
+                  type: object
+                  properties:
+                    from:
+                      type: string
+                      format: date
+                    to:
+                      type: string
+                      format: date
+      responses:
+        '201':
+          description: Report created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/reports/{id}:
+    delete:
+      tags: [Reports]
+      summary: Delete report
+      operationId: deleteReport
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Report deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/reports/{id}/download:
+    get:
+      tags: [Reports]
+      summary: Download report file
+      operationId: downloadReport
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Report file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            text/csv:
+              schema:
+                type: string
+
+  # ─── Analytics ───────────────────────────────────────────
+  /api/analytics/summary:
+    get:
+      tags: [Analytics]
+      summary: Financial summary dashboard
+      operationId: getAnalyticsSummary
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [week, month, quarter, year]
+      responses:
+        '200':
+          description: Financial summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/analytics/kpis:
+    get:
+      tags: [Analytics]
+      summary: Key performance indicators
+      operationId: getKPIs
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: KPI data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/analytics/cash-flow:
+    get:
+      tags: [Analytics]
+      summary: Cash flow analysis
+      operationId: getCashFlow
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - name: period
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cash flow data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/analytics/vendor-performance:
+    get:
+      tags: [Analytics]
+      summary: Vendor performance analysis
+      operationId: getVendorPerformance
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Vendor analytics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/analytics/payroll-summary:
+    get:
+      tags: [Analytics]
+      summary: Payroll summary analysis
+      operationId: getPayrollSummary
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Payroll analytics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/analytics/insights:
+    get:
+      tags: [Analytics]
+      summary: AI-powered analytics insights
+      operationId: getAnalyticsInsights
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: AI insights
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/analytics/snapshots:
+    get:
+      tags: [Analytics]
+      summary: Analytics snapshots
+      operationId: getAnalyticsSnapshots
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Analytics snapshots
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/analytics/stored-insights:
+    get:
+      tags: [Analytics]
+      summary: Stored analytics insights
+      operationId: getStoredInsights
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Stored insights
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── KYC ─────────────────────────────────────────────────
+  /api/user-profile/{cognitoSub}:
+    get:
+      tags: [KYC]
+      summary: Get user profile
+      operationId: getUserProfile
+      parameters:
+        - name: cognitoSub
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/UserProfile'
+    patch:
+      tags: [KYC]
+      summary: Update user profile
+      operationId: updateUserProfile
+      parameters:
+        - name: cognitoSub
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                phone:
+                  type: string
+                country:
+                  type: string
+      responses:
+        '200':
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/UserProfile'
+
+  /api/user-profile:
+    post:
+      tags: [KYC]
+      summary: Create user profile
+      operationId: createUserProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [firstName, lastName, email]
+              properties:
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                phone:
+                  type: string
+                country:
+                  type: string
+      responses:
+        '201':
+          description: Profile created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/UserProfile'
+
+  /api/kyc/submit:
+    post:
+      tags: [KYC]
+      summary: Submit KYC verification
+      operationId: submitKYC
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [documentType, documentNumber]
+              properties:
+                documentType:
+                  type: string
+                  enum: [passport, national_id, drivers_license]
+                documentNumber:
+                  type: string
+                country:
+                  type: string
+      responses:
+        '200':
+          description: KYC submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/kyc/status:
+    get:
+      tags: [KYC]
+      summary: Get KYC verification status
+      operationId: getKYCStatus
+      responses:
+        '200':
+          description: KYC status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            type: string
+                            enum: [not_started, pending, approved, rejected]
+                          submittedAt:
+                            type: string
+                            format: date-time
+
+  /api/kyc/upload-document:
+    post:
+      tags: [KYC]
+      summary: Upload KYC document
+      operationId: uploadKYCDocument
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                document:
+                  type: string
+                  format: binary
+                documentType:
+                  type: string
+      responses:
+        '200':
+          description: Document uploaded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          url:
+                            type: string
+                            format: uri
+
+  # ─── Settings ────────────────────────────────────────────
+  /api/settings:
+    get:
+      tags: [Settings]
+      summary: Get application settings
+      operationId: getSettings
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+    patch:
+      tags: [Settings]
+      summary: Update settings
+      operationId: updateSettings
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Settings updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Notifications ──────────────────────────────────────
+  /api/notifications:
+    get:
+      tags: [Notifications]
+      summary: List notifications
+      operationId: listNotifications
+      parameters:
+        - $ref: '#/components/parameters/PaginationLimit'
+        - $ref: '#/components/parameters/PaginationOffset'
+      responses:
+        '200':
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Notification'
+
+  /api/notifications/unread-count:
+    get:
+      tags: [Notifications]
+      summary: Get unread notification count
+      operationId: getUnreadCount
+      responses:
+        '200':
+          description: Unread count
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          count:
+                            type: integer
+
+  /api/notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark notification as read
+      operationId: markNotificationRead
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Marked as read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/notifications/mark-all-read:
+    post:
+      tags: [Notifications]
+      summary: Mark all notifications as read
+      operationId: markAllRead
+      responses:
+        '200':
+          description: All marked as read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/notifications/{id}:
+    delete:
+      tags: [Notifications]
+      summary: Delete notification
+      operationId: deleteNotification
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Notification deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/notifications/test-email:
+    post:
+      tags: [Notifications]
+      summary: Send test email notification
+      operationId: sendTestEmail
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Test email sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/push-tokens:
+    post:
+      tags: [Notifications]
+      summary: Register push notification token
+      operationId: registerPushToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, platform]
+              properties:
+                token:
+                  type: string
+                platform:
+                  type: string
+                  enum: [ios, android, web]
+      responses:
+        '201':
+          description: Token registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/push-tokens/{token}:
+    delete:
+      tags: [Notifications]
+      summary: Remove push notification token
+      operationId: removePushToken
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Token removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Wallets ─────────────────────────────────────────────
+  /api/wallets:
+    get:
+      tags: [Wallets]
+      summary: List wallets
+      operationId: listWallets
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Wallets
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Wallet'
+    post:
+      tags: [Wallets]
+      summary: Create wallet
+      operationId: createWallet
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currency]
+              properties:
+                currency:
+                  type: string
+      responses:
+        '201':
+          description: Wallet created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Wallet'
+
+  /api/wallets/{id}:
+    get:
+      tags: [Wallets]
+      summary: Get wallet
+      operationId: getWallet
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Wallet details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Wallet'
+
+  /api/wallets/{id}/transactions:
+    get:
+      tags: [Wallets]
+      summary: Get wallet transactions
+      operationId: getWalletTransactions
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/PaginationLimit'
+        - $ref: '#/components/parameters/PaginationOffset'
+      responses:
+        '200':
+          description: Wallet transactions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Transaction'
+
+  /api/wallets/{id}/fund:
+    post:
+      tags: [Wallets]
+      summary: Fund wallet
+      operationId: fundWallet
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  type: integer
+                paymentMethodId:
+                  type: string
+      responses:
+        '200':
+          description: Wallet funded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/wallets/{id}/withdraw:
+    post:
+      tags: [Wallets]
+      summary: Withdraw from wallet (PIN required)
+      operationId: withdrawFromWallet
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  type: integer
+                destinationId:
+                  type: integer
+      responses:
+        '200':
+          description: Withdrawal initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/exchange-rates:
+    get:
+      tags: [Wallets]
+      summary: List exchange rates
+      operationId: listExchangeRates
+      responses:
+        '200':
+          description: Exchange rates
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            base:
+                              type: string
+                            target:
+                              type: string
+                            rate:
+                              type: number
+    post:
+      tags: [Wallets]
+      summary: Create exchange rate (admin)
+      operationId: createExchangeRate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [base, target, rate]
+              properties:
+                base:
+                  type: string
+                target:
+                  type: string
+                rate:
+                  type: number
+      responses:
+        '201':
+          description: Rate created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/exchange-rates/seed:
+    post:
+      tags: [Wallets]
+      summary: Seed default exchange rates (admin)
+      operationId: seedExchangeRates
+      responses:
+        '200':
+          description: Rates seeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Payouts ─────────────────────────────────────────────
+  /api/payout-destinations:
+    get:
+      tags: [Payouts]
+      summary: List payout destinations
+      operationId: listPayoutDestinations
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Payout destinations
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/PayoutDestination'
+    post:
+      tags: [Payouts]
+      summary: Create payout destination
+      operationId: createPayoutDestination
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, bankName, accountNumber, currency]
+              properties:
+                name:
+                  type: string
+                bankName:
+                  type: string
+                accountNumber:
+                  type: string
+                currency:
+                  type: string
+                routingNumber:
+                  type: string
+      responses:
+        '201':
+          description: Destination created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/PayoutDestination'
+
+  /api/payout-destinations/{id}:
+    put:
+      tags: [Payouts]
+      summary: Update payout destination
+      operationId: updatePayoutDestination
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                bankName:
+                  type: string
+                accountNumber:
+                  type: string
+      responses:
+        '200':
+          description: Destination updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/PayoutDestination'
+    delete:
+      tags: [Payouts]
+      summary: Delete payout destination
+      operationId: deletePayoutDestination
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Destination deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/payouts:
+    get:
+      tags: [Payouts]
+      summary: List payouts
+      operationId: listPayouts
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/PaginationLimit'
+        - $ref: '#/components/parameters/PaginationOffset'
+      responses:
+        '200':
+          description: Payouts
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Payout'
+    post:
+      tags: [Payouts]
+      summary: Create payout
+      operationId: createPayout
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [destinationId, amount, currency]
+              properties:
+                destinationId:
+                  type: integer
+                amount:
+                  type: integer
+                currency:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '201':
+          description: Payout created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Payout'
+
+  /api/payouts/{id}:
+    get:
+      tags: [Payouts]
+      summary: Get payout
+      operationId: getPayout
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Payout details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/Payout'
+
+  /api/payouts/{id}/approve:
+    post:
+      tags: [Payouts]
+      summary: Approve payout (admin, PIN required)
+      operationId: approvePayout
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      responses:
+        '200':
+          description: Payout approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/payouts/{id}/process:
+    post:
+      tags: [Payouts]
+      summary: Process payout (admin, PIN required)
+      operationId: processPayout
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      responses:
+        '200':
+          description: Payout processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/payouts/{id}/reject:
+    post:
+      tags: [Payouts]
+      summary: Reject payout (admin)
+      operationId: rejectPayout
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Payout rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/payouts/batch-process:
+    post:
+      tags: [Payouts]
+      summary: Batch process payouts (admin, PIN required)
+      operationId: batchProcessPayouts
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/TransactionPin'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payoutIds:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: Batch processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Admin ──────────────────────────────────────────────
+  /api/admin/audit-logs:
+    get:
+      tags: [Admin]
+      summary: Get audit logs
+      operationId: getAuditLogs
+      parameters:
+        - $ref: '#/components/parameters/PaginationLimit'
+        - $ref: '#/components/parameters/PaginationOffset'
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: userId
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Audit logs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: integer
+                            action:
+                              type: string
+                            userId:
+                              type: integer
+                            metadata:
+                              type: object
+                            createdAt:
+                              type: string
+                              format: date-time
+
+  /api/admin/organization:
+    get:
+      tags: [Admin]
+      summary: Get organization settings
+      operationId: getOrganization
+      responses:
+        '200':
+          description: Organization settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+    put:
+      tags: [Admin]
+      summary: Update organization settings
+      operationId: updateOrganization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Organization updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/admin/settings:
+    get:
+      tags: [Admin]
+      summary: Get system settings
+      operationId: getAdminSettings
+      responses:
+        '200':
+          description: System settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/admin/settings/{key}:
+    put:
+      tags: [Admin]
+      summary: Update system setting
+      operationId: updateAdminSetting
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value: {}
+      responses:
+        '200':
+          description: Setting updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/admin/security:
+    get:
+      tags: [Admin]
+      summary: Get security settings
+      operationId: getSecuritySettings
+      responses:
+        '200':
+          description: Security settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+    put:
+      tags: [Admin]
+      summary: Update security settings
+      operationId: updateSecuritySettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Security settings updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/admin/users:
+    get:
+      tags: [Admin]
+      summary: List all users
+      operationId: listAdminUsers
+      parameters:
+        - $ref: '#/components/parameters/PaginationLimit'
+        - $ref: '#/components/parameters/PaginationOffset'
+      responses:
+        '200':
+          description: Users
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/UserProfile'
+
+  /api/admin/users/{id}:
+    put:
+      tags: [Admin]
+      summary: Update user (admin)
+      operationId: updateAdminUser
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+    delete:
+      tags: [Admin]
+      summary: Delete user (admin)
+      operationId: deleteAdminUser
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: User deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/admin/login:
+    post:
+      tags: [Admin]
+      summary: Admin login
+      operationId: adminLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          token:
+                            type: string
+
+  /api/admin/verify-session:
+    post:
+      tags: [Admin]
+      summary: Verify admin session
+      operationId: verifyAdminSession
+      responses:
+        '200':
+          description: Session valid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ─── Webhooks ────────────────────────────────────────────
+  /api/paystack/callback:
+    get:
+      tags: [Webhooks]
+      summary: Paystack payment callback
+      operationId: paystackCallback
+      security: []
+      parameters:
+        - name: reference
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect after payment verification
+
+  /api/stripe/webhook:
+    post:
+      tags: [Webhooks]
+      summary: Stripe webhook handler
+      operationId: stripeWebhook
+      security: []
+      description: Verified via Stripe signature header
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Webhook processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean
+
+  /api/paystack/webhook:
+    post:
+      tags: [Webhooks]
+      summary: Paystack webhook handler
+      operationId: paystackWebhook
+      security: []
+      description: Verified via Paystack signature header
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Webhook processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean
+
+  # ─── Scheduled Payments ─────────────────────────────────
+  /api/scheduled-payments:
+    get:
+      tags: [Scheduled Payments]
+      summary: List scheduled payments
+      operationId: listScheduledPayments
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Scheduled payments
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ScheduledPayment'
+    post:
+      tags: [Scheduled Payments]
+      summary: Create scheduled payment
+      operationId: createScheduledPayment
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, currency, frequency, destinationId]
+              properties:
+                amount:
+                  type: integer
+                currency:
+                  type: string
+                frequency:
+                  type: string
+                  enum: [daily, weekly, biweekly, monthly, quarterly, yearly]
+                destinationId:
+                  type: integer
+                startDate:
+                  type: string
+                  format: date
+                description:
+                  type: string
+      responses:
+        '201':
+          description: Scheduled payment created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/ScheduledPayment'
+
+  /api/scheduled-payments/{id}:
+    patch:
+      tags: [Scheduled Payments]
+      summary: Update scheduled payment
+      operationId: updateScheduledPayment
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: integer
+                frequency:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '200':
+          description: Scheduled payment updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - properties:
+                      data:
+                        $ref: '#/components/schemas/ScheduledPayment'
+    delete:
+      tags: [Scheduled Payments]
+      summary: Delete scheduled payment
+      operationId: deleteScheduledPayment
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Scheduled payment deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/scheduled-payments/{id}/pause:
+    post:
+      tags: [Scheduled Payments]
+      summary: Pause scheduled payment
+      operationId: pauseScheduledPayment
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Payment paused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /api/scheduled-payments/{id}/resume:
+    post:
+      tags: [Scheduled Payments]
+      summary: Resume scheduled payment
+      operationId: resumeScheduledPayment
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - $ref: '#/components/parameters/CompanyId'
+      responses:
+        '200':
+          description: Payment resumed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
