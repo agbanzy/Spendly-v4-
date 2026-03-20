@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -24,7 +24,7 @@ ENV VITE_COGNITO_USER_POOL_ID=$VITE_COGNITO_USER_POOL_ID \
 RUN npm run build
 
 # Stage 2: Production
-FROM node:20-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
