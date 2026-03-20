@@ -2,6 +2,8 @@ import { storage } from '../storage';
 import type { InsertNotification, NotificationSettings } from '@shared/schema';
 import { SESClient, SendRawEmailCommand } from '@aws-sdk/client-ses';
 import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
+import nodemailer from 'nodemailer';
+import type { Transporter } from 'nodemailer';
 
 interface SendNotificationOptions {
   userId: string;
@@ -24,7 +26,7 @@ interface SmsConfig {
   body: string;
 }
 
-type EmailProvider = 'aws' | 'none';
+type EmailProvider = 'smtp' | 'aws' | 'none';
 type SmsProvider = 'aws' | 'none';
 
 // Security: URL validation to prevent XSS in actionUrl
@@ -53,6 +55,7 @@ function sanitizeSmsText(text: string): string {
 class NotificationService {
   private sesClient: SESClient | null = null;
   private snsClient: SNSClient | null = null;
+  private smtpTransporter: Transporter | null = null;
   private emailProvider: EmailProvider = 'none';
   private smsProvider: SmsProvider = 'none';
 
@@ -61,8 +64,36 @@ class NotificationService {
   }
 
   private initializeClients() {
+    // Priority 1: Microsoft 365 / SMTP (preferred)
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+
+    if (smtpHost && smtpUser && smtpPass) {
+      try {
+        this.smtpTransporter = nodemailer.createTransport({
+          host: smtpHost,
+          port: parseInt(process.env.SMTP_PORT || '587', 10),
+          secure: process.env.SMTP_SECURE === 'true', // true for 465, false for 587 (STARTTLS)
+          auth: {
+            user: smtpUser,
+            pass: smtpPass,
+          },
+          tls: {
+            // Microsoft 365 requires TLS
+            ciphers: 'SSLv3',
+            rejectUnauthorized: true,
+          },
+        });
+        this.emailProvider = 'smtp';
+        console.log(`SMTP email client initialized (${smtpHost}, user: ${smtpUser})`);
+      } catch (error) {
+        console.log('SMTP client initialization failed:', error);
+      }
+    }
+
+    // Priority 2: AWS SES (fallback)
     const region = process.env.AWS_REGION;
-    // Support both explicit credentials (local dev) and IAM role auto-discovery (ECS/Lambda)
     const hasExplicitCreds = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY;
     const isOnAWS = process.env.ECS_CONTAINER_METADATA_URI_V4 || process.env.AWS_EXECUTION_ENV;
     const canUseAWS = region && (hasExplicitCreds || isOnAWS);
@@ -75,14 +106,15 @@ class NotificationService {
           secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
         };
       }
-      // When on ECS, omit credentials — SDK auto-discovers from task role
 
-      try {
-        this.sesClient = new SESClient(clientConfig);
-        this.emailProvider = 'aws';
-        console.log('AWS SES client initialized' + (hasExplicitCreds ? ' (explicit credentials)' : ' (IAM role)'));
-      } catch (error) {
-        console.log('AWS SES client initialization failed:', error);
+      if (this.emailProvider === 'none') {
+        try {
+          this.sesClient = new SESClient(clientConfig);
+          this.emailProvider = 'aws';
+          console.log('AWS SES client initialized' + (hasExplicitCreds ? ' (explicit credentials)' : ' (IAM role)'));
+        } catch (error) {
+          console.log('AWS SES client initialization failed:', error);
+        }
       }
 
       try {
@@ -247,12 +279,35 @@ class NotificationService {
   }
 
   async sendEmail(config: EmailConfig): Promise<void> {
-    const fromEmail = process.env.AWS_SES_FROM_EMAIL || 'noreply@thefinanciar.com';
-    const fromName = process.env.AWS_SES_FROM_NAME || 'Financiar';
+    const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.AWS_SES_FROM_EMAIL || 'noreply@thefinanciar.com';
+    const fromName = process.env.SMTP_FROM_NAME || process.env.AWS_SES_FROM_NAME || 'Financiar';
     const formattedFrom = `${fromName} <${fromEmail}>`;
     const appUrl = this.getAppUrl();
     const plainText = config.text || config.html.replace(/<[^>]*>/g, '');
 
+    // Priority 1: SMTP (Microsoft 365 / custom SMTP)
+    if (this.emailProvider === 'smtp' && this.smtpTransporter) {
+      try {
+        await this.smtpTransporter.sendMail({
+          from: formattedFrom,
+          to: config.to,
+          subject: config.subject,
+          text: plainText,
+          html: config.html,
+          headers: {
+            'X-Mailer': 'Financiar/1.0',
+            'List-Unsubscribe': `<mailto:unsubscribe@thefinanciar.com>, <${appUrl}/settings>`,
+          },
+        });
+        console.log('Email sent via SMTP to:', config.to);
+        return;
+      } catch (error) {
+        console.error('Failed to send email via SMTP:', error);
+        throw error;
+      }
+    }
+
+    // Priority 2: AWS SES (fallback)
     if (this.emailProvider === 'aws' && this.sesClient) {
       try {
         const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).substring(2)}`;
