@@ -6,7 +6,7 @@ import { Money, paymentLogger, validateCurrencyForProvider, mapPaymentError } fr
 export { REGION_CONFIGS, getRegionConfig, getPaymentProvider, SUPPORTED_COUNTRIES, getCountryConfig, getProviderForCountry, isPaystackCountry, getBankListKey } from '../shared/constants';
 export { getCurrencyForCountry } from '../shared/constants';
 export type { RegionConfig, CountryConfig } from '../shared/constants';
-import { getRegionConfig, getPaymentProvider, getBankListKey, getCurrencyForCountry } from '../shared/constants';
+import { getRegionConfig, getPaymentProvider, getBankListKey, getCurrencyForCountry, getPreferredBank } from '../shared/constants';
 
 export const paymentService = {
   async createPaymentIntent(amount: number, currency: string, countryCode: string, metadata?: any, callbackUrl?: string) {
@@ -212,18 +212,19 @@ export const paymentService = {
 
   async createVirtualAccount(customerEmail: string, firstName: string, lastName: string, countryCode: string, phone?: string, bvn?: string, bankAccountNumber?: string, bankCode?: string) {
     const provider = getPaymentProvider(countryCode);
-    
+
     if (provider === 'paystack') {
       const safePhone = phone || '';
       const safeLastName = lastName || firstName || 'User';
-      
+      const preferred = getPreferredBank(countryCode);
+
       try {
         const result = await paystackClient.assignDedicatedAccount({
           email: customerEmail,
           firstName: firstName || 'User',
           lastName: safeLastName,
           phone: safePhone,
-          preferredBank: 'wema-bank',
+          preferredBank: preferred.code,
           country: countryCode || 'NG',
           bvn,
           accountNumber: bankAccountNumber,
@@ -234,29 +235,29 @@ export const paymentService = {
         return {
           provider: 'paystack',
           accountNumber: accountData.account_number || '',
-          bankName: accountData.bank?.name || 'Wema Bank',
-          bankCode: accountData.bank?.slug || 'wema-bank',
+          bankName: accountData.bank?.name || preferred.name,
+          bankCode: accountData.bank?.slug || preferred.code,
           accountName: accountData.account_name || `${firstName} ${safeLastName}`,
           customerCode: accountData.customer?.customer_code || '',
           status: accountData.assignment?.assignee_type ? 'assigned' : 'pending',
         };
       } catch (assignError: any) {
         paymentLogger.warn('dva_assign_failed_trying_two_step', { error: assignError.message, email: customerEmail });
-        
+
         const customer = await paystackClient.createCustomer(customerEmail, firstName || 'User', safeLastName, safePhone);
         const customerCode = customer.data?.customer_code;
-        
+
         if (!customerCode) {
           throw new Error('Failed to create Paystack customer');
         }
 
         try {
-          const account = await paystackClient.createVirtualAccount(customerCode);
+          const account = await paystackClient.createVirtualAccount(customerCode, preferred.code);
           return {
             provider: 'paystack',
             accountNumber: account.data?.account_number || '',
-            bankName: account.data?.bank?.name || 'Wema Bank',
-            bankCode: account.data?.bank?.slug || 'wema-bank',
+            bankName: account.data?.bank?.name || preferred.name,
+            bankCode: account.data?.bank?.slug || preferred.code,
             accountName: account.data?.account_name || `${firstName} ${safeLastName}`,
             customerCode,
             status: 'active',
@@ -266,8 +267,8 @@ export const paymentService = {
           return {
             provider: 'paystack',
             accountNumber: '',
-            bankName: 'Wema Bank',
-            bankCode: 'wema-bank',
+            bankName: preferred.name,
+            bankCode: preferred.code,
             accountName: `${firstName} ${safeLastName}`,
             customerCode,
             status: 'pending_validation',

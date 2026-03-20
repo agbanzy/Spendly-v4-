@@ -16,6 +16,78 @@ import { notificationService } from "../services/notification-service";
 
 const router = express.Router();
 
+// ==================== PAYOUT CURRENCY VALIDATION ====================
+
+/**
+ * Mapping of country codes to their expected currencies.
+ * Used to validate that payout currency matches the destination country.
+ */
+const COUNTRY_CURRENCY_MAP: Record<string, string[]> = {
+  US: ['USD'],
+  CA: ['CAD'],
+  GB: ['GBP'],
+  NG: ['NGN'],
+  GH: ['GHS'],
+  KE: ['KES'],
+  ZA: ['ZAR'],
+  EG: ['EGP'],
+  RW: ['RWF'],
+  AU: ['AUD'],
+  EU: ['EUR'], // Eurozone placeholder
+  DE: ['EUR'],
+  FR: ['EUR'],
+  IT: ['EUR'],
+  ES: ['EUR'],
+  NL: ['EUR'],
+  IE: ['EUR'],
+  PT: ['EUR'],
+  AT: ['EUR'],
+  BE: ['EUR'],
+  FI: ['EUR'],
+  GR: ['EUR'],
+  SE: ['SEK'],
+  NO: ['NOK'],
+  DK: ['DKK'],
+  CH: ['CHF'],
+  JP: ['JPY'],
+  IN: ['INR'],
+  CN: ['CNY'],
+};
+
+interface CurrencyValidationResult {
+  valid: boolean;
+  error?: string;
+  expectedCurrencies?: string[];
+  country?: string;
+}
+
+/**
+ * Validate that the payout currency matches the destination country's expected currency.
+ * Returns an error if there is a mismatch.
+ */
+function validatePayoutCurrency(currency: string, countryCode: string): CurrencyValidationResult {
+  const normalizedCountry = countryCode.toUpperCase();
+  const normalizedCurrency = currency.toUpperCase();
+
+  const expectedCurrencies = COUNTRY_CURRENCY_MAP[normalizedCountry];
+
+  // If country is not in our map, we allow any currency (unknown territory)
+  if (!expectedCurrencies) {
+    return { valid: true };
+  }
+
+  if (!expectedCurrencies.includes(normalizedCurrency)) {
+    return {
+      valid: false,
+      error: `Currency ${normalizedCurrency} does not match destination country ${normalizedCountry}. Expected: ${expectedCurrencies.join(' or ')}.`,
+      expectedCurrencies,
+      country: normalizedCountry,
+    };
+  }
+
+  return { valid: true };
+}
+
 // ==================== PAYOUT DESTINATIONS ROUTES ====================
 
 router.get("/payout-destinations", requireAuth, async (req, res) => {
@@ -213,6 +285,18 @@ router.post("/payouts", requireAuth, async (req, res) => {
       destination = await storage.getPayoutDestination(destinationId);
       if (destination) {
         provider = destination.provider;
+
+        // Validate currency matches destination country
+        const payoutCurrency = currency || 'USD';
+        const countryCode = destination.country || 'US';
+        const currencyCheck = validatePayoutCurrency(payoutCurrency, countryCode);
+        if (!currencyCheck.valid) {
+          return res.status(400).json({
+            error: currencyCheck.error,
+            expectedCurrencies: currencyCheck.expectedCurrencies,
+            destinationCountry: currencyCheck.country,
+          });
+        }
       }
     }
 
@@ -394,6 +478,16 @@ router.post("/payouts/:id/process", requireAuth, requireAdmin, requirePin, async
     // Determine country for provider selection
     const countryCode = destination.country || 'US';
 
+    // Validate currency matches destination country before processing
+    const currencyCheck = validatePayoutCurrency(payout.currency, countryCode);
+    if (!currencyCheck.valid) {
+      return res.status(400).json({
+        error: currencyCheck.error,
+        expectedCurrencies: currencyCheck.expectedCurrencies,
+        destinationCountry: currencyCheck.country,
+      });
+    }
+
     try {
       // Initiate transfer via payment service
       const transferResult = await paymentService.initiateTransfer(
@@ -494,6 +588,257 @@ router.post("/payouts/:id/process", requireAuth, requireAdmin, requirePin, async
     res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
   }
 });
+
+// ==================== BATCH PAYOUT PROCESSING ====================
+
+router.post("/payouts/batch", requireAuth, requireAdmin, requirePin, async (req, res) => {
+  try {
+    const { payoutIds } = req.body;
+
+    if (!Array.isArray(payoutIds) || payoutIds.length === 0) {
+      return res.status(400).json({ error: "payoutIds must be a non-empty array" });
+    }
+
+    if (payoutIds.length > 50) {
+      return res.status(400).json({ error: "Maximum 50 payouts per batch" });
+    }
+
+    const userId = (req as any).user?.uid;
+    const userName = await getAuditUserName(req);
+
+    const results: Array<{
+      payoutId: string;
+      status: 'processed' | 'failed' | 'skipped';
+      error?: string;
+      providerReference?: string;
+    }> = [];
+
+    let processed = 0;
+    let failed = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    // Process each payout sequentially to avoid race conditions
+    for (const payoutId of payoutIds) {
+      try {
+        const payout = await storage.getPayout(payoutId);
+        if (!payout) {
+          results.push({ payoutId, status: 'skipped', error: 'Payout not found' });
+          skipped++;
+          continue;
+        }
+
+        if (!['pending', 'approved'].includes(payout.status)) {
+          results.push({ payoutId, status: 'skipped', error: `Cannot process payout in '${payout.status}' status` });
+          skipped++;
+          continue;
+        }
+
+        const destination = payout.destinationId
+          ? await storage.getPayoutDestination(payout.destinationId)
+          : null;
+
+        if (!destination) {
+          results.push({ payoutId, status: 'failed', error: 'No payout destination configured' });
+          failed++;
+          errors.push(`${payoutId}: No destination`);
+          continue;
+        }
+
+        const countryCode = destination.country || 'US';
+
+        // Validate currency
+        const currencyCheck = validatePayoutCurrency(payout.currency, countryCode);
+        if (!currencyCheck.valid) {
+          results.push({ payoutId, status: 'failed', error: currencyCheck.error });
+          failed++;
+          errors.push(`${payoutId}: ${currencyCheck.error}`);
+          continue;
+        }
+
+        // Initiate transfer
+        const transferResult = await paymentService.initiateTransfer(
+          parseFloat(payout.amount),
+          {
+            accountNumber: destination.accountNumber,
+            bankCode: destination.bankCode,
+            accountName: destination.accountName,
+            stripeAccountId: destination.providerRecipientId,
+            currency: destination.currency,
+          },
+          countryCode,
+          `Batch Payout: ${payout.type} - ${payout.id}`
+        );
+
+        await storage.updatePayout(payout.id, {
+          status: 'processing',
+          providerTransferId: transferResult.transferId || transferResult.transferCode,
+          providerReference: transferResult.reference,
+          processedAt: new Date().toISOString(),
+        });
+
+        results.push({
+          payoutId,
+          status: 'processed',
+          providerReference: transferResult.reference,
+        });
+        processed++;
+
+        // Credit recipient wallet if applicable
+        if (payout.recipientType === 'employee' && payout.recipientId) {
+          const recipientWallet = await storage.getWalletByUserId(payout.recipientId, payout.currency);
+          if (recipientWallet) {
+            await storage.creditWallet(
+              recipientWallet.id,
+              parseFloat(payout.amount),
+              payout.type,
+              `Batch payout received: ${payout.type}`,
+              `BPO-${payout.id}`,
+              { payoutId: payout.id, batch: true }
+            );
+          }
+        }
+      } catch (err: any) {
+        // Mark individual payout as failed but continue batch
+        try {
+          await storage.updatePayout(payoutId, {
+            status: 'failed',
+            failureReason: err.message,
+          });
+        } catch {}
+
+        results.push({ payoutId, status: 'failed', error: err.message });
+        failed++;
+        errors.push(`${payoutId}: ${err.message}`);
+      }
+    }
+
+    // Log audit entry for the batch operation
+    await logAudit(
+      'payout',
+      'batch',
+      'batch_process',
+      userId,
+      userName,
+      { payoutIds },
+      { processed, failed, skipped },
+      { totalRequested: payoutIds.length, errors: errors.slice(0, 10) }
+    );
+
+    res.json({
+      processed,
+      failed,
+      skipped,
+      total: payoutIds.length,
+      errors: errors.slice(0, 20), // Limit error list
+      results,
+    });
+  } catch (error: any) {
+    const mapped = mapPaymentError(error, 'payout');
+    res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
+  }
+});
+
+// ==================== PAYOUT CANCELLATION ====================
+
+router.post("/payouts/:id/cancel", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const userId = (req as any).user?.uid;
+    const userName = await getAuditUserName(req);
+    const { reason } = req.body;
+
+    const payout = await storage.getPayout(param(req.params.id));
+    if (!payout) {
+      return res.status(404).json({ error: "Payout not found" });
+    }
+
+    // Only allow cancellation if not yet processing/completed
+    const cancellableStatuses = ['pending', 'approved', 'pending_second_approval'];
+    if (!cancellableStatuses.includes(payout.status)) {
+      return res.status(400).json({
+        error: `Payout cannot be cancelled in '${payout.status}' status. Only payouts with status: ${cancellableStatuses.join(', ')} can be cancelled.`,
+        currentStatus: payout.status,
+      });
+    }
+
+    const previousStatus = payout.status;
+
+    // If the payout was approved, the balance may have been debited — refund it
+    let balanceRefunded = false;
+    if (payout.status === 'approved' && payout.recipientType === 'employee' && payout.recipientId) {
+      try {
+        // Check if a wallet debit was made for this payout
+        const recipientWallet = await storage.getWalletByUserId(payout.recipientId, payout.currency);
+        if (recipientWallet) {
+          // Credit back the amount (reverse the debit)
+          await storage.creditWallet(
+            recipientWallet.id,
+            parseFloat(payout.amount),
+            'payout_cancellation_refund',
+            `Refund for cancelled payout: ${payout.id}`,
+            `CANCEL-${payout.id}`,
+            { payoutId: payout.id, cancelledBy: userId }
+          );
+          balanceRefunded = true;
+        }
+      } catch (refundErr: any) {
+        console.error(`Failed to refund balance for cancelled payout ${payout.id}:`, refundErr.message);
+        // Continue with cancellation even if refund fails — log for manual review
+      }
+    }
+
+    // Update payout status to cancelled
+    const updatedPayout = await storage.updatePayout(payout.id, {
+      status: 'cancelled',
+      failureReason: reason || 'Cancelled by admin',
+      metadata: {
+        ...(payout.metadata ? JSON.parse(JSON.stringify(payout.metadata)) : {}),
+        cancelledBy: userId,
+        cancelledByName: userName,
+        cancelledAt: new Date().toISOString(),
+        cancellationReason: reason || 'No reason provided',
+        balanceRefunded,
+      } as any,
+    });
+
+    // Log audit trail
+    await logAudit(
+      'payout',
+      payout.id,
+      'cancelled',
+      userId,
+      userName,
+      { status: previousStatus },
+      { status: 'cancelled' },
+      {
+        reason: reason || 'No reason provided',
+        amount: payout.amount,
+        currency: payout.currency,
+        balanceRefunded,
+        recipientName: payout.recipientName,
+      }
+    );
+
+    // Update related entity if applicable
+    if (payout.relatedEntityType === 'expense' && payout.relatedEntityId) {
+      await storage.updateExpense(payout.relatedEntityId, {
+        payoutStatus: 'cancelled',
+      });
+    }
+
+    res.json({
+      success: true,
+      payout: updatedPayout,
+      balanceRefunded,
+      message: `Payout ${payout.id} cancelled successfully.${balanceRefunded ? ' Balance has been refunded.' : ''}`,
+    });
+  } catch (error: any) {
+    const mapped = mapPaymentError(error, 'payout');
+    res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
+  }
+});
+
+// ==================== PAYOUT REJECTION ====================
 
 router.post("/payouts/:id/reject", requireAuth, requireAdmin, async (req, res) => {
   try {

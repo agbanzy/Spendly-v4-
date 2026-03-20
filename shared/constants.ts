@@ -254,3 +254,86 @@ export function getBankDetailLabel(format: BankDetailFormat): string {
     case 'transit': return 'Transit + Institution Number';
   }
 }
+
+// ── Preferred banks per country (for DVA / virtual account creation) ──
+
+export const PREFERRED_BANKS: Record<string, Array<{ code: string; name: string }>> = {
+  NG: [
+    { code: 'wema-bank', name: 'Wema Bank' },
+    { code: 'access-bank', name: 'Access Bank' },
+    { code: 'test-bank', name: 'Test Bank' }, // Paystack test environment
+  ],
+  GH: [
+    { code: 'gcb-bank', name: 'GCB Bank' },
+    { code: 'fidelity-bank-ghana', name: 'Fidelity Bank Ghana' },
+  ],
+};
+
+/**
+ * Get the default preferred bank for a Paystack DVA country.
+ * Returns the first bank in the preferred list, or 'wema-bank' as fallback.
+ */
+export function getPreferredBank(countryCode: string): { code: string; name: string } {
+  const banks = PREFERRED_BANKS[countryCode.toUpperCase()];
+  if (banks && banks.length > 0) return banks[0];
+  return { code: 'wema-bank', name: 'Wema Bank' };
+}
+
+// ── Currency → Country mapping (which countries can receive a given currency) ──
+
+export const CURRENCY_TO_COUNTRIES: Record<string, string[]> = (() => {
+  const map: Record<string, string[]> = {};
+  for (const c of SUPPORTED_COUNTRIES) {
+    if (!map[c.currency]) map[c.currency] = [];
+    map[c.currency].push(c.code);
+  }
+  return map;
+})();
+
+/**
+ * Check whether a country is valid for a given currency.
+ */
+export function isCurrencyValidForCountry(currency: string, countryCode: string): boolean {
+  const config = getCountryConfig(countryCode.toUpperCase());
+  return config?.currency === currency.toUpperCase();
+}
+
+// ── Virtual account support matrix ──────────────────────────────
+
+export type VirtualAccountMethod = 'paystack_dva' | 'mpesa_paybill' | 'bank_reference' | 'stripe_treasury' | 'unsupported';
+
+/**
+ * Determine which virtual account creation method to use for a given country.
+ */
+export function getVirtualAccountMethod(countryCode: string): VirtualAccountMethod {
+  switch (countryCode.toUpperCase()) {
+    case 'NG':
+    case 'GH':
+      return 'paystack_dva';
+    case 'KE':
+      return 'mpesa_paybill';
+    case 'ZA':
+      return 'bank_reference';
+    case 'US':
+    case 'CA':
+    case 'GB':
+    case 'AU':
+    case 'DE':
+    case 'FR':
+    case 'ES':
+    case 'IT':
+    case 'NL':
+    case 'BE':
+    case 'AT':
+    case 'CH':
+    case 'SE':
+    case 'NO':
+    case 'DK':
+    case 'FI':
+    case 'IE':
+    case 'PT':
+      return 'stripe_treasury';
+    default:
+      return 'unsupported';
+  }
+}

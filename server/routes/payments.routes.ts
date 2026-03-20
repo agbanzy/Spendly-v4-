@@ -28,6 +28,7 @@ import {
 import { getPaystackPublicKey, paystackClient } from "../paystackClient";
 import { mapPaymentError, Money, paymentLogger } from "../utils/paymentUtils";
 import { IdempotencyCache } from "../utils/idempotencyCache";
+import { validateTransferRequest } from "../lib/validators";
 import { db } from "../db";
 import { companyBalances, transactions as transactionsTable } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -309,6 +310,27 @@ router.post("/payment/transfer", requireAuth, requirePin, financialLimiter, asyn
 
     if (!userId) {
       return res.status(401).json({ error: "User authentication required" });
+    }
+
+    // Validate transfer request: currency-country match, amount limits, account format, provider
+    const transferValidation = validateTransferRequest({
+      amount,
+      countryCode,
+      currency,
+      recipientDetails: {
+        accountNumber: recipientDetails.accountNumber,
+        bankCode: recipientDetails.bankCode,
+        routingNumber: recipientDetails.routingNumber,
+        sortCode: recipientDetails.sortCode,
+        bsbNumber: recipientDetails.bsbNumber,
+        iban: recipientDetails.iban,
+      },
+    });
+    if (!transferValidation.valid) {
+      return res.status(400).json({
+        error: "Transfer validation failed",
+        details: transferValidation.errors,
+      });
     }
 
     // SECURITY: Verify user's personal wallet balance before transfer

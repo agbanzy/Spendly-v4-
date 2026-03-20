@@ -9,6 +9,7 @@ import { paymentService } from "../paymentService";
 import { mapPaymentError, paymentLogger } from "../utils/paymentUtils";
 import { requireAuth, requirePin } from "../middleware/auth";
 import { financialLimiter, sensitiveLimiter } from "../middleware/rateLimiter";
+import { db } from "../db";
 import {
   param,
   validateAmount,
@@ -19,6 +20,56 @@ import {
 } from "./shared";
 
 const router = express.Router();
+
+// ==================== PER-COUNTRY VIRTUAL CARD MESSAGING ====================
+
+interface CurrencyRejectionInfo {
+  message: string;
+  suggestedAlternativeCurrency: string;
+  suggestedAlternativeLabel: string;
+}
+
+/**
+ * Country/currency-specific messaging for unsupported virtual card currencies.
+ * Instead of a generic "not available" error, provide actionable guidance.
+ */
+const LOCAL_CURRENCY_INFO: Record<string, CurrencyRejectionInfo> = {
+  NGN: {
+    message: 'Virtual cards are coming soon for Nigerian Naira. In the meantime, you can fund a USD virtual card and use it globally.',
+    suggestedAlternativeCurrency: 'USD',
+    suggestedAlternativeLabel: 'US Dollar (USD)',
+  },
+  GHS: {
+    message: 'Virtual cards for Ghanaian Cedi are not yet available. You can create a USD virtual card instead, which works worldwide.',
+    suggestedAlternativeCurrency: 'USD',
+    suggestedAlternativeLabel: 'US Dollar (USD)',
+  },
+  KES: {
+    message: 'Kenyan Shilling virtual cards are coming soon. For now, consider funding a USD or EUR virtual card for international transactions.',
+    suggestedAlternativeCurrency: 'USD',
+    suggestedAlternativeLabel: 'US Dollar (USD)',
+  },
+  ZAR: {
+    message: 'South African Rand virtual cards will be available soon. You can create a USD or GBP card and fund it from your ZAR wallet with automatic conversion.',
+    suggestedAlternativeCurrency: 'USD',
+    suggestedAlternativeLabel: 'US Dollar (USD)',
+  },
+  EGP: {
+    message: 'Egyptian Pound virtual cards are not yet supported. Fund a USD card instead for international use.',
+    suggestedAlternativeCurrency: 'USD',
+    suggestedAlternativeLabel: 'US Dollar (USD)',
+  },
+  RWF: {
+    message: 'Rwandan Franc virtual cards are not yet available. Consider a USD virtual card for international purchases.',
+    suggestedAlternativeCurrency: 'USD',
+    suggestedAlternativeLabel: 'US Dollar (USD)',
+  },
+  XOF: {
+    message: 'CFA Franc virtual cards are not yet supported. You can create a EUR or USD virtual card instead.',
+    suggestedAlternativeCurrency: 'EUR',
+    suggestedAlternativeLabel: 'Euro (EUR)',
+  },
+};
 
 // ==================== CARDS ====================
 
@@ -61,12 +112,16 @@ router.post("/cards", requireAuth, async (req, res) => {
 
     // Virtual card issuance is only available via Stripe (USD, EUR, GBP, AUD, etc.)
     // Paystack does not have a card issuance API — reject local currency cards
-    const LOCAL_CURRENCIES = ['NGN', 'GHS', 'KES', 'ZAR', 'EGP', 'RWF', 'XOF'];
-    if (LOCAL_CURRENCIES.includes(selectedCurrency)) {
+    // with per-country specific messaging and suggested alternatives
+    const localCurrencyInfo = LOCAL_CURRENCY_INFO[selectedCurrency];
+    if (localCurrencyInfo) {
       return res.status(400).json({
-        error: 'Virtual card issuance is not yet available for this currency.',
-        detail: `Card issuance for ${selectedCurrency} is coming soon. Virtual cards are currently available for USD, EUR, GBP, and AUD.`,
+        error: localCurrencyInfo.message,
+        detail: localCurrencyInfo.message,
         comingSoon: true,
+        suggestedAlternativeCurrency: localCurrencyInfo.suggestedAlternativeCurrency,
+        suggestedAlternativeLabel: localCurrencyInfo.suggestedAlternativeLabel,
+        requestedCurrency: selectedCurrency,
       });
     }
 
@@ -203,7 +258,7 @@ router.delete("/cards/:id", requireAuth, async (req, res) => {
   }
 });
 
-// Fund a virtual card from wallet
+// Fund a virtual card from wallet — ATOMIC: wallet debit + card credit in a single transaction
 router.post("/cards/:id/fund", financialLimiter, requireAuth, requirePin, async (req, res) => {
   try {
     const { amount, sourceCurrency } = req.body;
@@ -269,34 +324,55 @@ router.post("/cards/:id/fund", financialLimiter, requireAuth, requirePin, async 
       });
     }
 
-    // Debit from wallet
-    await storage.debitWallet(
-      sourceWallet.id,
-      amountToDeduct,
-      'card_funding',
-      `Fund card ${card.name} (****${card.last4})`,
-      `CFUND-${Date.now()}`,
-      { cardId: card.id, exchangeRate, cardCurrency }
-    );
+    // Mark card as pendingCardFunding to track in-flight operation
+    await storage.updateCard(param(req.params.id), { status: 'pendingCardFunding' } as any);
 
-    // Update card balance
-    const currentBalance = parseFloat(String(card.balance || 0));
-    const newBalance = currentBalance + amountToCredit;
-    const updated = await storage.updateCard(param(req.params.id), { balance: newBalance });
+    let updated: any;
+    try {
+      // ATOMIC OPERATION: debit wallet AND update card balance in a single DB transaction.
+      // If either operation fails, both are rolled back.
+      await db.transaction(async (tx) => {
+        // Step 1: Debit from wallet
+        await storage.debitWallet(
+          sourceWallet.id,
+          amountToDeduct,
+          'card_funding',
+          `Fund card ${card.name} (****${card.last4})`,
+          `CFUND-${Date.now()}`,
+          { cardId: card.id, exchangeRate, cardCurrency }
+        );
 
-    // Create funding transaction
-    await storage.createTransaction({
-      description: `Card funding - ${card.name} (****${card.last4})`,
-      amount: String(amountToCredit),
-      fee: "0",
-      type: 'funding',
-      status: 'completed',
-      date: new Date().toISOString().split('T')[0],
-      currency: cardCurrency,
-      reference: null,
-      userId: (req as any).user?.uid || null,
-      companyId: company?.companyId ?? null,
-    });
+        // Step 2: Update card balance
+        const currentBalance = parseFloat(String(card.balance || 0));
+        const newBalance = currentBalance + amountToCredit;
+        updated = await storage.updateCard(param(req.params.id), {
+          balance: newBalance,
+          status: 'active', // restore from pendingCardFunding
+        });
+
+        // Step 3: Create funding transaction record
+        await storage.createTransaction({
+          description: `Card funding - ${card.name} (****${card.last4})`,
+          amount: String(amountToCredit),
+          fee: "0",
+          type: 'funding',
+          status: 'completed',
+          date: new Date().toISOString().split('T')[0],
+          currency: cardCurrency,
+          reference: null,
+          userId: (req as any).user?.uid || null,
+          companyId: company?.companyId ?? null,
+        });
+      });
+    } catch (txError: any) {
+      // Transaction failed — restore card status
+      await storage.updateCard(param(req.params.id), { status: card.status || 'active' } as any);
+      console.error('Card funding transaction failed:', txError);
+      return res.status(500).json({
+        error: "Card funding failed. No money was deducted from your wallet.",
+        detail: "The operation was rolled back due to an internal error. Please try again.",
+      });
+    }
 
     const currencySymbols: Record<string, string> = {
       USD: '$', EUR: '€', GBP: '£', AUD: 'A$', CAD: 'CA$',

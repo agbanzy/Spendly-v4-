@@ -18,6 +18,12 @@ import {
   resolveUserCompany,
   fundingSourceSchema,
 } from "./shared";
+import {
+  getPreferredBank,
+  getVirtualAccountMethod,
+  PREFERRED_BANKS,
+  type VirtualAccountMethod,
+} from "../../shared/constants";
 
 const router = express.Router();
 
@@ -35,7 +41,7 @@ router.get("/virtual-accounts", requireAuth, async (req, res) => {
 
 router.post("/virtual-accounts", requireAuth, async (req, res) => {
   try {
-    const { name, currency, type, countryCode, email, firstName, lastName, phone, bvn } = req.body;
+    const { name, currency, type, countryCode, email, firstName, lastName, phone, bvn, preferredBank: reqPreferredBank } = req.body;
     const userId = (req as any).user?.uid || (req as any).user?.id;
 
     if (!name) {
@@ -44,11 +50,41 @@ router.post("/virtual-accounts", requireAuth, async (req, res) => {
 
     const effectiveCountry = countryCode || (currency === 'NGN' ? 'NG' : currency === 'GHS' ? 'GH' : 'US');
     // DVA countries must use local currency regardless of what client sends
-    const DVA_CURRENCY_MAP: Record<string, string> = { 'NG': 'NGN', 'GH': 'GHS' };
+    const DVA_CURRENCY_MAP: Record<string, string> = { 'NG': 'NGN', 'GH': 'GHS', 'KE': 'KES', 'ZA': 'ZAR' };
     const effectiveCurrency = DVA_CURRENCY_MAP[effectiveCountry.toUpperCase()] || currency || 'USD';
     const provider = paymentService.getProvider ? paymentService.getProvider(effectiveCountry) : (
       ['NG', 'GH', 'ZA', 'KE', 'EG', 'RW', 'CI'].includes(effectiveCountry.toUpperCase()) ? 'paystack' : 'stripe'
     );
+
+    // ── KYC gate: block virtual account creation if KYC not approved ──
+    if (userId) {
+      const userProfile = await storage.getUserProfileByCognitoSub(userId);
+      const kycStatus = (userProfile as any)?.kycStatus;
+      const APPROVED_KYC_STATUSES = ['approved', 'auto_verified'];
+      if (!kycStatus || !APPROVED_KYC_STATUSES.includes(kycStatus)) {
+        return res.status(403).json({
+          error: "KYC verification required before creating a virtual account",
+          kycStatus: kycStatus || 'not_started',
+          requiredStatuses: APPROVED_KYC_STATUSES,
+        });
+      }
+    }
+
+    // ── Duplicate prevention: one account per currency per user ──
+    if (userId) {
+      const companyCtx = await resolveUserCompany(req);
+      const existingAccounts = await storage.getVirtualAccounts(companyCtx?.companyId);
+      const duplicate = existingAccounts.find(
+        (a: any) => a.userId === userId && a.currency === effectiveCurrency && a.status !== 'closed'
+      );
+      if (duplicate) {
+        return res.status(409).json({
+          error: `You already have an active ${effectiveCurrency} virtual account`,
+          existingAccountId: duplicate.id,
+          accountNumber: (duplicate as any).accountNumber,
+        });
+      }
+    }
 
     // Resolve company context
     const companyContext = await resolveUserCompany(req);
@@ -61,16 +97,18 @@ router.post("/virtual-accounts", requireAuth, async (req, res) => {
     let providerCustomerCode = '';
     let status = 'pending';
 
-    if (provider === 'paystack') {
-      // --- PAYSTACK DVA (Dedicated Virtual Account) ---
-      // DVA only supports Nigeria (NG) and Ghana (GH) per Paystack API docs.
-      const DVA_SUPPORTED_COUNTRIES = ['NG', 'GH'];
-      if (!DVA_SUPPORTED_COUNTRIES.includes(effectiveCountry.toUpperCase())) {
-        return res.status(400).json({
-          error: `Paystack Dedicated Virtual Accounts are only available in Nigeria and Ghana. Country '${effectiveCountry}' is not supported for DVA.`,
-          supportedCountries: DVA_SUPPORTED_COUNTRIES,
-        });
-      }
+    // Determine the virtual account method for this country
+    const vaMethod = getVirtualAccountMethod(effectiveCountry);
+
+    if (vaMethod === 'unsupported') {
+      return res.status(400).json({
+        error: `Virtual accounts are not yet available for country '${effectiveCountry}'.`,
+        supportedMethods: ['paystack_dva (NG/GH)', 'mpesa_paybill (KE)', 'bank_reference (ZA)', 'stripe_treasury (US/GB/EU/AU)'],
+      });
+    }
+
+    if (vaMethod === 'paystack_dva') {
+      // --- PAYSTACK DVA (Dedicated Virtual Account) — NG and GH ---
       const userProfile = userId ? await storage.getUserProfileByCognitoSub(userId) : null;
       const userEmail = email || (userProfile as any)?.email;
       const userFirstName = firstName || (userProfile as any)?.firstName || name;
@@ -84,14 +122,19 @@ router.post("/virtual-accounts", requireAuth, async (req, res) => {
         });
       }
 
+      // Select preferred bank: use request param, or fall back to country default
+      const preferred = reqPreferredBank
+        ? { code: reqPreferredBank, name: reqPreferredBank }
+        : getPreferredBank(effectiveCountry);
+
       try {
         const dvaResult = await paymentService.createVirtualAccount(
           userEmail, userFirstName, userLastName, effectiveCountry, userPhone, bvn
         );
 
         accountNumber = dvaResult.accountNumber || '';
-        bankName = dvaResult.bankName || 'Wema Bank';
-        bankCode = dvaResult.bankCode || 'wema-bank';
+        bankName = dvaResult.bankName || preferred.name;
+        bankCode = dvaResult.bankCode || preferred.code;
         accountName = dvaResult.accountName || `${userFirstName} ${userLastName}`;
         providerCustomerCode = dvaResult.customerCode || '';
         status = dvaResult.status === 'active' || dvaResult.status === 'assigned' ? 'active' : 'pending';
@@ -107,8 +150,105 @@ router.post("/virtual-accounts", requireAuth, async (req, res) => {
           detail: dvaErr.message,
         });
       }
+    } else if (vaMethod === 'mpesa_paybill') {
+      // --- KENYA: M-Pesa paybill number generation ---
+      // M-Pesa paybill numbers are typically assigned by Safaricom.
+      // Generate a unique account reference that maps to the Paystack customer.
+      const userProfile = userId ? await storage.getUserProfileByCognitoSub(userId) : null;
+      const userEmail = email || (userProfile as any)?.email;
+      const userFirstName = firstName || (userProfile as any)?.firstName || name;
+      const userLastName = lastName || (userProfile as any)?.lastName || 'User';
+      const userPhone = phone || (userProfile as any)?.phoneNumber || '';
+
+      if (!userEmail) {
+        return res.status(400).json({
+          error: "Email is required for Kenyan virtual accounts",
+          requiredFields: ['email', 'firstName', 'lastName', 'phone'],
+        });
+      }
+
+      try {
+        // Create Paystack customer first
+        const customer = await paystackClient.createCustomer(
+          userEmail, userFirstName, userLastName, userPhone
+        );
+        const customerCode = customer.data?.customer_code;
+        if (!customerCode) {
+          throw new Error('Failed to create Paystack customer for M-Pesa');
+        }
+
+        // Generate a unique paybill account reference
+        // Format: SP-<short user id>-<timestamp suffix>
+        const shortId = (userId || 'U').substring(0, 6).toUpperCase();
+        const accountRef = `SP-${shortId}-${Date.now().toString(36).toUpperCase()}`;
+
+        accountNumber = accountRef;
+        bankName = 'M-Pesa (Safaricom)';
+        bankCode = 'MPESA';
+        accountName = `${userFirstName} ${userLastName}`;
+        providerCustomerCode = customerCode;
+        status = 'active';
+
+        paymentLogger.info('mpesa_paybill_reference_created', {
+          accountRef, customerCode, country: 'KE',
+        });
+      } catch (mpesaErr: any) {
+        console.error('M-Pesa account reference creation failed:', mpesaErr.message);
+        return res.status(502).json({
+          error: "Failed to create M-Pesa virtual account",
+          detail: mpesaErr.message,
+        });
+      }
+    } else if (vaMethod === 'bank_reference') {
+      // --- SOUTH AFRICA: Bank reference generation ---
+      // ZA does not support Paystack DVA; generate a unique bank reference
+      // that can be used for EFT deposits to a pooled collection account.
+      const userProfile = userId ? await storage.getUserProfileByCognitoSub(userId) : null;
+      const userEmail = email || (userProfile as any)?.email;
+      const userFirstName = firstName || (userProfile as any)?.firstName || name;
+      const userLastName = lastName || (userProfile as any)?.lastName || 'User';
+      const userPhone = phone || (userProfile as any)?.phoneNumber || '';
+
+      if (!userEmail) {
+        return res.status(400).json({
+          error: "Email is required for South African virtual accounts",
+          requiredFields: ['email', 'firstName', 'lastName'],
+        });
+      }
+
+      try {
+        // Create Paystack customer
+        const customer = await paystackClient.createCustomer(
+          userEmail, userFirstName, userLastName, userPhone
+        );
+        const customerCode = customer.data?.customer_code;
+        if (!customerCode) {
+          throw new Error('Failed to create Paystack customer for ZA');
+        }
+
+        // Generate unique bank reference for EFT deposits
+        const shortId = (userId || 'U').substring(0, 8).toUpperCase();
+        const bankRef = `FIN-${shortId}-${Date.now().toString(36).toUpperCase()}`;
+
+        accountNumber = bankRef;
+        bankName = 'Financiar (EFT Reference)';
+        bankCode = 'FIN-ZA';
+        accountName = `${userFirstName} ${userLastName}`;
+        providerCustomerCode = customerCode;
+        status = 'active';
+
+        paymentLogger.info('za_bank_reference_created', {
+          bankRef, customerCode, country: 'ZA',
+        });
+      } catch (zaErr: any) {
+        console.error('ZA bank reference creation failed:', zaErr.message);
+        return res.status(502).json({
+          error: "Failed to create South African virtual account",
+          detail: zaErr.message,
+        });
+      }
     } else {
-      // --- STRIPE TREASURY (Financial Account) ---
+      // --- STRIPE TREASURY (US/GB/EU/AU) ---
       try {
         const treasuryResult = await paymentService.createStripeFinancialAccount({
           supportedCurrencies: [effectiveCurrency],
@@ -494,10 +634,25 @@ router.post("/virtual-accounts/create", requireAuth, requirePin, async (req, res
     const safeCountry = countryCode || 'US';
     const { currency } = getCurrencyForCountry(safeCountry);
 
+    // Duplicate prevention: check for existing account with same currency
     const existingAccounts = await storage.getVirtualAccounts();
-    const userAccount = existingAccounts.find((a: any) => a.userId === userId);
+    const userAccount = existingAccounts.find(
+      (a: any) => a.userId === userId && a.currency === currency && a.status !== 'closed'
+    );
     if (userAccount) {
       return res.json(userAccount);
+    }
+
+    // KYC gate: require approved or auto_verified status
+    const userProfile = userId ? await storage.getUserProfileByCognitoSub(userId) : null;
+    const kycStatus = (userProfile as any)?.kycStatus;
+    const APPROVED_KYC = ['approved', 'auto_verified'];
+    if (!kycStatus || !APPROVED_KYC.includes(kycStatus)) {
+      return res.status(403).json({
+        error: "KYC verification must be completed before creating a virtual account",
+        kycStatus: kycStatus || 'not_started',
+        requiredStatuses: APPROVED_KYC,
+      });
     }
 
     let accountNumber = '';
@@ -508,10 +663,10 @@ router.post("/virtual-accounts/create", requireAuth, requirePin, async (req, res
     let providerMessage = '';
 
     try {
-      const provider = getPaymentProvider(safeCountry);
+      const vaMethod = getVirtualAccountMethod(safeCountry);
 
-      if (provider === 'stripe') {
-        // Use Stripe Treasury for non-African countries
+      if (vaMethod === 'stripe_treasury') {
+        // Use Stripe Treasury for non-African countries (US/GB/EU/AU)
         try {
           const financialAccount = await paymentService.createStripeFinancialAccount({
             supportedCurrencies: [currency],
@@ -538,35 +693,73 @@ router.post("/virtual-accounts/create", requireAuth, requirePin, async (req, res
           accountStatus = 'pending';
           providerMessage = 'Stripe Treasury account pending activation. Your account will be activated shortly.';
         }
-      } else {
-        // Use Paystack for African countries — DVA only works for NG and GH
-        const DVA_SUPPORTED = ['NG', 'GH'];
-        if (!DVA_SUPPORTED.includes(safeCountry.toUpperCase())) {
-          accountStatus = 'unavailable';
-          providerMessage = `Virtual accounts are not yet available in your country (${safeCountry}). This feature is currently supported in Nigeria and Ghana.`;
-        } else {
-          const providerResult = await paymentService.createVirtualAccount(
-            safeEmail,
-            firstName || 'User',
-            lastName || safeName,
-            safeCountry,
-            phone,
-            bvn,
-            bankAccountNumber,
-            userBankCode
-          );
+      } else if (vaMethod === 'paystack_dva') {
+        // Paystack DVA for NG and GH — with preferred bank selection
+        const preferred = getPreferredBank(safeCountry);
+        const providerResult = await paymentService.createVirtualAccount(
+          safeEmail,
+          firstName || 'User',
+          lastName || safeName,
+          safeCountry,
+          phone,
+          bvn,
+          bankAccountNumber,
+          userBankCode
+        );
 
-          if (providerResult.accountNumber) {
-            accountNumber = providerResult.accountNumber;
-            bankName = providerResult.bankName || bankName;
-            bankCode = providerResult.bankCode || bankCode;
-            accountName = providerResult.accountName || accountName;
-            accountStatus = 'active';
-          } else if (providerResult.status === 'pending_validation') {
-            accountStatus = 'pending';
-            providerMessage = providerResult.message || 'Account pending validation';
-          }
+        if (providerResult.accountNumber) {
+          accountNumber = providerResult.accountNumber;
+          bankName = providerResult.bankName || preferred.name;
+          bankCode = providerResult.bankCode || preferred.code;
+          accountName = providerResult.accountName || accountName;
+          accountStatus = 'active';
+        } else if (providerResult.status === 'pending_validation') {
+          accountStatus = 'pending';
+          providerMessage = providerResult.message || 'Account pending validation';
         }
+      } else if (vaMethod === 'mpesa_paybill') {
+        // Kenya — M-Pesa paybill reference
+        try {
+          const customer = await paystackClient.createCustomer(
+            safeEmail, firstName || 'User', lastName || safeName, phone
+          );
+          const customerCode = customer.data?.customer_code;
+          if (!customerCode) throw new Error('Failed to create Paystack customer');
+
+          const shortId = userId.substring(0, 6).toUpperCase();
+          accountNumber = `SP-${shortId}-${Date.now().toString(36).toUpperCase()}`;
+          bankName = 'M-Pesa (Safaricom)';
+          bankCode = 'MPESA';
+          accountName = safeName;
+          accountStatus = 'active';
+          paymentLogger.info('mpesa_signup_account_created', { userId, country: 'KE' });
+        } catch (keErr: any) {
+          accountStatus = 'pending';
+          providerMessage = 'M-Pesa account creation pending. Please try again.';
+        }
+      } else if (vaMethod === 'bank_reference') {
+        // South Africa — bank reference for EFT
+        try {
+          const customer = await paystackClient.createCustomer(
+            safeEmail, firstName || 'User', lastName || safeName, phone
+          );
+          const customerCode = customer.data?.customer_code;
+          if (!customerCode) throw new Error('Failed to create Paystack customer');
+
+          const shortId = userId.substring(0, 8).toUpperCase();
+          accountNumber = `FIN-${shortId}-${Date.now().toString(36).toUpperCase()}`;
+          bankName = 'Financiar (EFT Reference)';
+          bankCode = 'FIN-ZA';
+          accountName = safeName;
+          accountStatus = 'active';
+          paymentLogger.info('za_signup_account_created', { userId, country: 'ZA' });
+        } catch (zaErr: any) {
+          accountStatus = 'pending';
+          providerMessage = 'South African account creation pending. Please try again.';
+        }
+      } else {
+        accountStatus = 'unavailable';
+        providerMessage = `Virtual accounts are not yet available in your country (${safeCountry}).`;
       }
     } catch (providerError: any) {
       console.log('Payment provider virtual account creation failed:', providerError.message);

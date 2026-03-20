@@ -1,3 +1,5 @@
+import { validateNUBAN, validateIBAN } from './lib/validators';
+
 const PAYSTACK_BASE_URL = 'https://api.paystack.co';
 
 function getPaystackSecretKey(): string {
@@ -65,6 +67,10 @@ export function validateTransferDetails(
       // Bank code: 3 digits
       if (!/^\d{3}$/.test(bankCode)) {
         return { valid: false, message: 'Nigerian bank code must be 3 digits (e.g., 058 for GTBank)' };
+      }
+      // NUBAN checksum validation (CBN weighted algorithm)
+      if (!validateNUBAN(accountNumber, bankCode)) {
+        return { valid: false, message: 'Nigerian account number failed NUBAN checksum validation. Please verify the account number and bank code.' };
       }
       break;
 
@@ -178,16 +184,20 @@ export function validateStripeBankDetails(
       break;
 
     default:
-      // EU / SEPA: IBAN validation
+      // EU / SEPA: Full IBAN validation with MOD-97 checksum
       if (details.iban) {
-        const iban = details.iban.replace(/\s/g, '').toUpperCase();
-        // Basic IBAN: 2 letter country + 2 check digits + up to 30 alphanumeric
-        if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(iban)) {
-          return { valid: false, message: 'Invalid IBAN format. Must start with 2-letter country code followed by check digits' };
+        const ibanResult = validateIBAN(details.iban);
+        if (!ibanResult.valid) {
+          return { valid: false, message: ibanResult.error || 'Invalid IBAN' };
         }
       } else if (details.accountNumber) {
-        // Fallback: at least some account number provided
-        if (details.accountNumber.length < 5) {
+        // Check if the account number looks like an IBAN (starts with 2 letters)
+        if (/^[A-Za-z]{2}\d{2}/.test(details.accountNumber)) {
+          const ibanResult = validateIBAN(details.accountNumber);
+          if (!ibanResult.valid) {
+            return { valid: false, message: ibanResult.error || 'Invalid IBAN format in account number field' };
+          }
+        } else if (details.accountNumber.length < 5) {
           return { valid: false, message: 'Account number must be at least 5 characters' };
         }
       } else {
