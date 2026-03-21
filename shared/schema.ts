@@ -1304,6 +1304,40 @@ export const processedWebhooks = pgTable("processed_webhooks", {
   metadata: jsonb("metadata"),
 });
 
+// Payment Methods table — saved cards and bank accounts for Stripe + Paystack
+export const paymentMethods = pgTable("payment_methods", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  companyId: integer("company_id"),
+  provider: text("provider").notNull(), // 'stripe' or 'paystack'
+  type: text("type").notNull(), // 'card', 'bank_account'
+  last4: text("last4"),
+  brand: text("brand"), // 'visa', 'mastercard', etc.
+  expMonth: integer("exp_month"),
+  expYear: integer("exp_year"),
+  bankName: text("bank_name"),
+  // Stripe fields
+  stripePaymentMethodId: text("stripe_payment_method_id"),
+  stripeCustomerId: text("stripe_customer_id"),
+  // Paystack fields
+  paystackAuthorizationCode: text("paystack_authorization_code"),
+  paystackCustomerCode: text("paystack_customer_code"),
+  isDefault: boolean("is_default").default(false),
+  isReusable: boolean("is_reusable").default(true),
+  metadata: jsonb("metadata"),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+}, (t) => [
+  index("payment_methods_user_id_idx").on(t.userId),
+  index("payment_methods_company_id_idx").on(t.companyId),
+  index("payment_methods_provider_idx").on(t.provider),
+]);
+
+export const insertPaymentMethodSchema = createInsertSchema(paymentMethods).omit({ id: true });
+export const selectPaymentMethodSchema = createInsertSchema(paymentMethods);
+export type InsertPaymentMethod = z.infer<typeof insertPaymentMethodSchema>;
+export type PaymentMethod = typeof paymentMethods.$inferSelect;
+
 // Category icons mapping
 export const categoryIcons: Record<string, string> = {
   'Software': 'code',

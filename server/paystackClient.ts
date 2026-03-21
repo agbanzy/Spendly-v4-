@@ -404,9 +404,14 @@ export const paystackClient = {
     });
   },
 
+  /**
+   * @deprecated Use `validateCustomerBankAccount` instead.
+   * The `type: "bvn"` validation is deprecated by Paystack.
+   * This method now defaults to `type: "bank_account"`.
+   */
   async validateCustomer(customerCode: string, params: {
-    type: string;
-    value: string;
+    type?: string;
+    value?: string;
     country: string;
     bvn: string;
     bankCode: string;
@@ -416,8 +421,7 @@ export const paystackClient = {
     middleName?: string;
   }) {
     return paystackRequest(`/customer/${encodeURIComponent(customerCode)}/identification`, 'POST', {
-      type: params.type || 'bank_account',
-      value: params.value || params.bvn,
+      type: 'bank_account',
       country: params.country || 'NG',
       bvn: params.bvn,
       bank_code: params.bankCode,
@@ -425,6 +429,30 @@ export const paystackClient = {
       first_name: params.firstName,
       last_name: params.lastName,
       middle_name: params.middleName,
+    });
+  },
+
+  /**
+   * Validate a customer's identity using bank account details.
+   * This is the recommended replacement for the deprecated `type: "bvn"` validation.
+   * POST /customer/:customerCode/identification with `type: "bank_account"`.
+   */
+  async validateCustomerBankAccount(customerCode: string, params: {
+    country: string;
+    accountNumber: string;
+    bvn: string;
+    bankCode: string;
+    firstName: string;
+    lastName: string;
+  }) {
+    return paystackRequest(`/customer/${encodeURIComponent(customerCode)}/identification`, 'POST', {
+      type: 'bank_account',
+      country: params.country || 'NG',
+      account_number: params.accountNumber,
+      bvn: params.bvn,
+      bank_code: params.bankCode,
+      first_name: params.firstName,
+      last_name: params.lastName,
     });
   },
 
@@ -602,9 +630,10 @@ export const paystackClient = {
   },
 
   /**
-   * Resolve BVN (Bank Verification Number) via Paystack API.
-   * NOTE: This endpoint requires special Paystack approval.
-   * If unavailable, the call will fail and KYC goes to pending_review (safe default).
+   * @deprecated The GET /bank/resolve_bvn/:bvn endpoint is unreliable due to
+   * NIBSS restrictions and may be removed by Paystack. Use `resolveAccountNumber`
+   * for bank account verification, or `validateCustomerBankAccount` for
+   * customer identity validation with BVN + bank account details.
    */
   async resolveBVN(bvn: string) {
     return paystackRequest(`/bank/resolve_bvn/${encodeURIComponent(bvn)}`, 'GET');

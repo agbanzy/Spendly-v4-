@@ -538,6 +538,7 @@ router.post("/onboarding/complete", requireAuth, async (req, res) => {
       firstName, lastName, country, phoneNumber, dateOfBirth,
       isBusinessAccount, businessName, businessType, businessIndustry, teamSize,
       idNumber, addressLine1, city, state, postalCode,
+      accountNumber: reqAccountNumber, bankCode: reqBankCode,
     } = req.body;
 
     if (!firstName || !lastName || !country || !phoneNumber || !dateOfBirth || !idNumber) {
@@ -603,28 +604,37 @@ router.post("/onboarding/complete", requireAuth, async (req, res) => {
 
     let bvnVerification: BvnVerificationResult | null = null;
 
-    // For NG + BVN: auto-verify via Paystack with confidence scoring
+    // For NG + BVN: auto-verify via Paystack bank_account validation (replaces deprecated resolveBVN)
     if (upperCountry === 'NG' && idConfig.key === 'bvn' && idNumber) {
       try {
-        const bvnResult = await paystackClient.resolveBVN(idNumber);
-        if (bvnResult && bvnResult.status && bvnResult.data) {
-          bvnVerification = verifyBvnMatch(bvnResult.data, { firstName, lastName, phoneNumber });
-          if (bvnVerification.confidence === 'high') {
-            isAutoApproved = true;
-          } else if (bvnVerification.confidence === 'medium') {
-            // Flag for manual review with details
-            paymentLogger.warn('bvn_medium_confidence', {
-              bvn: `***${idNumber.slice(-4)}`,
-              confidence: bvnVerification.confidence,
-              details: bvnVerification.details,
-            });
-          } else {
-            paymentLogger.warn('bvn_low_confidence', {
-              bvn: `***${idNumber.slice(-4)}`,
-              confidence: bvnVerification.confidence,
-              details: bvnVerification.details,
-            });
+        if (reqAccountNumber && reqBankCode) {
+          // Preferred path: validate via bank_account type (Paystack recommended)
+          const resolveResult = await paystackClient.resolveAccountNumber(reqAccountNumber, reqBankCode);
+          if (resolveResult && resolveResult.status && resolveResult.data) {
+            bvnVerification = verifyBvnMatch(resolveResult.data, { firstName, lastName, phoneNumber });
+            if (bvnVerification.confidence === 'high') {
+              isAutoApproved = true;
+            } else if (bvnVerification.confidence === 'medium') {
+              paymentLogger.warn('bvn_medium_confidence', {
+                bvn: `***${idNumber.slice(-4)}`,
+                confidence: bvnVerification.confidence,
+                details: bvnVerification.details,
+              });
+            } else {
+              paymentLogger.warn('bvn_low_confidence', {
+                bvn: `***${idNumber.slice(-4)}`,
+                confidence: bvnVerification.confidence,
+                details: bvnVerification.details,
+              });
+            }
           }
+        } else {
+          // Fallback: resolveBVN is deprecated and unreliable due to NIBSS restrictions
+          // KYC will go to pending_review (safe default)
+          paymentLogger.warn('bvn_missing_bank_details', {
+            bvn: `***${idNumber.slice(-4)}`,
+            message: 'Bank account number and bank code not provided; cannot use bank_account validation. KYC will require manual review.',
+          });
         }
       } catch (bvnErr: any) {
         console.error('BVN verification failed (non-blocking):', bvnErr.message);
@@ -1103,6 +1113,8 @@ const kycSubmissionSchema = z.object({
   acceptTerms: z.union([z.boolean(), z.string()]).optional().transform(v => v === true || v === 'true'),
   accountType: optionalString,
   bvnNumber: optionalString,
+  bankAccountNumber: optionalString,
+  bankCode: optionalString,
 });
 
 // Submit KYC (also aliased as /kyc/submit)
@@ -1249,32 +1261,42 @@ const handleKycSubmission = async (req: any, res: any) => {
     let isAutoApproved = false;
     let kycBvnVerification: BvnVerificationResult | null = null;
 
-    // For Nigerian users with BVN, verify server-side via Paystack with confidence scoring
+    // For Nigerian users with BVN, verify server-side via Paystack bank_account validation
+    // (replaces deprecated resolveBVN endpoint due to NIBSS restrictions)
     if (data.bvnNumber && data.country?.toUpperCase() === 'NG') {
       try {
-        const bvnResult = await paystackClient.resolveBVN(data.bvnNumber);
-        if (bvnResult && bvnResult.status && bvnResult.data) {
-          kycBvnVerification = verifyBvnMatch(bvnResult.data, {
-            firstName: data.firstName,
-            lastName: data.lastName,
-            phoneNumber: data.phoneNumber,
-          });
+        if (data.bankAccountNumber && data.bankCode) {
+          // Preferred path: resolve account number and match identity
+          const resolveResult = await paystackClient.resolveAccountNumber(data.bankAccountNumber, data.bankCode);
+          if (resolveResult && resolveResult.status && resolveResult.data) {
+            kycBvnVerification = verifyBvnMatch(resolveResult.data, {
+              firstName: data.firstName,
+              lastName: data.lastName,
+              phoneNumber: data.phoneNumber,
+            });
 
-          if (kycBvnVerification.confidence === 'high') {
-            isAutoApproved = true;
-          } else if (kycBvnVerification.confidence === 'medium') {
-            paymentLogger.warn('bvn_medium_confidence', {
-              bvn: `***${data.bvnNumber.slice(-4)}`,
-              confidence: kycBvnVerification.confidence,
-              details: kycBvnVerification.details,
-            });
-          } else {
-            paymentLogger.warn('bvn_low_confidence', {
-              bvn: `***${data.bvnNumber.slice(-4)}`,
-              confidence: kycBvnVerification.confidence,
-              details: kycBvnVerification.details,
-            });
+            if (kycBvnVerification.confidence === 'high') {
+              isAutoApproved = true;
+            } else if (kycBvnVerification.confidence === 'medium') {
+              paymentLogger.warn('bvn_medium_confidence', {
+                bvn: `***${data.bvnNumber.slice(-4)}`,
+                confidence: kycBvnVerification.confidence,
+                details: kycBvnVerification.details,
+              });
+            } else {
+              paymentLogger.warn('bvn_low_confidence', {
+                bvn: `***${data.bvnNumber.slice(-4)}`,
+                confidence: kycBvnVerification.confidence,
+                details: kycBvnVerification.details,
+              });
+            }
           }
+        } else {
+          // No bank details provided — cannot use bank_account validation
+          paymentLogger.warn('bvn_missing_bank_details', {
+            bvn: `***${data.bvnNumber.slice(-4)}`,
+            message: 'Bank account number and bank code not provided; KYC will require manual review.',
+          });
         }
       } catch (bvnErr) {
         paymentLogger.warn('bvn_verification_failed', { error: (bvnErr as Error).message });
@@ -1705,62 +1727,68 @@ router.post("/kyc/stripe/webhook", express.raw({ type: 'application/json' }), as
 
 // ==================== PAYSTACK KYC (BVN VERIFICATION) ====================
 
-// Resolve BVN (Bank Verification Number) - Nigeria
+// Verify BVN via bank account validation - Nigeria
+// Uses Paystack's bank_account customer identification (replaces deprecated /bvn/match)
 router.post("/kyc/paystack/resolve-bvn", requireAuth, async (req, res) => {
   try {
-    const { bvn, accountNumber, bankCode, firstName, lastName } = req.body;
+    const { bvn, accountNumber, bankCode, firstName, lastName, customerCode } = req.body;
     if (!bvn) {
       return res.status(400).json({ error: "BVN is required" });
     }
-
-    const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
-    if (!paystackSecretKey) {
-      return res.status(500).json({ error: "Paystack secret key not configured" });
+    if (!accountNumber || !bankCode) {
+      return res.status(400).json({ error: "Bank account number and bank code are required for BVN verification" });
     }
 
-    // Resolve BVN
-    const response = await fetch(`https://api.paystack.co/bvn/match`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${paystackSecretKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        bvn,
-        account_number: accountNumber,
-        bank_code: bankCode,
-        first_name: firstName,
-        last_name: lastName,
-      }),
-    });
-
-    const data = await response.json();
-
-    if (data.status) {
-      res.json({
-        success: true,
-        verified: data.data?.is_blacklisted === false,
-        data: {
-          firstName: data.data?.first_name,
-          lastName: data.data?.last_name,
-          dateOfBirth: data.data?.dob,
-          mobile: data.data?.mobile,
-        }
-      });
-    } else {
-      res.status(400).json({
+    // Step 1: Resolve the bank account to verify it exists and get account name
+    const resolveResult = await paystackClient.resolveAccountNumber(accountNumber, bankCode);
+    if (!resolveResult || !resolveResult.status) {
+      return res.status(400).json({
         success: false,
-        error: data.message || "BVN verification failed"
+        error: resolveResult?.message || "Could not resolve bank account. Please check the account number and bank code.",
       });
     }
+
+    // Step 2: If a customer code is provided, submit bank_account identification
+    if (customerCode) {
+      try {
+        await paystackClient.validateCustomerBankAccount(customerCode, {
+          country: 'NG',
+          accountNumber,
+          bvn,
+          bankCode,
+          firstName: firstName || '',
+          lastName: lastName || '',
+        });
+      } catch (identErr: any) {
+        // Non-blocking — identification may be async on Paystack's side
+        paymentLogger.warn('bvn_bank_account_identification_failed', { error: identErr.message });
+      }
+    }
+
+    // Step 3: Match resolved account name against provided name
+    const resolvedAccountName = (resolveResult.data?.account_name || '').toLowerCase();
+    const providedName = `${firstName || ''} ${lastName || ''}`.toLowerCase().trim();
+    const nameMatch = resolvedAccountName.includes((firstName || '').toLowerCase()) ||
+      resolvedAccountName.includes((lastName || '').toLowerCase());
+
+    res.json({
+      success: true,
+      verified: nameMatch,
+      data: {
+        accountName: resolveResult.data?.account_name,
+        accountNumber: resolveResult.data?.account_number,
+        bankId: resolveResult.data?.bank_id,
+        nameMatch,
+      }
+    });
   } catch (error: any) {
-    console.error('Paystack BVN error:', error);
+    console.error('Paystack BVN bank account verification error:', error);
     const mapped = mapPaymentError(error, 'payment');
     res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
   }
 });
 
-// Validate account with Paystack
+// Validate account with Paystack (uses paystackClient.resolveAccountNumber)
 router.post("/kyc/paystack/validate-account", requireAuth, async (req, res) => {
   try {
     const { accountNumber, bankCode } = req.body;
@@ -1768,33 +1796,19 @@ router.post("/kyc/paystack/validate-account", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Account number and bank code are required" });
     }
 
-    const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
-    if (!paystackSecretKey) {
-      return res.status(500).json({ error: "Paystack secret key not configured" });
-    }
+    const result = await paystackClient.resolveAccountNumber(accountNumber, bankCode);
 
-    const response = await fetch(
-      `https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${paystackSecretKey}`,
-        },
-      }
-    );
-
-    const data = await response.json();
-
-    if (data.status) {
+    if (result.status) {
       res.json({
         success: true,
-        accountName: data.data?.account_name,
-        accountNumber: data.data?.account_number,
-        bankId: data.data?.bank_id,
+        accountName: result.data?.account_name,
+        accountNumber: result.data?.account_number,
+        bankId: result.data?.bank_id,
       });
     } else {
       res.status(400).json({
         success: false,
-        error: data.message || "Account validation failed"
+        error: result.message || "Account validation failed"
       });
     }
   } catch (error: any) {

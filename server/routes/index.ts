@@ -37,6 +37,7 @@ import walletsRouter from "./wallets.routes";
 import payoutsRouter from "./payouts.routes";
 import webhooksRouter from "./webhooks.routes";
 import scheduledRouter from "./scheduled.routes";
+import paymentMethodsRouter from "./payment-methods.routes";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -108,6 +109,7 @@ export async function registerRoutes(
   app.use("/api", webhooksRouter);
 
   app.use("/api", scheduledRouter);
+  app.use("/api", paymentMethodsRouter);
 
   // ==================== API 404 CATCH-ALL (must be last) ====================
   app.all("/api/{*rest}", (_req, res) => {

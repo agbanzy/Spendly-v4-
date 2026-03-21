@@ -170,7 +170,7 @@ export default function Team() {
   });
 
   const invalidateInvitations = () => {
-    queryClient.invalidateQueries({ queryKey: ["/api/companies/invitations"] });
+    queryClient.invalidateQueries({ queryKey: [`/api/companies/${currentCompany?.id}/invitations`] });
     queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
     queryClient.invalidateQueries({ queryKey: ["/api/team"] });
   };

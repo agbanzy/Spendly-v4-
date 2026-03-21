@@ -1,8 +1,20 @@
 import express from "express";
+import crypto from "crypto";
 import { param, resolveUserCompany, verifyCompanyAccess, teamMemberSchema, teamMemberUpdateSchema } from "./shared";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { storage } from "../storage";
 import { notificationService } from "../services/notification-service";
+
+function getPermissionsForRole(role: string): string[] {
+  const upper = (role || 'EMPLOYEE').toUpperCase();
+  if (upper === 'OWNER' || upper === 'ADMIN') {
+    return ['CREATE_EXPENSE', 'APPROVE_EXPENSE', 'VIEW_REPORTS', 'MANAGE_TEAM', 'MANAGE_SETTINGS'];
+  }
+  if (upper === 'MANAGER') {
+    return ['CREATE_EXPENSE', 'APPROVE_EXPENSE', 'VIEW_REPORTS'];
+  }
+  return ['CREATE_EXPENSE'];
+}
 
 const router = express.Router();
 
@@ -41,32 +53,68 @@ router.post("/team", requireAuth, requireAdmin, async (req, res) => {
     }
     const { name, email, role, department } = result.data;
 
+    // Resolve company context for the current user
+    const companyCtx = await resolveUserCompany(req);
+    const companyId = companyCtx?.companyId || null;
+
     const existingMembers = await storage.getTeamMembersByEmail(email);
     const sameDepMember = existingMembers?.find(m => m.department === (department || 'General'));
     if (sameDepMember) {
       return res.status(400).json({ error: "This person is already in this department" });
     }
 
+    const assignedRole = role || 'EMPLOYEE';
+
     const member = await storage.createTeamMember({
       name,
       email,
-      role: (role || 'EMPLOYEE') as any,
+      role: assignedRole as any,
       department: (department || 'General') as any,
       departmentId: null,
       avatar: null,
-      status: 'active',
+      status: 'invited',
       joinedAt: new Date().toISOString().split('T')[0],
-      permissions: ['CREATE_EXPENSE'],
+      permissions: getPermissionsForRole(assignedRole),
       userId: null,
-      companyId: null,
+      companyId,
     });
 
-    // Send team invite email
+    // Create a company invitation with token so the invite email links properly
+    let inviteToken: string | undefined;
+    let companyName = 'your team';
+    const userId = (req as any).user?.uid || (req as any).user?.id;
+
+    if (companyId) {
+      const company = await storage.getCompany(companyId);
+      companyName = company?.name || 'your team';
+
+      const userProfile = await storage.getUserProfileByCognitoSub(userId);
+      const inviterName = userProfile?.displayName || 'A team member';
+
+      inviteToken = crypto.randomUUID();
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+      await storage.createCompanyInvitation({
+        companyId,
+        email,
+        role: assignedRole,
+        department: department || null,
+        token: inviteToken,
+        invitedBy: userId,
+        invitedByName: inviterName,
+        status: 'pending',
+        expiresAt,
+      });
+    }
+
+    // Send team invite email with token and company info
     const emailResult = await notificationService.sendTeamInvite({
       email,
       name,
-      role: role || 'Employee',
+      role: assignedRole,
       department: department || undefined,
+      companyName,
+      inviteToken,
     });
 
     if (!emailResult.success) {

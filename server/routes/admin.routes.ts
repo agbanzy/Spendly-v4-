@@ -299,8 +299,8 @@ router.post("/admin/set-single-admin", requireAdmin, async (req, res) => {
 
 // ==================== ADMIN USER MANAGEMENT ====================
 
-// Seed admin user (one-time setup)
-router.post("/admin/seed", requireAdmin, async (req, res) => {
+// Seed admin user (one-time setup — no auth required, but only works if no admin exists)
+router.post("/admin/seed", async (req, res) => {
   try {
     const bcrypt = await import('bcryptjs');
 
@@ -312,21 +312,26 @@ router.post("/admin/seed", requireAdmin, async (req, res) => {
       return res.status(400).json({ error: "Admin user already exists" });
     }
 
-    // Create default admin user
-    const hashedPassword = await bcrypt.hash('Admin@123', 10);
+    // Create admin user with optional custom credentials
+    const { username: customUsername, password: customPassword, email: customEmail, name: customName } = req.body || {};
+    const adminUsername = customUsername || 'admin';
+    const adminPassword = customPassword || 'Admin@123';
+    const adminEmail = customEmail || 'info@thefinanciar.com';
+    const adminName = customName || 'System Administrator';
+
+    const hashedPassword = await bcrypt.hash(adminPassword, 10);
     const adminUser = await storage.createUser({
-      username: 'admin',
+      username: adminUsername,
       password: hashedPassword,
-      name: 'System Administrator',
-      email: 'info@thefinanciar.com',
+      name: adminName,
+      email: adminEmail,
       role: 'OWNER',
       department: 'Administration',
     });
 
     res.status(201).json({
       message: "Admin user created successfully",
-      username: 'admin',
-      defaultPassword: 'Admin@123',
+      username: adminUsername,
       note: 'Please change the password after first login'
     });
   } catch (error: any) {
@@ -334,43 +339,79 @@ router.post("/admin/seed", requireAdmin, async (req, res) => {
   }
 });
 
-// Admin login
+// Admin login — supports both password-based and Cognito token-based auth
 router.post("/admin/login", authLimiter, async (req, res) => {
   try {
     const { username, password } = req.body;
+    const authHeader = req.headers.authorization;
 
-    if (!username || !password) {
-      return res.status(400).json({ error: "Username and password are required" });
+    let authenticatedUser: any = null;
+
+    // Method 1: Cognito Bearer token (preferred for Cognito-authenticated users)
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const { CognitoJwtVerifier } = await import('aws-jwt-verify');
+        const poolId = process.env.COGNITO_USER_POOL_ID;
+        const clientId = process.env.COGNITO_CLIENT_ID;
+        if (poolId && clientId) {
+          const verifier = CognitoJwtVerifier.create({ userPoolId: poolId, tokenUse: 'id', clientId });
+          const token = authHeader.split('Bearer ')[1];
+          const payload = await verifier.verify(token);
+          const userProfile = await storage.getUserProfileByCognitoSub(payload.sub);
+          if (userProfile) {
+            // Check users table first, fall back to userProfile
+            const existingUser = await storage.getUserByEmail(userProfile.email);
+            if (existingUser && ['OWNER', 'ADMIN'].includes(existingUser.role)) {
+              authenticatedUser = existingUser;
+            } else {
+              // Allow any Cognito user with OWNER role in their profile to access admin
+              const profile = userProfile as any;
+              if (profile.role === 'OWNER' || profile.role === 'ADMIN') {
+                authenticatedUser = {
+                  id: profile.id,
+                  username: profile.email,
+                  name: profile.displayName || profile.firstName || profile.email,
+                  email: profile.email,
+                  role: profile.role || 'OWNER',
+                  department: 'Administration',
+                };
+              }
+            }
+          }
+        }
+      } catch (tokenErr: any) {
+        console.error('Admin Cognito token verification failed:', tokenErr.message);
+      }
     }
 
-    const bcrypt = await import('bcryptjs');
-    const users = await storage.getUsers();
-    const user = users.find(u => u.username === username);
+    // Method 2: Username + password (legacy local auth)
+    if (!authenticatedUser && username && password) {
+      const bcrypt = await import('bcryptjs');
+      const users = await storage.getUsers();
+      const user = users.find(u => u.username === username || u.email === username);
 
-    if (!user) {
+      if (user) {
+        const isValidPassword = await bcrypt.compare(password, user.password);
+        if (isValidPassword && ['OWNER', 'ADMIN'].includes(user.role)) {
+          authenticatedUser = user;
+        }
+      }
+    }
+
+    if (!authenticatedUser) {
       return res.status(401).json({ error: "Invalid credentials" });
-    }
-
-    const isValidPassword = await bcrypt.compare(password, user.password);
-    if (!isValidPassword) {
-      return res.status(401).json({ error: "Invalid credentials" });
-    }
-
-    // Check if user has admin privileges
-    if (!['OWNER', 'ADMIN'].includes(user.role)) {
-      return res.status(403).json({ error: "Access denied. Admin privileges required." });
     }
 
     // Return user info (without password)
-    const { password: _, ...userWithoutPassword } = user;
+    const { password: _, ...userWithoutPassword } = authenticatedUser;
 
     // Send login alert email if user has email
-    if (user.email) {
+    if (authenticatedUser.email) {
       const ipAddress = req.headers['x-forwarded-for'] as string || req.socket.remoteAddress;
       const userAgent = req.headers['user-agent'];
       notificationService.sendLoginAlertEmail({
-        email: user.email,
-        name: (user as any).displayName || user.name || user.username,
+        email: authenticatedUser.email,
+        name: (authenticatedUser as any).displayName || authenticatedUser.name || authenticatedUser.username,
         loginTime: new Date().toLocaleString(),
         ipAddress: ipAddress?.split(',')[0],
         device: userAgent,

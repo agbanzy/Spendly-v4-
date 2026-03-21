@@ -58,7 +58,15 @@ export default function VirtualAccounts() {
   const pin = usePinVerification();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isDepositOpen, setIsDepositOpen] = useState(false);
+  const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<VirtualAccount | null>(null);
+  const [withdrawForm, setWithdrawForm] = useState({
+    amount: "",
+    accountNumber: "",
+    bankCode: "",
+    routingNumber: "",
+    accountName: "",
+  });
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
   });
@@ -71,6 +79,10 @@ export default function VirtualAccounts() {
     currency: defaultCurrency,
     type: "collection",
     countryCode: defaultCountry,
+    firstName: "",
+    lastName: "",
+    phone: "",
+    bvn: "",
   });
 
   // Sync form defaults when settings load
@@ -103,17 +115,43 @@ export default function VirtualAccounts() {
 
   const createMutation = useMutation({
     mutationFn: async (data: typeof createForm) => {
-      const res = await apiRequest("POST", "/api/virtual-accounts", data);
+      const res = await pinProtectedRequest("POST", "/api/virtual-accounts", data);
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/virtual-accounts"] });
       toast({ title: "Virtual account created", description: "Your dedicated account is being provisioned." });
       setIsCreateOpen(false);
-      setCreateForm({ name: "", currency: settings?.currency || "USD", type: "collection", countryCode: settings?.countryCode || "US" });
+      setCreateForm({ name: "", currency: settings?.currency || "USD", type: "collection", countryCode: settings?.countryCode || "US", firstName: "", lastName: "", phone: "", bvn: "" });
     },
     onError: (error: any) => {
       toast({ title: "Failed to create account", description: sanitizeErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const withdrawMutation = useMutation({
+    mutationFn: async ({ accountId, data }: { accountId: number; data: typeof withdrawForm }) => {
+      const payload: any = {
+        amount: parseFloat(data.amount),
+        destination: {
+          accountNumber: data.accountNumber,
+          bankCode: data.bankCode,
+          routingNumber: data.routingNumber,
+          accountName: data.accountName,
+        },
+      };
+      const res = await pinProtectedRequest("POST", `/api/virtual-accounts/${accountId}/withdraw`, payload);
+      return res.json();
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/virtual-accounts"] });
+      toast({ title: "Withdrawal initiated", description: result.message || "Your withdrawal is being processed." });
+      setIsWithdrawOpen(false);
+      setWithdrawForm({ amount: "", accountNumber: "", bankCode: "", routingNumber: "", accountName: "" });
+      setSelectedAccount(null);
+    },
+    onError: (error: any) => {
+      toast({ title: "Withdrawal failed", description: sanitizeErrorMessage(error), variant: "destructive" });
     },
   });
 
@@ -127,11 +165,17 @@ export default function VirtualAccounts() {
     setIsDepositOpen(true);
   };
 
+  const openWithdraw = (account: VirtualAccount) => {
+    setSelectedAccount(account);
+    setWithdrawForm({ amount: "", accountNumber: "", bankCode: "", routingNumber: "", accountName: "" });
+    setIsWithdrawOpen(true);
+  };
+
   const currencyCountryMap: Record<string, string> = {
     NGN: "NG",
     GHS: "GH",
     USD: "US",
-    EUR: "EU",
+    EUR: "DE",
     GBP: "GB",
     KES: "KE",
     ZAR: "ZA",
@@ -141,7 +185,7 @@ export default function VirtualAccounts() {
     { value: "NGN", label: "Nigerian Naira (NGN)", country: "NG" },
     { value: "GHS", label: "Ghanaian Cedi (GHS)", country: "GH" },
     { value: "USD", label: "US Dollar (USD)", country: "US" },
-    { value: "EUR", label: "Euro (EUR)", country: "EU" },
+    { value: "EUR", label: "Euro (EUR)", country: "DE" },
     { value: "GBP", label: "British Pound (GBP)", country: "GB" },
     { value: "KES", label: "Kenyan Shilling (KES)", country: "KE" },
     { value: "ZAR", label: "South African Rand (ZAR)", country: "ZA" },
@@ -305,6 +349,7 @@ export default function VirtualAccounts() {
                       variant="outline"
                       size="sm"
                       className="flex-1"
+                      onClick={() => openWithdraw(account)}
                       disabled={account.status !== "active" || parseFloat(String(account.balance || "0")) <= 0}
                       data-testid={`button-withdraw-${account.id}`}
                     >
@@ -379,16 +424,75 @@ export default function VirtualAccounts() {
             </div>
 
             {(createForm.countryCode === "NG" || createForm.countryCode === "GH") && (
-              <div className="p-3 bg-blue-50 dark:bg-blue-950 rounded-xl text-blue-800 dark:text-blue-200 text-sm flex items-start gap-2">
+              <>
+                <div className="p-3 bg-blue-50 dark:bg-blue-950 rounded-xl text-blue-800 dark:text-blue-200 text-sm flex items-start gap-2">
+                  <Landmark className="h-4 w-4 mt-0.5 shrink-0" />
+                  <span>
+                    A Paystack Dedicated Virtual Account (DVA) will be created with a real NUBAN number.
+                    {createForm.countryCode === "NG" ? " Bank: Wema Bank." : " Bank: GCB Bank."}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="dva-first-name">First Name</Label>
+                  <Input
+                    id="dva-first-name"
+                    placeholder="First name"
+                    value={createForm.firstName}
+                    onChange={(e) => setCreateForm({ ...createForm, firstName: e.target.value })}
+                    data-testid="input-dva-first-name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="dva-last-name">Last Name</Label>
+                  <Input
+                    id="dva-last-name"
+                    placeholder="Last name"
+                    value={createForm.lastName}
+                    onChange={(e) => setCreateForm({ ...createForm, lastName: e.target.value })}
+                    data-testid="input-dva-last-name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="dva-phone">Phone Number</Label>
+                  <Input
+                    id="dva-phone"
+                    placeholder="e.g. +234..."
+                    value={createForm.phone}
+                    onChange={(e) => setCreateForm({ ...createForm, phone: e.target.value })}
+                    data-testid="input-dva-phone"
+                  />
+                </div>
+                {createForm.countryCode === "NG" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="dva-bvn">BVN (Bank Verification Number)</Label>
+                    <Input
+                      id="dva-bvn"
+                      placeholder="11-digit BVN"
+                      value={createForm.bvn}
+                      onChange={(e) => setCreateForm({ ...createForm, bvn: e.target.value })}
+                      maxLength={11}
+                      data-testid="input-dva-bvn"
+                    />
+                  </div>
+                )}
+              </>
+            )}
+
+            {createForm.countryCode === "KE" && (
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950 rounded-xl text-emerald-800 dark:text-emerald-200 text-sm flex items-start gap-2">
                 <Landmark className="h-4 w-4 mt-0.5 shrink-0" />
-                <span>
-                  A Paystack Dedicated Virtual Account (DVA) will be created with a real NUBAN number.
-                  {createForm.countryCode === "NG" ? " Bank: Wema Bank." : " Bank: GCB Bank."}
-                </span>
+                <span>An M-Pesa Paybill account reference will be created for receiving KES payments via Safaricom M-Pesa.</span>
               </div>
             )}
 
-            {createForm.countryCode !== "NG" && createForm.countryCode !== "GH" && (
+            {createForm.countryCode === "ZA" && (
+              <div className="p-3 bg-amber-50 dark:bg-amber-950 rounded-xl text-amber-800 dark:text-amber-200 text-sm flex items-start gap-2">
+                <Landmark className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>An EFT Bank Reference will be generated for receiving ZAR deposits via electronic funds transfer.</span>
+              </div>
+            )}
+
+            {createForm.countryCode !== "NG" && createForm.countryCode !== "GH" && createForm.countryCode !== "KE" && createForm.countryCode !== "ZA" && (
               <div className="p-3 bg-sky-50 dark:bg-sky-950 rounded-xl text-sky-800 dark:text-sky-200 text-sm flex items-start gap-2">
                 <Landmark className="h-4 w-4 mt-0.5 shrink-0" />
                 <span>A Stripe Treasury financial account will be created for {createForm.currency} transactions.</span>
@@ -462,6 +566,105 @@ export default function VirtualAccounts() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDepositOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isWithdrawOpen} onOpenChange={setIsWithdrawOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowUpFromLine className="h-5 w-5 text-primary" />
+              Withdraw from {selectedAccount?.name}
+            </DialogTitle>
+            <DialogDescription>
+              Transfer funds from your virtual account to an external bank account.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedAccount && (
+            <div className="space-y-4 py-2">
+              <div className="p-3 bg-muted/50 rounded-xl text-sm">
+                <span className="text-muted-foreground">Available balance: </span>
+                <span className="font-bold">{formatCurrencyAmount(parseFloat(String(selectedAccount.balance || "0")), selectedAccount.currency)}</span>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="withdraw-amount">Amount</Label>
+                <Input
+                  id="withdraw-amount"
+                  type="number"
+                  placeholder="0.00"
+                  min="0"
+                  step="0.01"
+                  value={withdrawForm.amount}
+                  onChange={(e) => setWithdrawForm({ ...withdrawForm, amount: e.target.value })}
+                  data-testid="input-withdraw-amount"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="withdraw-account-name">Recipient Name</Label>
+                <Input
+                  id="withdraw-account-name"
+                  placeholder="Account holder name"
+                  value={withdrawForm.accountName}
+                  onChange={(e) => setWithdrawForm({ ...withdrawForm, accountName: e.target.value })}
+                  data-testid="input-withdraw-account-name"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="withdraw-account-number">Account Number</Label>
+                <Input
+                  id="withdraw-account-number"
+                  placeholder="Destination account number"
+                  value={withdrawForm.accountNumber}
+                  onChange={(e) => setWithdrawForm({ ...withdrawForm, accountNumber: e.target.value })}
+                  data-testid="input-withdraw-account-number"
+                />
+              </div>
+              {(selectedAccount.provider === "paystack" || ["NGN", "GHS", "KES", "ZAR"].includes(selectedAccount.currency)) ? (
+                <div className="space-y-2">
+                  <Label htmlFor="withdraw-bank-code">Bank Code</Label>
+                  <Input
+                    id="withdraw-bank-code"
+                    placeholder="e.g. 044 (Access Bank)"
+                    value={withdrawForm.bankCode}
+                    onChange={(e) => setWithdrawForm({ ...withdrawForm, bankCode: e.target.value })}
+                    data-testid="input-withdraw-bank-code"
+                  />
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="withdraw-routing-number">Routing / Sort Code</Label>
+                  <Input
+                    id="withdraw-routing-number"
+                    placeholder="Routing number or sort code"
+                    value={withdrawForm.routingNumber}
+                    onChange={(e) => setWithdrawForm({ ...withdrawForm, routingNumber: e.target.value })}
+                    data-testid="input-withdraw-routing-number"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsWithdrawOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (selectedAccount) {
+                  withdrawMutation.mutate({ accountId: Number(selectedAccount.id), data: withdrawForm });
+                }
+              }}
+              disabled={
+                !withdrawForm.amount ||
+                parseFloat(withdrawForm.amount) <= 0 ||
+                !withdrawForm.accountNumber ||
+                (!withdrawForm.bankCode && !withdrawForm.routingNumber) ||
+                withdrawMutation.isPending
+              }
+              data-testid="button-confirm-withdraw"
+            >
+              {withdrawMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Withdraw
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

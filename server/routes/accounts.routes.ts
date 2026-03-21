@@ -250,23 +250,51 @@ router.post("/virtual-accounts", requireAuth, async (req, res) => {
     } else {
       // --- STRIPE TREASURY (US/GB/EU/AU) ---
       try {
+        // Request appropriate financial address types based on country
+        const requestedFeatures: string[] = ['aba']; // US default
+        const upperCountry = effectiveCountry.toUpperCase();
+        if (upperCountry === 'GB') {
+          requestedFeatures.push('sort_code');
+        }
+        // EU countries (including DE, FR, IT, ES, NL, etc.)
+        const EU_COUNTRIES = ['DE', 'FR', 'IT', 'ES', 'NL', 'BE', 'AT', 'IE', 'FI', 'PT', 'GR', 'LU', 'MT', 'CY', 'SK', 'SI', 'EE', 'LV', 'LT'];
+        if (EU_COUNTRIES.includes(upperCountry)) {
+          requestedFeatures.push('iban');
+        }
+
         const treasuryResult = await paymentService.createStripeFinancialAccount({
           supportedCurrencies: [effectiveCurrency],
+          features: requestedFeatures,
         });
 
         providerAccountId = treasuryResult.id;
 
-        // Extract real ABA routing/account from financial_addresses
-        const abaAddress = (treasuryResult.financialAddresses || []).find(
-          (addr: any) => addr.type === 'aba' && addr.aba
-        );
+        // Extract financial address — try ABA (US), sort_code (GB), then IBAN (EU)
+        const addresses = treasuryResult.financialAddresses || [];
+
+        const abaAddress = addresses.find((addr: any) => addr.type === 'aba' && addr.aba);
+        const sortCodeAddress = addresses.find((addr: any) => addr.type === 'sort_code' && addr.sort_code);
+        const ibanAddress = addresses.find((addr: any) => addr.type === 'iban' && addr.iban);
+
         if (abaAddress?.aba) {
           accountNumber = abaAddress.aba.account_number || '';
           bankCode = abaAddress.aba.routing_number || '';
           bankName = 'Stripe Treasury';
           accountName = name;
+        } else if ((sortCodeAddress as any)?.sort_code) {
+          const sc = (sortCodeAddress as any).sort_code;
+          accountNumber = sc.account_number || '';
+          bankCode = sc.sort_code || '';
+          bankName = 'Stripe Treasury (UK)';
+          accountName = name;
+        } else if ((ibanAddress as any)?.iban) {
+          const ib = (ibanAddress as any).iban;
+          accountNumber = ib.iban || '';
+          bankCode = ib.bic || '';
+          bankName = 'Stripe Treasury (EU)';
+          accountName = name;
         } else {
-          // Financial account created but ABA not yet provisioned
+          // Financial account created but address not yet provisioned
           accountNumber = `pending_${treasuryResult.id}`;
           bankName = 'Stripe Treasury';
           bankCode = '';
@@ -555,12 +583,38 @@ router.post("/virtual-accounts/:id/withdraw", requireAuth, requirePin, async (re
       try {
         const stripe = await getUncachableStripeClient();
 
-        // Create outbound payment
-        const outboundPayment = await stripe.treasury.outboundPayments.create({
-          financial_account: providerAcctId,
-          amount: Math.round(amount * 100),
-          currency: account.currency.toLowerCase(),
-          destination_payment_method_data: {
+        // Determine payment method type based on account country
+        const accountCountry = ((account as any).country || 'US').toUpperCase();
+        let paymentMethodData: any;
+
+        if (accountCountry === 'GB') {
+          paymentMethodData = {
+            type: 'us_bank_account', // Stripe uses us_bank_account type but sort_code for GB
+            us_bank_account: {
+              routing_number: destination.routingNumber, // sort code for GB
+              account_number: destination.accountNumber,
+              account_holder_type: 'individual',
+            },
+            billing_details: {
+              name: destination.accountName || account.name,
+            },
+          };
+        } else if (['DE', 'FR', 'IT', 'ES', 'NL', 'BE', 'AT', 'IE', 'FI', 'PT', 'GR', 'LU'].includes(accountCountry)) {
+          // EU countries — use SEPA / IBAN
+          paymentMethodData = {
+            type: 'us_bank_account',
+            us_bank_account: {
+              routing_number: destination.routingNumber || '000000', // BIC/SWIFT
+              account_number: destination.accountNumber, // IBAN
+              account_holder_type: 'individual',
+            },
+            billing_details: {
+              name: destination.accountName || account.name,
+            },
+          };
+        } else {
+          // US and other — standard ACH
+          paymentMethodData = {
             type: 'us_bank_account',
             us_bank_account: {
               routing_number: destination.routingNumber,
@@ -570,7 +624,15 @@ router.post("/virtual-accounts/:id/withdraw", requireAuth, requirePin, async (re
             billing_details: {
               name: destination.accountName || account.name,
             },
-          },
+          };
+        }
+
+        // Create outbound payment
+        const outboundPayment = await stripe.treasury.outboundPayments.create({
+          financial_account: providerAcctId,
+          amount: Math.round(amount * 100),
+          currency: account.currency.toLowerCase(),
+          destination_payment_method_data: paymentMethodData,
           description: reason || `Withdrawal from ${account.name}`,
         });
 
@@ -611,6 +673,17 @@ router.post("/virtual-accounts/:id/withdraw", requireAuth, requirePin, async (re
 
 router.delete("/virtual-accounts/:id", requireAuth, async (req, res) => {
   try {
+    const account = await storage.getVirtualAccount(param(req.params.id));
+    if (!account) {
+      return res.status(404).json({ error: "Virtual account not found" });
+    }
+
+    // Verify user owns this account
+    const userId = (req as any).user?.uid || (req as any).user?.id || (req as any).user?.cognitoSub;
+    if (account.userId && account.userId !== userId) {
+      return res.status(403).json({ error: "Access denied: you do not own this account" });
+    }
+
     const deleted = await storage.deleteVirtualAccount(param(req.params.id));
     if (!deleted) {
       return res.status(404).json({ error: "Virtual account not found" });
@@ -673,11 +746,25 @@ router.post("/virtual-accounts/create", requireAuth, requirePin, async (req, res
           });
 
           // Extract real bank account details from financial addresses
-          const abaAddress = financialAccount.financialAddresses?.find((a: any) => a.type === 'aba');
+          const addresses = financialAccount.financialAddresses || [];
+          const abaAddress = addresses.find((a: any) => a.type === 'aba' && a.aba);
+          const sortCodeAddress = addresses.find((a: any) => a.type === 'sort_code' && a.sort_code);
+          const ibanAddress = addresses.find((a: any) => a.type === 'iban' && a.iban);
+
           if (abaAddress?.aba) {
             accountNumber = abaAddress.aba.account_number || financialAccount.id;
             bankCode = abaAddress.aba.routing_number || 'STRIPE_TREASURY';
             bankName = abaAddress.aba.bank_name || 'Stripe Treasury';
+          } else if ((sortCodeAddress as any)?.sort_code) {
+            const sc = (sortCodeAddress as any).sort_code;
+            accountNumber = sc.account_number || financialAccount.id;
+            bankCode = sc.sort_code || 'STRIPE_TREASURY';
+            bankName = 'Stripe Treasury (UK)';
+          } else if ((ibanAddress as any)?.iban) {
+            const ib = (ibanAddress as any).iban;
+            accountNumber = ib.iban || financialAccount.id;
+            bankCode = ib.bic || 'STRIPE_TREASURY';
+            bankName = 'Stripe Treasury (EU)';
           } else {
             accountNumber = financialAccount.id;
             bankCode = 'STRIPE_TREASURY';

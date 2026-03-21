@@ -5,6 +5,17 @@ import { requireAuth, requireAdmin } from "../middleware/auth";
 import { storage } from "../storage";
 import { notificationService } from "../services/notification-service";
 
+function getPermissionsForRole(role: string): string[] {
+  const upper = (role || 'EMPLOYEE').toUpperCase();
+  if (upper === 'OWNER' || upper === 'ADMIN') {
+    return ['CREATE_EXPENSE', 'APPROVE_EXPENSE', 'VIEW_REPORTS', 'MANAGE_TEAM', 'MANAGE_SETTINGS'];
+  }
+  if (upper === 'MANAGER') {
+    return ['CREATE_EXPENSE', 'APPROVE_EXPENSE', 'VIEW_REPORTS'];
+  }
+  return ['CREATE_EXPENSE'];
+}
+
 const router = express.Router();
 
 // ==================== DEPARTMENTS ====================
@@ -277,7 +288,7 @@ router.post("/companies/:id/invitations", requireAuth, async (req, res) => {
       companyId,
       userId: null,
       joinedAt: new Date().toISOString().split('T')[0],
-      permissions: ['CREATE_EXPENSE'],
+      permissions: getPermissionsForRole(role || 'EMPLOYEE'),
     });
 
     const emailResult = await notificationService.sendTeamInvite({

@@ -30,8 +30,13 @@ export default function InvitePage() {
   const { data: invitation, isLoading, error } = useQuery<InvitationInfo>({
     queryKey: ["/api/invitations", token],
     queryFn: async () => {
-      const authHeaders = await getAuthHeaders();
-      const res = await fetch(`/api/invitations/${token}`, { headers: authHeaders, credentials: "include" });
+      let headers: Record<string, string> = {};
+      try {
+        headers = await getAuthHeaders();
+      } catch {
+        // Auth headers are optional — logged-out users can still view invitations
+      }
+      const res = await fetch(`/api/invitations/${token}`, { headers, credentials: "include" });
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || "Failed to load invitation");
