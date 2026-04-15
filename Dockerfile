@@ -3,9 +3,16 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Upgrade npm to v11 to match lockfile version
-# Use wget+tarball method since `npm install -g npm@11` breaks on Alpine
-RUN wget -qO- https://registry.npmjs.org/npm/-/npm-11.12.1.tgz | tar xz -C /usr/local/lib/node_modules/npm --strip-components=1
+# Upgrade npm to v11 to match lockfile version (lockfileVersion 3)
+# The bundled npm 10 can't run `npm ci` against an npm 11 lockfile.
+# Overwrite the bundled npm in-place, then verify.
+RUN npm install -g npm@11 2>/dev/null || \
+    (wget -qO /tmp/npm.tgz https://registry.npmjs.org/npm/-/npm-11.12.1.tgz && \
+     rm -rf /usr/local/lib/node_modules/npm && \
+     mkdir -p /usr/local/lib/node_modules/npm && \
+     tar xzf /tmp/npm.tgz -C /usr/local/lib/node_modules/npm --strip-components=1 && \
+     rm /tmp/npm.tgz) && \
+    npm --version
 
 # Install dependencies first (better layer caching)
 COPY package.json package-lock.json ./
@@ -44,7 +51,12 @@ COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/scripts ./scripts
 
 # Upgrade npm and install production dependencies only
-RUN wget -qO- https://registry.npmjs.org/npm/-/npm-11.12.1.tgz | tar xz -C /usr/local/lib/node_modules/npm --strip-components=1 && \
+RUN npm install -g npm@11 2>/dev/null || \
+    (wget -qO /tmp/npm.tgz https://registry.npmjs.org/npm/-/npm-11.12.1.tgz && \
+     rm -rf /usr/local/lib/node_modules/npm && \
+     mkdir -p /usr/local/lib/node_modules/npm && \
+     tar xzf /tmp/npm.tgz -C /usr/local/lib/node_modules/npm --strip-components=1 && \
+     rm /tmp/npm.tgz) && \
     npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 # Create non-root user and writable directories
