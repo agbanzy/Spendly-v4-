@@ -517,6 +517,14 @@ router.patch("/invoices/:id", requireAuth, async (req, res) => {
     if (!result.success) {
       return res.status(400).json({ error: "Invalid invoice data", details: result.error.issues });
     }
+    const existing = await storage.getInvoice(param(req.params.id));
+    if (!existing) {
+      return res.status(404).json({ error: "Invoice not found" });
+    }
+    const userCompany = await resolveUserCompany(req);
+    if (userCompany?.companyId && !(await verifyCompanyAccess((existing as any).companyId, userCompany.companyId))) {
+      return res.status(403).json({ error: "Access denied" });
+    }
     const invoice = await storage.updateInvoice(param(req.params.id), result.data as any);
     if (!invoice) {
       return res.status(404).json({ error: "Invoice not found" });
@@ -529,6 +537,14 @@ router.patch("/invoices/:id", requireAuth, async (req, res) => {
 
 router.delete("/invoices/:id", requireAuth, async (req, res) => {
   try {
+    const invoice = await storage.getInvoice(param(req.params.id));
+    if (!invoice) {
+      return res.status(404).json({ error: "Invoice not found" });
+    }
+    const userCompany = await resolveUserCompany(req);
+    if (userCompany?.companyId && !(await verifyCompanyAccess((invoice as any).companyId, userCompany.companyId))) {
+      return res.status(403).json({ error: "Access denied" });
+    }
     const deleted = await storage.deleteInvoice(param(req.params.id));
     if (!deleted) {
       return res.status(404).json({ error: "Invoice not found" });

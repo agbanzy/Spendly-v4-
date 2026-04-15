@@ -12,7 +12,8 @@ const router = express.Router();
 // Get all notifications for a user
 router.get("/notifications", requireAuth, async (req, res) => {
   try {
-    const userId = req.query.userId as string;
+    // SECURITY FIX: Use authenticated user's identity, not client-supplied userId
+    const userId = req.user!.cognitoSub;
     if (!userId) {
       return res.status(400).json({ error: "User ID is required" });
     }
@@ -26,7 +27,8 @@ router.get("/notifications", requireAuth, async (req, res) => {
 // Get unread notification count
 router.get("/notifications/unread-count", requireAuth, async (req, res) => {
   try {
-    const userId = req.query.userId as string;
+    // SECURITY FIX: Use authenticated user's identity
+    const userId = req.user!.cognitoSub;
     if (!userId) {
       return res.status(400).json({ error: "User ID is required" });
     }
@@ -55,7 +57,8 @@ router.patch("/notifications/:id/read", requireAuth, async (req, res) => {
 // Mark all notifications as read
 router.post("/notifications/mark-all-read", requireAuth, async (req, res) => {
   try {
-    const { userId } = req.body;
+    // SECURITY FIX: Use authenticated user's identity
+    const userId = req.user!.cognitoSub;
     if (!userId) {
       return res.status(400).json({ error: "User ID is required" });
     }
@@ -317,17 +320,22 @@ router.post("/auth/request-password-reset", async (req, res) => {
 });
 
 // Send password reset confirmation (called after successful reset)
-router.post("/auth/password-reset-success", async (req, res) => {
+// SECURITY FIX: Require authentication to prevent abuse as spam/phishing vector
+router.post("/auth/password-reset-success", requireAuth, async (req, res) => {
   try {
-    const { email, name } = req.body;
+    // Use authenticated user's email instead of client-supplied value
+    const cognitoSub = req.user!.cognitoSub;
+    const profile = await storage.getUserProfileByCognitoSub(cognitoSub);
+    const email = profile?.email;
+    const name = profile?.displayName || (email ? email.split('@')[0] : 'User');
 
     if (!email) {
-      return res.status(400).json({ error: "email is required" });
+      return res.status(400).json({ error: "User email not found" });
     }
 
     const result = await notificationService.sendPasswordResetSuccess({
       email,
-      name: name || email.split('@')[0],
+      name,
     });
 
     res.json(result);
@@ -337,13 +345,19 @@ router.post("/auth/password-reset-success", async (req, res) => {
 });
 
 // Send email verification
+// SECURITY FIX: Generate verification link server-side — never accept URLs from client (phishing vector)
 router.post("/auth/send-verification", emailLimiter, async (req, res) => {
   try {
-    const { email, name, verificationLink } = req.body;
+    const { email, name } = req.body;
 
-    if (!email || !verificationLink) {
-      return res.status(400).json({ error: "email and verificationLink are required" });
+    if (!email) {
+      return res.status(400).json({ error: "email is required" });
     }
+
+    // Generate verification link server-side using trusted APP_URL
+    const appUrl = process.env.APP_URL || 'https://app.thefinanciar.com';
+    const verificationToken = require('crypto').randomBytes(32).toString('hex');
+    const verificationLink = `${appUrl}/verify-email?token=${verificationToken}&email=${encodeURIComponent(email)}`;
 
     const result = await notificationService.sendEmailVerification({
       email,

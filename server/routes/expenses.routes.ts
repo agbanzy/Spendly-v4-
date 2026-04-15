@@ -353,6 +353,14 @@ router.patch("/expenses/:id", requireAuth, requirePin, async (req, res) => {
 
 router.delete("/expenses/:id", requireAuth, async (req, res) => {
   try {
+    const expense = await storage.getExpense(param(req.params.id));
+    if (!expense) {
+      return res.status(404).json({ error: "Expense not found" });
+    }
+    const userCompany = await resolveUserCompany(req);
+    if (userCompany?.companyId && !(await verifyCompanyAccess((expense as any).companyId, userCompany.companyId))) {
+      return res.status(403).json({ error: "Access denied" });
+    }
     const deleted = await storage.deleteExpense(param(req.params.id));
     if (!deleted) {
       return res.status(404).json({ error: "Expense not found" });

@@ -299,8 +299,8 @@ router.post("/admin/set-single-admin", requireAdmin, async (req, res) => {
 
 // ==================== ADMIN USER MANAGEMENT ====================
 
-// Seed admin user (one-time setup — no auth required, but only works if no admin exists)
-router.post("/admin/seed", async (req, res) => {
+// Seed admin user (one-time setup — rate-limited, only works if no admin exists)
+router.post("/admin/seed", authLimiter, async (req, res) => {
   try {
     const bcrypt = await import('bcryptjs');
 
@@ -428,16 +428,19 @@ router.post("/admin/login", authLimiter, async (req, res) => {
 });
 
 // Admin session verification - validates stored admin session is still valid
-router.post("/admin/verify-session", async (req, res) => {
+router.post("/admin/verify-session", requireAuth, async (req, res) => {
   try {
-    const { userId } = req.body;
+    // SECURITY FIX: Use the authenticated user's identity, not client-supplied userId
+    const cognitoSub = req.user!.cognitoSub;
+    const userProfile = await storage.getUserProfileByCognitoSub(cognitoSub);
+    const userId = userProfile?.id || (req.body.userId as string);
 
     if (!userId) {
       return res.status(400).json({ valid: false, error: "User ID is required" });
     }
 
     const users = await storage.getUsers();
-    const user = users.find(u => u.id === userId || u.id === String(userId));
+    const user = users.find(u => u.id === userId || u.id === String(userId) || u.email === userProfile?.email);
 
     if (!user) {
       return res.status(401).json({ valid: false, error: "User not found" });
@@ -488,7 +491,7 @@ router.get("/audit-logs", requireAuth, requireAdmin, async (req, res) => {
 });
 
 // Get audit trail for a specific entity
-router.get("/audit-logs/:entityType/:entityId", requireAuth, async (req, res) => {
+router.get("/audit-logs/:entityType/:entityId", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { entityType, entityId } = req.params;
     const logs = await storage.getAuditLogs();

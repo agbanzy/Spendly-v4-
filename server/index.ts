@@ -63,7 +63,19 @@ app.set('trust proxy', 1);
 
 // Security headers (X-Frame-Options, HSTS, CSP, X-Content-Type-Options, etc.)
 app.use(helmet({
-  contentSecurityPolicy: false, // Disabled to allow inline scripts from Vite/React
+  contentSecurityPolicy: process.env.NODE_ENV === 'production' ? {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "https://*.amazonaws.com", "https://api.stripe.com", "https://api.paystack.co"],
+      fontSrc: ["'self'", "https:", "data:"],
+      frameSrc: ["'self'", "https://js.stripe.com", "https://hooks.stripe.com"],
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: [],
+    },
+  } : false, // Disabled in development for Vite/React HMR inline scripts
   crossOriginEmbedderPolicy: false, // Disabled for cross-origin resource loading
 }));
 

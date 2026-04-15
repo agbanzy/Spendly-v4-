@@ -73,6 +73,14 @@ router.patch("/budgets/:id", requireAuth, async (req, res) => {
     if (!result.success) {
       return res.status(400).json({ error: "Invalid budget data", details: result.error.issues });
     }
+    const existing = await storage.getBudget(param(req.params.id));
+    if (!existing) {
+      return res.status(404).json({ error: "Budget not found" });
+    }
+    const userCompany = await resolveUserCompany(req);
+    if (userCompany?.companyId && !(await verifyCompanyAccess((existing as any).companyId, userCompany.companyId))) {
+      return res.status(403).json({ error: "Access denied" });
+    }
     const budget = await storage.updateBudget(param(req.params.id), result.data as any);
     if (!budget) {
       return res.status(404).json({ error: "Budget not found" });
@@ -85,6 +93,14 @@ router.patch("/budgets/:id", requireAuth, async (req, res) => {
 
 router.delete("/budgets/:id", requireAuth, async (req, res) => {
   try {
+    const budget = await storage.getBudget(param(req.params.id));
+    if (!budget) {
+      return res.status(404).json({ error: "Budget not found" });
+    }
+    const userCompany = await resolveUserCompany(req);
+    if (userCompany?.companyId && !(await verifyCompanyAccess((budget as any).companyId, userCompany.companyId))) {
+      return res.status(403).json({ error: "Access denied" });
+    }
     const deleted = await storage.deleteBudget(param(req.params.id));
     if (!deleted) {
       return res.status(404).json({ error: "Budget not found" });

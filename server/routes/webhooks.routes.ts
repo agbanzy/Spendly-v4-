@@ -53,21 +53,10 @@ router.get("/paystack/callback", async (req, res) => {
     if (verification.status === 'success') {
       processedPaystackReferences.add(reference);
 
-      const balances = await storage.getBalances();
-      const currentLocal = parseFloat(String(balances.local || 0));
-      await storage.updateBalances({ local: String(currentLocal + verification.amount) });
-
-      await storage.createTransaction({
-        type: 'funding',
-        amount: String(verification.amount),
-        fee: "0",
-        status: 'completed',
-        description: `paystack_callback:${reference}`,
-        currency: verification.currency || 'NGN',
-        date: new Date().toISOString().split('T')[0],
-        reference: null,
-        userId: null,
-      });
+      // SECURITY FIX: Do NOT credit balance here — the Paystack webhook handler
+      // (paystackWebhook.ts) is the authoritative source for crediting.
+      // Crediting in both callback AND webhook causes double-credit.
+      // The callback only confirms the redirect; actual crediting happens via webhook.
 
       res.redirect('/dashboard?payment=success');
     } else {
@@ -120,9 +109,15 @@ router.post("/stripe/webhook", express.raw({ type: 'application/json' }), async 
     const eventId = event.id;
     const eventType = event.type;
 
-    // Idempotency check
+    // Idempotency check — in-memory fast path + DB authoritative check
     if (processedStripeEvents.has(eventId)) {
-      console.log(`Stripe event ${eventId} already processed`);
+      console.log(`Stripe event ${eventId} already processed (memory)`);
+      return res.status(200).json({ received: true });
+    }
+    const alreadyProcessedInDb = await storage.isWebhookProcessed(eventId);
+    if (alreadyProcessedInDb) {
+      console.log(`Stripe event ${eventId} already processed (DB)`);
+      processedStripeEvents.add(eventId);
       return res.status(200).json({ received: true });
     }
 
@@ -253,6 +248,9 @@ router.post("/stripe/webhook", express.raw({ type: 'application/json' }), async 
           userId: null,
         });
       }
+
+      // SECURITY FIX: Mark in DB to prevent double-crediting on retry/restart
+      await storage.markWebhookProcessed(eventId, 'stripe', 'payment_intent.succeeded');
     }
 
     // ==================== STRIPE ISSUING EVENTS ====================

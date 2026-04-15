@@ -2,6 +2,7 @@ import express from "express";
 import { storage } from "../storage";
 import { requireAuth, requireAdmin, requirePin } from "../middleware/auth";
 import { financialLimiter } from "../middleware/rateLimiter";
+import { paymentService } from "../paymentService";
 import {
   validateAmount,
   resolveUserCompany,
@@ -30,14 +31,29 @@ router.patch("/balances", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-router.post("/balances/fund", financialLimiter, requireAuth, async (req, res) => {
+router.post("/balances/fund", financialLimiter, requireAuth, requirePin, async (req, res) => {
   try {
-    const { amount } = req.body;
+    const { amount, reference, provider } = req.body;
     const amountCheck = validateAmount(amount);
     if (!amountCheck.valid) {
       return res.status(400).json({ error: amountCheck.error });
     }
     const parsedAmount = amountCheck.parsed;
+
+    // SECURITY: Require a payment reference and verify with provider before crediting
+    if (!reference) {
+      return res.status(400).json({ error: "Payment reference is required for balance funding" });
+    }
+    const fundingProvider = provider || 'stripe';
+    try {
+      const verification = await paymentService.verifyPayment(reference, fundingProvider);
+      if (verification.status !== 'succeeded' && verification.status !== 'success') {
+        return res.status(400).json({ error: "Payment not confirmed. Balance will be credited via webhook." });
+      }
+    } catch (verifyErr: any) {
+      console.error(`[Balance Fund] Payment verification failed for ref ${reference}:`, verifyErr.message);
+      return res.status(400).json({ error: "Payment verification failed. Balance will be credited via webhook if payment succeeds." });
+    }
 
     const fundCompany = await resolveUserCompany(req);
     const currentBalances = await storage.getBalances();
@@ -55,7 +71,7 @@ router.post("/balances/fund", financialLimiter, requireAuth, async (req, res) =>
       date: new Date().toISOString().split('T')[0],
       description: "Wallet Funding",
       currency,
-      reference: null,
+      reference: reference,
       userId: (req as any).user?.uid || null,
       companyId: fundCompany?.companyId ?? null,
     });

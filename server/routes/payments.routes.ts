@@ -1285,9 +1285,10 @@ router.post("/user/verify-pin", requireAuth, async (req, res) => {
   }
 });
 
-router.post("/user/disable-pin", requireAuth, async (req, res) => {
+router.post("/user/disable-pin", requireAuth, requirePin, async (req, res) => {
   try {
-    // SECURITY: Use authenticated user's cognitoSub
+    // SECURITY: Require current PIN before disabling (prevents session-hijack bypass)
+    // requirePin middleware already validated the PIN from x-transaction-pin header
     const cognitoSub = req.user!.cognitoSub;
 
     await storage.updateUserProfile(cognitoSub, {

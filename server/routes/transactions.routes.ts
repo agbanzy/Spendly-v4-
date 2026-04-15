@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/auth";
 import {
   param,
   resolveUserCompany,
+  verifyCompanyAccess,
   transactionSchema,
   transactionUpdateSchema,
   getSettingsForRequest,
@@ -28,6 +29,11 @@ router.get("/transactions/:id", requireAuth, async (req, res) => {
     const transaction = await storage.getTransaction(param(req.params.id));
     if (!transaction) {
       return res.status(404).json({ error: "Transaction not found" });
+    }
+    // SECURITY FIX: Verify the transaction belongs to the user's company
+    const userCompany = await resolveUserCompany(req);
+    if (userCompany?.companyId && !(await verifyCompanyAccess((transaction as any).companyId, userCompany.companyId))) {
+      return res.status(403).json({ error: "Access denied" });
     }
     res.json(transaction);
   } catch (error) {
@@ -72,10 +78,16 @@ router.patch("/transactions/:id", requireAuth, async (req, res) => {
     if (!result.success) {
       return res.status(400).json({ error: "Invalid transaction data", details: result.error.issues });
     }
-    const transaction = await storage.updateTransaction(param(req.params.id), result.data as any);
-    if (!transaction) {
+    // SECURITY FIX: Verify ownership before updating
+    const existing = await storage.getTransaction(param(req.params.id));
+    if (!existing) {
       return res.status(404).json({ error: "Transaction not found" });
     }
+    const userCompany = await resolveUserCompany(req);
+    if (userCompany?.companyId && !(await verifyCompanyAccess((existing as any).companyId, userCompany.companyId))) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+    const transaction = await storage.updateTransaction(param(req.params.id), result.data as any);
     res.json(transaction);
   } catch (error) {
     res.status(500).json({ error: "Failed to update transaction" });
@@ -84,10 +96,16 @@ router.patch("/transactions/:id", requireAuth, async (req, res) => {
 
 router.delete("/transactions/:id", requireAuth, async (req, res) => {
   try {
-    const deleted = await storage.deleteTransaction(param(req.params.id));
-    if (!deleted) {
+    // SECURITY FIX: Verify ownership before deleting
+    const existing = await storage.getTransaction(param(req.params.id));
+    if (!existing) {
       return res.status(404).json({ error: "Transaction not found" });
     }
+    const userCompany = await resolveUserCompany(req);
+    if (userCompany?.companyId && !(await verifyCompanyAccess((existing as any).companyId, userCompany.companyId))) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+    const deleted = await storage.deleteTransaction(param(req.params.id));
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ error: "Failed to delete transaction" });

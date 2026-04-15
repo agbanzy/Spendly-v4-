@@ -98,7 +98,7 @@ router.get("/wallets/:id/transactions", requireAuth, async (req, res) => {
 });
 
 // Fund wallet (credit)
-router.post("/wallets/:id/fund", financialLimiter, requireAuth, async (req, res) => {
+router.post("/wallets/:id/fund", financialLimiter, requireAuth, requirePin, async (req, res) => {
   try {
     const { amount, reference, description, metadata, provider } = req.body;
 

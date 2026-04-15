@@ -1,6 +1,6 @@
 import express from "express";
 import { storage } from "../storage";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireAdmin } from "../middleware/auth";
 import {
   param,
   resolveUserCompany,
@@ -78,6 +78,14 @@ router.patch("/vendors/:id", requireAuth, async (req, res) => {
     if (!result.success) {
       return res.status(400).json({ error: "Invalid vendor data", details: result.error.issues });
     }
+    const existing = await storage.getVendor(param(req.params.id));
+    if (!existing) {
+      return res.status(404).json({ error: "Vendor not found" });
+    }
+    const userCompany = await resolveUserCompany(req);
+    if (userCompany?.companyId && !(await verifyCompanyAccess((existing as any).companyId, userCompany.companyId))) {
+      return res.status(403).json({ error: "Access denied" });
+    }
     const vendor = await storage.updateVendor(param(req.params.id), result.data as any);
     if (!vendor) {
       return res.status(404).json({ error: "Vendor not found" });
@@ -90,6 +98,14 @@ router.patch("/vendors/:id", requireAuth, async (req, res) => {
 
 router.delete("/vendors/:id", requireAuth, async (req, res) => {
   try {
+    const vendor = await storage.getVendor(param(req.params.id));
+    if (!vendor) {
+      return res.status(404).json({ error: "Vendor not found" });
+    }
+    const userCompany = await resolveUserCompany(req);
+    if (userCompany?.companyId && !(await verifyCompanyAccess((vendor as any).companyId, userCompany.companyId))) {
+      return res.status(403).json({ error: "Access denied" });
+    }
     const deleted = await storage.deleteVendor(param(req.params.id));
     if (!deleted) {
       return res.status(404).json({ error: "Vendor not found" });
@@ -102,14 +118,21 @@ router.delete("/vendors/:id", requireAuth, async (req, res) => {
 
 // ==================== VENDOR PAYMENT ====================
 
-router.post("/vendors/:id/pay", requireAuth, async (req, res) => {
+router.post("/vendors/:id/pay", requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { amount, description, initiatedBy, invoiceId } = req.body;
+    const { amount, description, invoiceId } = req.body;
 
     const vendor = await storage.getVendor(param(req.params.id));
     if (!vendor) {
       return res.status(404).json({ error: "Vendor not found" });
     }
+
+    const userCompany = await resolveUserCompany(req);
+    if (userCompany?.companyId && !(await verifyCompanyAccess((vendor as any).companyId, userCompany.companyId))) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    const initiatedBy = (req as any).user?.uid || "unknown";
 
     // Get vendor's payout destination
     const destinations = await storage.getPayoutDestinations(undefined, vendor.id);
