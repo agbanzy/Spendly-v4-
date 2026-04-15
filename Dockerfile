@@ -3,10 +3,8 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Upgrade npm to match lockfile version (lockfileVersion 3 from npm 11)
-RUN npm install -g npm@11 --no-fund --no-audit
-
 # Install dependencies first (better layer caching)
+# Node 22 ships with npm 10+ which supports lockfileVersion 3 natively
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 
@@ -42,9 +40,8 @@ COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/scripts ./scripts
 
-# Upgrade npm and install production dependencies only
-RUN npm install -g npm@11 --no-fund --no-audit && \
-    npm ci --omit=dev --ignore-scripts && npm cache clean --force
+# Install production dependencies only
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 # Create non-root user and writable directories
 RUN addgroup -g 1001 -S appgroup && adduser -S appuser -u 1001 -G appgroup
