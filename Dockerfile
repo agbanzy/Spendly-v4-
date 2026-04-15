@@ -3,8 +3,11 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+# Upgrade npm to v11 to match lockfile version
+# Use wget+tarball method since `npm install -g npm@11` breaks on Alpine
+RUN wget -qO- https://registry.npmjs.org/npm/-/npm-11.12.1.tgz | tar xz -C /usr/local/lib/node_modules/npm --strip-components=1
+
 # Install dependencies first (better layer caching)
-# Node 22 ships with npm 10+ which supports lockfileVersion 3 natively
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 
@@ -40,8 +43,9 @@ COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/scripts ./scripts
 
-# Install production dependencies only
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+# Upgrade npm and install production dependencies only
+RUN wget -qO- https://registry.npmjs.org/npm/-/npm-11.12.1.tgz | tar xz -C /usr/local/lib/node_modules/npm --strip-components=1 && \
+    npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 # Create non-root user and writable directories
 RUN addgroup -g 1001 -S appgroup && adduser -S appuser -u 1001 -G appgroup
