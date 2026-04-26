@@ -630,7 +630,16 @@ router.post("/payouts/:id/process", requireAuth, requireAdmin, requirePin, async
           currency: destination.currency,
         },
         countryCode,
-        `Payout: ${payout.type} - ${payout.id}`
+        `Payout: ${payout.type} - ${payout.id}`,
+        // AUD-DB-004 / 005 / 006 — thread payoutId so paymentService can
+        // derive stable idempotency keys (Paystack reference + Stripe
+        // idempotencyKey) from `payout-${payoutId}`. Network retries no
+        // longer create duplicate transfers.
+        {
+          payoutId: payout.id,
+          companyId: companyIdForDebit,
+          userId: userId ?? undefined,
+        },
       );
     } catch (transferError: any) {
       // External call failed — run the compensating credit and mark the
@@ -866,7 +875,14 @@ router.post("/payouts/batch", requireAuth, requireAdmin, requirePin, async (req,
               currency: destination.currency,
             },
             countryCode,
-            `Batch Payout: ${payout.type} - ${payout.id}`
+            `Batch Payout: ${payout.type} - ${payout.id}`,
+            // AUD-DB-004 / 005 / 006 — same payoutId-based idempotency
+            // wiring as the single /process path.
+            {
+              payoutId: payout.id,
+              companyId: companyIdForDebit,
+              userId: userId ?? undefined,
+            },
           );
         } catch (transferErr: any) {
           // Compensate locally and continue with the next item.
