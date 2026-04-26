@@ -181,9 +181,27 @@ export async function getSettingsForRequest(req: any): Promise<any> {
   return storage.getSettings();
 }
 
-/** Middleware to verify entity belongs to user's company */
-export async function verifyCompanyAccess(entityCompanyId: string | null | undefined, userCompanyId: string): Promise<boolean> {
-  if (!entityCompanyId) return true;
+/**
+ * Verify an entity belongs to the user's active company.
+ *
+ * AUD-DD-INV-004: previously returned `true` whenever `entityCompanyId` was
+ * null/undefined — a permissive default that meant any auth'd user could
+ * access an unscoped row. The audit found that invoices created with a null
+ * companyId (because `resolveUserCompany` returned no company) became
+ * globally accessible. The new policy is fail-closed: missing tenant
+ * ownership is rejected.
+ *
+ * The legacy permissive behaviour can be re-enabled per call site by passing
+ * { allowNullEntity: true } — currently nowhere — for one-off back-compat
+ * during a migration. Any new use of that flag should be treated as a code
+ * smell.
+ */
+export async function verifyCompanyAccess(
+  entityCompanyId: string | null | undefined,
+  userCompanyId: string,
+  opts: { allowNullEntity?: boolean } = {},
+): Promise<boolean> {
+  if (!entityCompanyId) return opts.allowNullEntity === true;
   return entityCompanyId === userCompanyId;
 }
 
