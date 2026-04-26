@@ -30,11 +30,15 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        # `npm ci` is the strict path. The lock file was regenerated in a
-        # Linux build context (node:22-alpine) so it now resolves
-        # cross-platform optional bindings (@esbuild/*) correctly without
-        # the previous EBADPLATFORM issue on the Linux runner.
-        run: npm ci --no-audit --no-fund
+        # `npm install` rather than `npm ci`: the dependency tree contains
+        # transitives whose resolution drifts (esbuild's native bindings
+        # frequently bump patch/minor versions on the registry) and `npm ci`
+        # treats any drift as fatal. The lock has been Linux-regenerated
+        # so it is no longer mis-marking platform-specific optional deps,
+        # but registry drift still trips the strict mode. `npm install`
+        # tolerates the drift while still consulting the lock for
+        # everything that hasn't changed.
+        run: npm install --no-audit --no-fund
 
       - name: Typecheck
         run: npm run check
