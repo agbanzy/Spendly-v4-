@@ -138,6 +138,32 @@ router.patch("/team/:id", requireAuth, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: "Invalid team member data", details: result.error.issues });
     }
     const originalMember = await storage.getTeamMember(param(req.params.id));
+    if (!originalMember) {
+      return res.status(404).json({ error: "Team member not found" });
+    }
+
+    // AUD-DD-TEAM-005 — last-admin guard. If the change demotes the
+    // last remaining OWNER/ADMIN, refuse it. Without this an ADMIN
+    // could demote the OWNER and leave the company with no one able
+    // to administer it.
+    const newRole = result.data.role;
+    const wasAdminLevel = ['OWNER', 'ADMIN'].includes(String(originalMember.role).toUpperCase());
+    const willStayAdminLevel = newRole && ['OWNER', 'ADMIN'].includes(String(newRole).toUpperCase());
+    if (wasAdminLevel && newRole && !willStayAdminLevel && (originalMember as any).companyId) {
+      const team = await storage.getTeam((originalMember as any).companyId);
+      const otherAdminCount = team.filter((m: any) =>
+        m.id !== originalMember.id &&
+        m.status === 'active' &&
+        ['OWNER', 'ADMIN'].includes(String(m.role).toUpperCase())
+      ).length;
+      if (otherAdminCount === 0) {
+        return res.status(409).json({
+          error: 'Cannot demote the last admin/owner of this company. Promote another member first.',
+          code: 'LAST_ADMIN_GUARD',
+        });
+      }
+    }
+
     const member = await storage.updateTeamMember(param(req.params.id), result.data as any);
     if (!member) {
       return res.status(404).json({ error: "Team member not found" });
@@ -170,6 +196,24 @@ router.patch("/team/:id", requireAuth, requireAdmin, async (req, res) => {
 
 router.delete("/team/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
+    // AUD-DD-TEAM-005 — last-admin guard on delete. Same logic as on
+    // patch: refuse to remove the last OWNER/ADMIN of a company.
+    const target = await storage.getTeamMember(param(req.params.id));
+    if (target && (target as any).companyId && ['OWNER', 'ADMIN'].includes(String(target.role).toUpperCase())) {
+      const team = await storage.getTeam((target as any).companyId);
+      const otherAdminCount = team.filter((m: any) =>
+        m.id !== target.id &&
+        m.status === 'active' &&
+        ['OWNER', 'ADMIN'].includes(String(m.role).toUpperCase())
+      ).length;
+      if (otherAdminCount === 0) {
+        return res.status(409).json({
+          error: 'Cannot remove the last admin/owner of this company. Promote another member first.',
+          code: 'LAST_ADMIN_GUARD',
+        });
+      }
+    }
+
     const deleted = await storage.deleteTeamMember(param(req.params.id));
     if (!deleted) {
       return res.status(404).json({ error: "Team member not found" });
