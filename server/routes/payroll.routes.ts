@@ -1,4 +1,5 @@
 import express from "express";
+import { z } from "zod";
 import { storage } from "../storage";
 import { requireAuth, requireAdmin, requirePin } from "../middleware/auth";
 import { financialLimiter } from "../middleware/rateLimiter";
@@ -220,6 +221,19 @@ router.post("/payroll", requireAuth, requireAdmin, async (req, res) => {
     const bonusNum = parseFloat(bonus || '0');
     const deductionsNum = parseFloat(deductions || '0');
     const netPayNum = salaryNum + bonusNum - deductionsNum;
+    // AUD-DD-FORM-021 — refuse negative netPay. The previous code
+    // happily wrote a row where deductions exceeded salary+bonus,
+    // producing impossible negative pay. The route now rejects with
+    // 400 before persisting.
+    if (!Number.isFinite(netPayNum) || netPayNum < 0) {
+      return res.status(400).json({
+        error: 'netPay would be negative — deductions cannot exceed salary + bonus',
+        salary: salaryNum,
+        bonus: bonusNum,
+        deductions: deductionsNum,
+        netPay: Number.isFinite(netPayNum) ? netPayNum : null,
+      });
+    }
     const actualPayDate = payDate || new Date().toISOString().split('T')[0];
 
     const entry = await storage.createPayrollEntry({
@@ -283,7 +297,11 @@ router.delete("/payroll/:id", requireAuth, requireAdmin, async (req, res) => {
 router.post("/payroll/process", financialLimiter, requireAuth, requireAdmin, requirePin, async (req, res) => {
   try {
     const entries = await storage.getPayroll();
-    const pendingEntries = entries.filter((e: any) => e.status === "pending");
+    // Idempotency: only process entries that are strictly 'pending'
+    // Skip any already in 'processing', 'completed', or 'paid' to prevent double-pay
+    const pendingEntries = entries.filter(
+      (e: any) => e.status === "pending" && e.status !== "processing" && e.status !== "completed" && e.status !== "paid"
+    );
 
     if (pendingEntries.length === 0) {
       return res.status(400).json({ error: "No pending payroll entries to process" });
@@ -438,7 +456,7 @@ router.post("/payroll/process", financialLimiter, requireAuth, requireAdmin, req
 });
 
 // Pay individual employee — initiates REAL bank transfer via Stripe/Paystack
-router.post("/payroll/:id/pay", requireAuth, requireAdmin, async (req, res) => {
+router.post("/payroll/:id/pay", requireAuth, requireAdmin, requirePin, async (req, res) => {
   try {
     const entry = await storage.getPayrollEntry(param(req.params.id));
     if (!entry) {
@@ -608,9 +626,20 @@ router.post("/payroll/:id/pay", requireAuth, requireAdmin, async (req, res) => {
 
 // ==================== PAYROLL BATCH PAYOUT ====================
 
+const batchPayoutSchema = z.object({
+  payrollIds: z.array(z.string().min(1)).min(1).max(50),
+  initiatedBy: z.string().optional(),
+});
+
 router.post("/payroll/batch-payout", requireAuth, requireAdmin, requirePin, async (req, res) => {
   try {
-    const { payrollIds, initiatedBy } = req.body;
+    const parsed = batchPayoutSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid batch payout data", details: parsed.error.issues });
+    }
+    const { payrollIds } = parsed.data;
+    // Never trust client-supplied initiator identity
+    const initiatedBy = (req as any).user?.uid || 'unknown';
 
     const results: any[] = [];
 

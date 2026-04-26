@@ -454,6 +454,44 @@ router.post("/invoices", requireAuth, async (req, res) => {
     }
     const { client, clientEmail, amount, subtotal, taxRate, taxAmount, currency: invoiceCurrency, notes, dueDate, items } = result.data;
 
+    // AUD-DD-FORM-019 — line-item cross-validation. If line items are
+    // present, sum (quantity * price/rate/amount) and confirm it
+    // matches the declared subtotal (or the top-level amount when no
+    // subtotal is given). Allow a 1-cent tolerance for rounding.
+    if (Array.isArray(items) && items.length > 0) {
+      const computedSubtotal = items.reduce((sum: number, it: any) => {
+        const qty = parseFloat(String(it.quantity ?? 1));
+        const unit = parseFloat(String(it.price ?? it.rate ?? it.amount ?? 0));
+        if (!Number.isFinite(qty) || !Number.isFinite(unit)) return sum;
+        return sum + qty * unit;
+      }, 0);
+      const declared = parseFloat(String(subtotal ?? amount ?? 0));
+      if (Number.isFinite(declared) && Math.abs(computedSubtotal - declared) > 0.01) {
+        return res.status(400).json({
+          error: 'Line-item totals do not match declared subtotal',
+          computedSubtotal: Number(computedSubtotal.toFixed(2)),
+          declaredSubtotal: Number(declared.toFixed(2)),
+        });
+      }
+    }
+
+    // AUD-DD-FORM-020 — tax cross-validation. taxAmount must equal
+    // subtotal * (taxRate / 100) within a 1-cent tolerance. Skip if
+    // either side is absent — taxRate=0 / taxAmount=0 trivially passes.
+    const taxRateNum = parseFloat(String(taxRate ?? '0'));
+    const taxAmountNum = parseFloat(String(taxAmount ?? '0'));
+    const subtotalNum = parseFloat(String(subtotal ?? amount ?? 0));
+    if (Number.isFinite(taxRateNum) && Number.isFinite(taxAmountNum) && Number.isFinite(subtotalNum) && taxRateNum > 0) {
+      const expectedTax = subtotalNum * (taxRateNum / 100);
+      if (Math.abs(expectedTax - taxAmountNum) > 0.01) {
+        return res.status(400).json({
+          error: 'Tax amount does not match subtotal × taxRate',
+          expectedTaxAmount: Number(expectedTax.toFixed(2)),
+          declaredTaxAmount: Number(taxAmountNum.toFixed(2)),
+        });
+      }
+    }
+
     const currentYear = new Date().getFullYear();
     const invoiceNumber = await storage.getNextInvoiceNumber(currentYear);
     const company = await resolveUserCompany(req);

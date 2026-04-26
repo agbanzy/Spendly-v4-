@@ -5,6 +5,7 @@ import { paystackClient } from "./paystackClient";
 import { getStripeClient } from "./stripeClient";
 import { getPaymentProvider, getCurrencyForCountry } from "./paymentService";
 import { logger as baseLogger } from "./lib/logger";
+import { computeNextDate } from "./utils/recurring-dates";
 
 // LU-002 / LU-003 / AUD-BE-001 / AUD-BE-004
 // Scheduler hardened to (a) acquire a Postgres advisory lock per tick so only
@@ -14,26 +15,9 @@ import { logger as baseLogger } from "./lib/logger";
 const logger = baseLogger.child({ module: "recurring-scheduler" });
 const SCHEDULER_LOCK_NAME = "financiar.recurring-scheduler";
 
-function computeNextDate(currentDate: string, frequency: string): string {
-  const date = new Date(currentDate);
-  switch (frequency) {
-    case 'weekly':
-      date.setDate(date.getDate() + 7);
-      break;
-    case 'monthly':
-      date.setMonth(date.getMonth() + 1);
-      break;
-    case 'quarterly':
-      date.setMonth(date.getMonth() + 3);
-      break;
-    case 'yearly':
-      date.setFullYear(date.getFullYear() + 1);
-      break;
-    default:
-      date.setMonth(date.getMonth() + 1);
-  }
-  return date.toISOString().split('T')[0];
-}
+// computeNextDate moved to server/utils/recurring-dates.ts
+// (AUD-DD-BILL-007 / AUD-DD-BILL-008) so unit tests can import it
+// without dragging in the db module.
 
 /**
  * Run `fn` only if this instance can acquire the named Postgres advisory lock.

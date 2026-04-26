@@ -190,7 +190,10 @@ router.post("/bills/:id/approve", requireAuth, requireAdmin, requirePin, async (
   }
 });
 
-router.post("/bills/:id/reject", requireAuth, requireAdmin, async (req, res) => {
+// AUD-DD-BILL-002: PIN now required on reject (state-only change but
+// the action is consequential — we pair it with PIN to match the
+// posture of approve / pay / request-changes).
+router.post("/bills/:id/reject", requireAuth, requireAdmin, requirePin, async (req, res) => {
   try {
     const company = await resolveUserCompany(req);
     const { reason } = req.body;
@@ -227,7 +230,9 @@ router.post("/bills/:id/reject", requireAuth, requireAdmin, async (req, res) => 
 });
 
 // Request changes on a bill
-router.post("/bills/:id/request-changes", requireAuth, requireAdmin, async (req, res) => {
+// AUD-DD-BILL-010: PIN now required on request-changes for the same
+// reason as reject — pair the state mutation with PIN.
+router.post("/bills/:id/request-changes", requireAuth, requireAdmin, requirePin, async (req, res) => {
   try {
     const { comments } = req.body;
     if (!comments || !comments.trim()) {

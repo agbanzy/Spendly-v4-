@@ -369,7 +369,10 @@ router.post("/payment/transfer", requireAuth, requirePin, financialLimiter, asyn
       XOF: 30000000,  // CFA30,000,000
     };
     const DAILY_LIMIT = DAILY_LIMITS[currency] || 50000;
-    const dailyTotal = await storage.getDailyTransferTotal(userId);
+    // AUD-DD-MT-008 — scope the daily-total to the active company so a
+    // user in two companies isn't blocked by the other company's spend.
+    const txCompany = await resolveUserCompany(req);
+    const dailyTotal = await storage.getDailyTransferTotal(userId, txCompany?.companyId);
     if (dailyTotal + amount > DAILY_LIMIT) {
       return res.status(400).json({
         error: "Daily transfer limit exceeded",
@@ -395,22 +398,38 @@ router.post("/payment/transfer", requireAuth, requirePin, financialLimiter, asyn
     // Generate unique reference for idempotency tracking
     const transferReference = `TRF-${userId.substring(0, 8)}-${Date.now()}`;
 
-    const transferResult = await paymentService.initiateTransfer(
-      amount,
-      recipientDetails,
-      countryCode,
-      reason
-    );
-
-    // Debit from user's wallet after successful transfer initiation
+    // FIX P2: Debit wallet BEFORE initiating external transfer to prevent fund leaks.
+    // If the external transfer fails, we refund the wallet. If we send first and debit
+    // fails, money leaves the platform without a corresponding internal deduction.
     await storage.debitWallet(
       userWallet.id,
       amount,
       'transfer_out',
       `Transfer: ${reason}`,
-      transferResult.reference || transferReference,
+      transferReference,
       { recipientName: recipientDetails.accountName, countryCode }
     );
+
+    let transferResult;
+    try {
+      transferResult = await paymentService.initiateTransfer(
+        amount,
+        recipientDetails,
+        countryCode,
+        reason
+      );
+    } catch (transferError: any) {
+      // External transfer failed — refund the wallet debit
+      await storage.creditWallet(
+        userWallet.id,
+        amount,
+        'transfer_refund',
+        `Refund: transfer failed - ${reason}`,
+        `REFUND-${transferReference}`,
+        { reason: transferError.message }
+      );
+      throw transferError;
+    }
 
     // Create transaction record with provider reference for webhook tracking
     const providerRef = transferResult.reference || transferResult.transferId || transferReference;
@@ -596,6 +615,12 @@ router.post("/bills/pay", financialLimiter, requireAuth, requirePin, async (req,
       }
 
       if (!deducted) {
+        // FIX P3: Verify the user belongs to the company before deducting from company balance
+        const userCompany = await resolveUserCompany(req);
+        if (!userCompany?.companyId) {
+          return res.status(403).json({ error: "Cannot deduct from company balance — no company association found" });
+        }
+
         const balances = await storage.getBalances();
         let balanceField: string;
         if (billCurrency === 'USD') {
@@ -753,7 +778,9 @@ router.post("/wallet/deposit/confirm", requireAuth, async (req, res) => {
       if (!paystackResult || paystackResult.status !== 'success') {
         return res.status(400).json({ error: "Payment verification failed" });
       }
-      amount = paystackResult.amount / 100;
+      // FIX P1: verifyPayment already converts from kobo to major units via Money.toMajor()
+      // Do NOT divide by 100 again — that would give users 1/100th of their deposit
+      amount = paystackResult.amount;
       depositCurrency = paystackResult.currency?.toUpperCase() || 'NGN';
     }
 

@@ -101,7 +101,9 @@ export interface IStorage {
   deleteTeamMember(id: string): Promise<boolean>;
   
   // Transfer tracking for security limits
-  getDailyTransferTotal(userId: string): Promise<number>;
+  // AUD-DD-MT-008 — Optional companyId scopes the running total to a
+  // single tenant. Pre-existing single-arg call sites continue to work.
+  getDailyTransferTotal(userId: string, companyId?: string): Promise<number>;
   
   // Webhook idempotency
   isWebhookProcessed(eventId: string): Promise<boolean>;
@@ -842,15 +844,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== TRANSFER TRACKING FOR SECURITY ====================
-  async getDailyTransferTotal(userId: string): Promise<number> {
+  async getDailyTransferTotal(userId: string, companyId?: string): Promise<number> {
     const today = new Date().toISOString().split('T')[0];
-    
-    // First get all wallets for this user
-    const userWallets = await this.getWallets(userId);
+
+    // AUD-DD-MT-008: optionally filter wallets to the active company so
+    // a user in companies A and B isn't blocked at company A's daily
+    // limit because their company B transfers also count.
+    let userWallets = await this.getWallets(userId);
+    if (companyId) {
+      userWallets = userWallets.filter((w: any) => w.companyId === companyId);
+    }
     if (userWallets.length === 0) {
       return 0;
     }
-    
+
     const walletIds = userWallets.map(w => w.id);
     
     // Sum all transfer_out transactions for today from user's wallets
