@@ -226,6 +226,35 @@ export interface IStorage {
   getPayout(id: string): Promise<Payout | undefined>;
   createPayout(payout: InsertPayout): Promise<Payout>;
   updatePayout(id: string, data: Partial<Payout>): Promise<Payout | undefined>;
+  // LU-DD-5 / AUD-DD-PAY-002 — debit-first payout processing.
+  // claimPayoutForProcessing atomically transitions the payout's status
+  // from {pending,approved} → processing so concurrent /process calls
+  // cannot both proceed. Returns the claimed row, or null when another
+  // caller already claimed it (or the payout is in a non-processable state).
+  claimPayoutForProcessing(payoutId: string): Promise<Payout | null>;
+  // atomicPayoutDebit locks company_balances FOR UPDATE, debits the
+  // appropriate currency column, and creates a 'processing' transactions
+  // row — all in one DB transaction. Throws on insufficient funds or a
+  // missing balance row. Must be called BEFORE the external transfer.
+  atomicPayoutDebit(params: {
+    payoutId: string;
+    companyId: string;
+    amount: number;
+    currency: string;
+    description: string;
+    reference: string;
+    userId?: string | null;
+  }): Promise<{ transactionId: string; balanceField: 'usd' | 'local' }>;
+  // atomicPayoutCompensateOnFailure runs the inverse of atomicPayoutDebit
+  // when the external transfer fails after the local debit committed.
+  // Re-credits company_balances and marks the local transaction failed.
+  atomicPayoutCompensateOnFailure(params: {
+    transactionId: string;
+    companyId: string;
+    amount: number;
+    currency: string;
+    reason: string;
+  }): Promise<void>;
 
   // Scheduled Payments
   getScheduledPayments(filters?: { status?: string; type?: string; companyId?: string }): Promise<ScheduledPayment[]>;
@@ -2083,6 +2112,151 @@ export class DatabaseStorage implements IStorage {
       .where(eq(payouts.id, id))
       .returning();
     return result[0];
+  }
+
+  // ==================== LU-DD-5 / AUD-DD-PAY-002 — Debit-first payout processing ====================
+  //
+  // The previous /payouts/:id/process flow called the external Stripe /
+  // Paystack transfer FIRST and only then updated local state. If the
+  // external call succeeded but a subsequent step crashed (DB outage,
+  // network, container kill), money left the bank account with no local
+  // ledger record. The recurringScheduler.processScheduledPayments path
+  // already had the right pattern ("FIX P4"); the route handler did not.
+  //
+  // The three methods below give the route handler:
+  //
+  //   1. claimPayoutForProcessing  — atomic status transition that
+  //      prevents two concurrent /process calls from both starting work.
+  //   2. atomicPayoutDebit         — DB-transactional local debit + a
+  //      'Processing' transactions row, BEFORE the external call.
+  //   3. atomicPayoutCompensateOnFailure — DB-transactional credit-back
+  //      + 'Failed' transactions row, when the external call rejects.
+
+  async claimPayoutForProcessing(payoutId: string): Promise<Payout | null> {
+    // Atomic transition: only succeed if the row is currently in a
+    // claim-eligible state. The CASE-with-WHERE pattern would also work,
+    // but Drizzle's update().where(...) plus .returning() is cleaner.
+    const now = new Date().toISOString();
+    const result = await db.update(payouts)
+      .set({ status: 'processing', updatedAt: now } as any)
+      .where(and(
+        eq(payouts.id, payoutId),
+        sql`${payouts.status} IN ('pending', 'approved')`,
+      ))
+      .returning();
+    return result[0] ?? null;
+  }
+
+  async atomicPayoutDebit(params: {
+    payoutId: string;
+    companyId: string;
+    amount: number;
+    currency: string;
+    description: string;
+    reference: string;
+    userId?: string | null;
+  }): Promise<{ transactionId: string; balanceField: 'usd' | 'local' }> {
+    const balanceField: 'usd' | 'local' = params.currency.toUpperCase() === 'USD' ? 'usd' : 'local';
+    const now = new Date().toISOString();
+
+    return await db.transaction(async (tx) => {
+      // Lock the company_balances row to prevent concurrent debits from
+      // racing against each other for the same company / currency.
+      const balanceRows = await tx.execute(
+        sql`SELECT id, ${sql.raw(balanceField)} AS field_value, local_currency
+            FROM company_balances
+            WHERE company_id = ${params.companyId}
+            FOR UPDATE`
+      );
+      const row = balanceRows.rows[0] as any;
+      if (!row) {
+        throw new Error(`No company_balances row for company ${params.companyId}`);
+      }
+
+      const currentBalance = parseFloat(String(row.field_value || '0'));
+      if (currentBalance < params.amount) {
+        throw new Error(`Insufficient ${balanceField} balance: need ${params.amount} ${params.currency}, have ${currentBalance}`);
+      }
+
+      // For non-USD currencies stored under `local`, sanity-check that the
+      // company's local_currency actually matches what we're debiting. A
+      // mismatch (e.g. payout in NGN but local_currency='GHS') would
+      // silently take from the wrong currency.
+      if (balanceField === 'local' && row.local_currency && row.local_currency !== params.currency.toUpperCase()) {
+        throw new Error(`Currency mismatch: payout currency ${params.currency} does not match company.local_currency ${row.local_currency}`);
+      }
+
+      const newBalance = Math.round((currentBalance - params.amount) * 100) / 100;
+
+      await tx.execute(
+        sql`UPDATE company_balances
+            SET ${sql.raw(balanceField)} = ${newBalance.toFixed(2)}
+            WHERE id = ${row.id}`
+      );
+
+      // Insert the local 'Processing' transaction row in the same transaction
+      // so the debit and the ledger record commit together. The post-LU-001
+      // bridge writes to `transactions` directly here too because there is
+      // no source-side `walletTransaction` to bridge from.
+      const txnInsert = await tx.insert(transactions).values({
+        type: 'Payout',
+        amount: params.amount.toFixed(2),
+        fee: '0',
+        status: 'Processing',
+        date: now.split('T')[0],
+        description: params.description,
+        currency: params.currency,
+        userId: params.userId ?? null,
+        reference: params.reference,
+        companyId: params.companyId,
+      } as any).returning();
+
+      return {
+        transactionId: txnInsert[0].id,
+        balanceField,
+      };
+    });
+  }
+
+  async atomicPayoutCompensateOnFailure(params: {
+    transactionId: string;
+    companyId: string;
+    amount: number;
+    currency: string;
+    reason: string;
+  }): Promise<void> {
+    const balanceField: 'usd' | 'local' = params.currency.toUpperCase() === 'USD' ? 'usd' : 'local';
+
+    await db.transaction(async (tx) => {
+      // Lock the balance row.
+      const balanceRows = await tx.execute(
+        sql`SELECT id, ${sql.raw(balanceField)} AS field_value
+            FROM company_balances
+            WHERE company_id = ${params.companyId}
+            FOR UPDATE`
+      );
+      const row = balanceRows.rows[0] as any;
+      if (!row) {
+        throw new Error(`No company_balances row for company ${params.companyId} during compensation`);
+      }
+
+      const currentBalance = parseFloat(String(row.field_value || '0'));
+      const restored = Math.round((currentBalance + params.amount) * 100) / 100;
+
+      await tx.execute(
+        sql`UPDATE company_balances
+            SET ${sql.raw(balanceField)} = ${restored.toFixed(2)}
+            WHERE id = ${row.id}`
+      );
+
+      // Mark the in-flight transaction as failed. We keep the row visible
+      // (do NOT soft-delete) so the audit trail still shows the attempted
+      // payout and its failure reason. A separate metadata insert isn't
+      // needed; the transactions.description was set at debit time.
+      await tx.update(transactions)
+        .set({ status: 'Failed' } as any)
+        .where(eq(transactions.id, params.transactionId));
+    });
   }
 
   // ==================== SCHEDULED PAYMENTS ====================
