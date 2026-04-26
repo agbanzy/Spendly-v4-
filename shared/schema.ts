@@ -1333,6 +1333,30 @@ export const processedWebhooks = pgTable("processed_webhooks", {
   metadata: jsonb("metadata"),
 });
 
+// Payment intent index — server-issued (provider, provider_intent_id) →
+// (companyId, userId, kind). The intent-creation path writes here
+// authoritatively; webhook handlers read companyId from this table instead
+// of trusting metadata.companyId on the inbound event. See LU-DD-2 in
+// docs/audit-2026-04-26/AUDIT_DEEP_DIVE_2026_04_26.md.
+export const paymentIntentIndex = pgTable("payment_intent_index", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  provider: text("provider").notNull(),                  // 'stripe' | 'paystack'
+  providerIntentId: text("provider_intent_id").notNull(),
+  kind: text("kind").notNull(),                          // 'payment_intent' | 'charge' | 'transfer' | 'payout'
+  companyId: text("company_id").references(() => companies.id, { onDelete: 'set null' }),
+  userId: text("user_id"),
+  metadataCompanyId: text("metadata_company_id"),        // forensic: companyId asserted by caller in metadata
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+}, (t) => [
+  index("payment_intent_index_company_id_idx").on(t.companyId),
+  index("payment_intent_index_kind_created_at_idx").on(t.kind, t.createdAt),
+]);
+
+export const insertPaymentIntentIndexSchema = createInsertSchema(paymentIntentIndex).omit({ id: true, createdAt: true });
+export type InsertPaymentIntentIndex = z.infer<typeof insertPaymentIntentIndexSchema>;
+export type PaymentIntentIndex = typeof paymentIntentIndex.$inferSelect;
+
 // Payment Methods table — saved cards and bank accounts for Stripe + Paystack
 export const paymentMethods = pgTable("payment_methods", {
   id: serial("id").primaryKey(),
