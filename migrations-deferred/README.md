@@ -24,3 +24,12 @@ production.
   parallel-write operation (no `[LU-DD-3] mirror ...` warn lines in
   CloudWatch) before applying. See file header for the pre-condition
   query.
+
+- **`0015_payouts_companyid_not_null.sql`** — applies `NOT NULL` to
+  `payouts.company_id` (AUD-DB-008). Gated on operator-driven
+  cleanup of orphan rows created by the pre-Sprint-1 open `POST
+  /payouts` endpoint (closed in PR #23). The migration includes a
+  belt-and-braces parity check that `RAISE EXCEPTION`s if any
+  NULL-company payout rows remain, so accidental application is safe.
+  See file header for the per-orphan resolution guide
+  (backfill from `audit_logs.initiatedBy` vs delete).
