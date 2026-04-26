@@ -10,19 +10,97 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
-interface FinanciarStackProps extends cdk.StackProps {
+// LU-012 / AUD-IN-002 / AUD-IN-003 / AUD-IN-004
+// Stack now takes an `env` selector and parameterizes the high-availability
+// posture per environment. Three single-points-of-failure from the prior
+// version are eliminated in prod:
+//   - natGateways: 2  (was 1)
+//   - rds.multiAz:  true (was false)
+//   - hardcoded APP_URL → injected from props.appUrl
+// Dev and staging keep the cheap settings; prod gets multi-NAT + multi-AZ.
+//
+// `npm run cdk synth` is required after restructuring; deployment is gated by
+// the existing GitHub Actions workflow and is NOT performed by this change.
+
+export type FinanciarEnvName = 'dev' | 'staging' | 'prod';
+
+export interface FinanciarStackProps extends cdk.StackProps {
+  /** Logical environment name. Drives sizing and HA defaults. */
+  envName: FinanciarEnvName;
+  /** Public APP_URL injected into the ECS task. */
+  appUrl: string;
   /** ARN of an ACM certificate for HTTPS. If not provided, only HTTP listener is created. */
   certificateArn?: string;
 }
 
+interface EnvDefaults {
+  natGateways: number;
+  multiAz: boolean;
+  rdsInstanceClass: ec2.InstanceClass;
+  rdsInstanceSize: ec2.InstanceSize;
+  rdsAllocatedStorage: number;
+  rdsMaxAllocatedStorage: number;
+  taskCpu: number;
+  taskMem: number;
+  minCapacity: number;
+  maxCapacity: number;
+  logRetention: logs.RetentionDays;
+}
+
+const ENV_DEFAULTS: Record<FinanciarEnvName, EnvDefaults> = {
+  dev: {
+    natGateways: 1,
+    multiAz: false,
+    rdsInstanceClass: ec2.InstanceClass.T3,
+    rdsInstanceSize: ec2.InstanceSize.MICRO,
+    rdsAllocatedStorage: 20,
+    rdsMaxAllocatedStorage: 50,
+    taskCpu: 256,
+    taskMem: 512,
+    minCapacity: 1,
+    maxCapacity: 1,
+    logRetention: logs.RetentionDays.TWO_WEEKS,
+  },
+  staging: {
+    natGateways: 1,
+    multiAz: false,
+    rdsInstanceClass: ec2.InstanceClass.T3,
+    rdsInstanceSize: ec2.InstanceSize.SMALL,
+    rdsAllocatedStorage: 20,
+    rdsMaxAllocatedStorage: 100,
+    taskCpu: 512,
+    taskMem: 1024,
+    minCapacity: 1,
+    maxCapacity: 2,
+    logRetention: logs.RetentionDays.ONE_MONTH,
+  },
+  prod: {
+    natGateways: 2,                 // AUD-IN-002: was 1
+    multiAz: true,                  // AUD-IN-003: was false
+    rdsInstanceClass: ec2.InstanceClass.T3,
+    rdsInstanceSize: ec2.InstanceSize.MEDIUM,
+    rdsAllocatedStorage: 50,
+    rdsMaxAllocatedStorage: 200,
+    taskCpu: 1024,
+    taskMem: 2048,
+    minCapacity: 2,
+    maxCapacity: 6,
+    logRetention: logs.RetentionDays.THREE_MONTHS,
+  },
+};
+
 export class FinanciarStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: FinanciarStackProps) {
+  constructor(scope: Construct, id: string, props: FinanciarStackProps) {
     super(scope, id, props);
+
+    const cfg = ENV_DEFAULTS[props.envName];
+    const envSlug = props.envName;
+    const namePrefix = envSlug === 'prod' ? 'financiar' : `financiar-${envSlug}`;
 
     // ==================== VPC ====================
     const vpc = new ec2.Vpc(this, 'FinanciarVpc', {
       maxAzs: 2,
-      natGateways: 1,
+      natGateways: cfg.natGateways,
       subnetConfiguration: [
         { cidrMask: 24, name: 'Public', subnetType: ec2.SubnetType.PUBLIC },
         { cidrMask: 24, name: 'Private', subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
@@ -31,8 +109,8 @@ export class FinanciarStack extends cdk.Stack {
 
     // ==================== SECRETS ====================
     const appSecrets = new secretsmanager.Secret(this, 'FinanciarSecrets', {
-      secretName: 'financiar/app-secrets',
-      description: 'Financiar application secrets',
+      secretName: `${namePrefix}/app-secrets`,
+      description: `Financiar application secrets (${envSlug})`,
       generateSecretString: {
         secretStringTemplate: JSON.stringify({
           DATABASE_URL: '',
@@ -50,7 +128,7 @@ export class FinanciarStack extends cdk.Stack {
     // ==================== RDS PostgreSQL ====================
     const dbSecurityGroup = new ec2.SecurityGroup(this, 'DbSecurityGroup', {
       vpc,
-      description: 'Security group for Financiar RDS',
+      description: `Security group for Financiar RDS (${envSlug})`,
       allowAllOutbound: false,
     });
 
@@ -58,43 +136,43 @@ export class FinanciarStack extends cdk.Stack {
       engine: rds.DatabaseInstanceEngine.postgres({
         version: rds.PostgresEngineVersion.VER_16_4,
       }),
-      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO),
+      instanceType: ec2.InstanceType.of(cfg.rdsInstanceClass, cfg.rdsInstanceSize),
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       securityGroups: [dbSecurityGroup],
       databaseName: 'financiar',
       credentials: rds.Credentials.fromGeneratedSecret('financiar_admin', {
-        secretName: 'financiar/db-credentials',
+        secretName: `${namePrefix}/db-credentials`,
       }),
       storageEncrypted: true,
-      multiAz: false,
-      allocatedStorage: 20,
-      maxAllocatedStorage: 100,
-      backupRetention: cdk.Duration.days(7),
-      deletionProtection: true,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      multiAz: cfg.multiAz,
+      allocatedStorage: cfg.rdsAllocatedStorage,
+      maxAllocatedStorage: cfg.rdsMaxAllocatedStorage,
+      backupRetention: cdk.Duration.days(envSlug === 'prod' ? 14 : 7),
+      deletionProtection: envSlug === 'prod',
+      removalPolicy: envSlug === 'prod' ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.SNAPSHOT,
     });
 
     // ==================== ECR Repository ====================
     const ecrRepo = new ecr.Repository(this, 'FinanciarRepo', {
-      repositoryName: 'financiar',
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      repositoryName: namePrefix,
+      removalPolicy: envSlug === 'prod' ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
       lifecycleRules: [
-        { maxImageCount: 10, description: 'Keep last 10 images' },
+        { maxImageCount: envSlug === 'prod' ? 20 : 10, description: 'Keep recent images' },
       ],
     });
 
     // ==================== ECS Cluster ====================
     const cluster = new ecs.Cluster(this, 'FinanciarCluster', {
       vpc,
-      clusterName: 'financiar',
+      clusterName: namePrefix,
       containerInsights: true,
     });
 
     // ==================== ECS Task Definition ====================
     const taskRole = new iam.Role(this, 'FinanciarTaskRole', {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
-      description: 'Financiar ECS task role',
+      description: `Financiar ECS task role (${envSlug})`,
     });
 
     // Grant SES, SNS, Secrets Manager access
@@ -110,14 +188,14 @@ export class FinanciarStack extends cdk.Stack {
     database.secret?.grantRead(taskRole);
 
     const taskDefinition = new ecs.FargateTaskDefinition(this, 'FinanciarTask', {
-      memoryLimitMiB: 1024,
-      cpu: 512,
+      memoryLimitMiB: cfg.taskMem,
+      cpu: cfg.taskCpu,
       taskRole,
     });
 
     const logGroup = new logs.LogGroup(this, 'FinanciarLogs', {
-      logGroupName: '/ecs/financiar',
-      retention: logs.RetentionDays.ONE_MONTH,
+      logGroupName: `/ecs/${namePrefix}`,
+      retention: cfg.logRetention,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
@@ -128,9 +206,9 @@ export class FinanciarStack extends cdk.Stack {
         logGroup,
       }),
       environment: {
-        NODE_ENV: 'production',
+        NODE_ENV: envSlug === 'prod' ? 'production' : envSlug,
         PORT: '5000',
-        APP_URL: 'https://app.thefinanciar.com',
+        APP_URL: props.appUrl,
         AWS_REGION: this.region,
         AWS_SES_FROM_EMAIL: 'noreply@thefinanciar.com',
         AWS_SES_FROM_NAME: 'Financiar',
@@ -163,7 +241,7 @@ export class FinanciarStack extends cdk.Stack {
     // ==================== ALB ====================
     const albSecurityGroup = new ec2.SecurityGroup(this, 'AlbSecurityGroup', {
       vpc,
-      description: 'Security group for Financiar ALB',
+      description: `Security group for Financiar ALB (${envSlug})`,
     });
     albSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'Allow HTTP');
     albSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'Allow HTTPS');
@@ -177,7 +255,7 @@ export class FinanciarStack extends cdk.Stack {
     // ==================== ECS Service ====================
     const serviceSecurityGroup = new ec2.SecurityGroup(this, 'ServiceSecurityGroup', {
       vpc,
-      description: 'Security group for Financiar ECS service',
+      description: `Security group for Financiar ECS service (${envSlug})`,
     });
 
     // ALB -> ECS on port 5000
@@ -200,8 +278,8 @@ export class FinanciarStack extends cdk.Stack {
 
     // Auto-scaling
     const scaling = service.autoScaleTaskCount({
-      minCapacity: 1,
-      maxCapacity: 4,
+      minCapacity: cfg.minCapacity,
+      maxCapacity: cfg.maxCapacity,
     });
 
     scaling.scaleOnCpuUtilization('CpuScaling', {
@@ -227,9 +305,8 @@ export class FinanciarStack extends cdk.Stack {
     });
 
     // HTTPS listener (if certificate ARN provided)
-    const certArn = (props as FinanciarStackProps)?.certificateArn;
-    if (certArn) {
-      const certificate = acm.Certificate.fromCertificateArn(this, 'FinanciarCert', certArn);
+    if (props.certificateArn) {
+      const certificate = acm.Certificate.fromCertificateArn(this, 'FinanciarCert', props.certificateArn);
 
       alb.addListener('HttpsListener', {
         port: 443,
@@ -278,6 +355,11 @@ export class FinanciarStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'DatabaseEndpoint', {
       value: database.dbInstanceEndpointAddress,
       description: 'RDS endpoint',
+    });
+
+    new cdk.CfnOutput(this, 'EnvName', {
+      value: envSlug,
+      description: 'Logical environment',
     });
   }
 }
