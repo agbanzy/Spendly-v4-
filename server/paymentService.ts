@@ -46,11 +46,35 @@ async function indexProviderIntent(input: {
   }
 }
 
-// Import from shared constants — single source of truth
-export { REGION_CONFIGS, getRegionConfig, getPaymentProvider, SUPPORTED_COUNTRIES, getCountryConfig, getProviderForCountry, isPaystackCountry, getBankListKey } from '../shared/constants';
+// Import from shared constants — single source of truth.
+// `getPaymentProvider` is intentionally NOT re-exported from shared here:
+// we want every server-side caller to go through the locally-wrapped
+// version below so unknown-country fallthroughs are observable.
+export { REGION_CONFIGS, getRegionConfig, SUPPORTED_COUNTRIES, getCountryConfig, getProviderForCountry, isPaystackCountry, getBankListKey } from '../shared/constants';
 export { getCurrencyForCountry } from '../shared/constants';
 export type { RegionConfig, CountryConfig } from '../shared/constants';
-import { getRegionConfig, getPaymentProvider, getBankListKey, getCurrencyForCountry, getPreferredBank } from '../shared/constants';
+import { getRegionConfig, getPaymentProvider as _getPaymentProvider, getBankListKey, getCurrencyForCountry, getPreferredBank, getCountryConfig } from '../shared/constants';
+
+// AUD-DD-CTRY-003 — log when payment-provider routing falls through to
+// the Stripe default for an unknown country. The bare lookup in
+// shared/constants silently routes unknowns to Stripe, which is sensible
+// behaviour but operationally invisible: a misconfigured tenant or a
+// typo in a country code wouldn't be caught until the Stripe API
+// rejected the call. Wrap the lookup at the server boundary so each
+// such fallthrough emits a structured warn line. The wrapper is
+// re-exported under the historical name so every server-side import
+// (recurringScheduler, expenses.routes, payroll.routes, accounts.routes,
+// routes.legacy) automatically gets the logged version.
+export function getPaymentProvider(countryCode: string): 'stripe' | 'paystack' {
+  const cfg = getCountryConfig(countryCode);
+  if (!cfg && countryCode) {
+    paymentLogger.warn('payment_provider_unknown_country_default', {
+      countryCode,
+      defaultedTo: 'stripe',
+    });
+  }
+  return _getPaymentProvider(countryCode);
+}
 
 export const paymentService = {
   async createPaymentIntent(amount: number, currency: string, countryCode: string, metadata?: any, callbackUrl?: string) {
