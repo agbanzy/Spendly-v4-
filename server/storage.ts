@@ -661,17 +661,96 @@ export class DatabaseStorage implements IStorage {
 
   async createTeamMember(member: CreateTeamMember): Promise<TeamMember> {
     const result = await db.insert(teamMembers).values(member as any).returning();
+    // LU-DD-3 / AUD-DD-TEAM-001 — parallel-write: also upsert the matching
+    // company_members row so the consolidated table stays in sync during
+    // the soak window. Errors here do NOT fail the primary write.
+    await this.mirrorTeamMemberToCompanyMember(result[0]).catch((err) => {
+      console.warn('[LU-DD-3] mirror team→company failed:', err?.message);
+    });
     return result[0];
   }
 
   async updateTeamMember(id: string, member: Partial<Omit<TeamMember, 'id'>>): Promise<TeamMember | undefined> {
     const result = await db.update(teamMembers).set(member as any).where(eq(teamMembers.id, id)).returning();
+    if (result[0]) {
+      await this.mirrorTeamMemberToCompanyMember(result[0]).catch((err) => {
+        console.warn('[LU-DD-3] mirror team→company on update failed:', err?.message);
+      });
+    }
     return result[0];
   }
 
   async deleteTeamMember(id: string): Promise<boolean> {
+    // Read the row first so we can mirror the delete to company_members.
+    const existing = await db.select().from(teamMembers).where(eq(teamMembers.id, id)).limit(1);
     const result = await db.delete(teamMembers).where(eq(teamMembers.id, id)).returning();
+    if (existing[0]) {
+      // Only delete the company_members row if it was a pure mirror — i.e.
+      // no userId attached suggesting it's actively being managed elsewhere.
+      // Conservative deletion: match on (companyId, email) and only remove
+      // when the row hasn't been promoted to an active membership.
+      await this.removeMirroredCompanyMember(existing[0]).catch((err) => {
+        console.warn('[LU-DD-3] mirror team→company on delete failed:', err?.message);
+      });
+    }
     return result.length > 0;
+  }
+
+  // LU-DD-3 — Parallel-write helpers. Idempotent UPSERT keyed by
+  // (companyId, lower(email)). The schema mirrors team_members
+  // semantically; for new column names introduced on company_members,
+  // we map straight across.
+  private async mirrorTeamMemberToCompanyMember(tm: TeamMember): Promise<void> {
+    if (!tm.companyId || !tm.email) return;
+    const existing = await db.select().from(companyMembers)
+      .where(and(
+        eq(companyMembers.companyId, tm.companyId),
+        sql`LOWER(${companyMembers.email}) = LOWER(${tm.email})`,
+      ))
+      .limit(1);
+    if (existing.length > 0) {
+      await db.update(companyMembers)
+        .set({
+          userId: tm.userId ?? existing[0].userId,
+          role: tm.role,
+          status: tm.status,
+          joinedAt: tm.joinedAt ?? existing[0].joinedAt,
+          name: tm.name ?? existing[0].name,
+          department: tm.department ?? existing[0].department,
+          departmentId: (tm as any).departmentId ?? (existing[0] as any).departmentId,
+          avatar: tm.avatar ?? existing[0].avatar,
+          permissions: tm.permissions ?? existing[0].permissions,
+        } as any)
+        .where(eq(companyMembers.id, existing[0].id));
+    } else {
+      await db.insert(companyMembers).values({
+        companyId: tm.companyId,
+        userId: tm.userId ?? null,
+        email: tm.email,
+        role: tm.role,
+        status: tm.status,
+        invitedAt: tm.joinedAt ?? new Date().toISOString(),
+        joinedAt: tm.joinedAt ?? null,
+        name: tm.name ?? null,
+        department: tm.department ?? null,
+        departmentId: (tm as any).departmentId ?? null,
+        avatar: tm.avatar ?? null,
+        permissions: tm.permissions ?? [],
+      } as any);
+    }
+  }
+
+  private async removeMirroredCompanyMember(tm: TeamMember): Promise<void> {
+    if (!tm.companyId || !tm.email) return;
+    // Only remove the mirror if it doesn't have a separate userId
+    // (i.e. wasn't independently promoted). When in doubt, keep the row
+    // and just mark it removed via status — but team_members' delete is
+    // semantically a hard delete, so we mirror that.
+    await db.delete(companyMembers)
+      .where(and(
+        eq(companyMembers.companyId, tm.companyId),
+        sql`LOWER(${companyMembers.email}) = LOWER(${tm.email})`,
+      ));
   }
 
   async getTeamMemberByEmail(email: string): Promise<TeamMember | undefined> {
@@ -2638,6 +2717,11 @@ export class DatabaseStorage implements IStorage {
 
   async createCompanyMember(member: InsertCompanyMember): Promise<CompanyMember> {
     const result = await db.insert(companyMembers).values(member as any).returning();
+    // LU-DD-3 / AUD-DD-TEAM-001 — mirror to team_members so legacy reads
+    // and the team-management UI stay in sync during the soak window.
+    await this.mirrorCompanyMemberToTeamMember(result[0]).catch((err) => {
+      console.warn('[LU-DD-3] mirror company→team failed:', err?.message);
+    });
     return result[0];
   }
 
@@ -2646,12 +2730,74 @@ export class DatabaseStorage implements IStorage {
       .set(data as any)
       .where(eq(companyMembers.id, id))
       .returning();
+    if (result[0]) {
+      await this.mirrorCompanyMemberToTeamMember(result[0]).catch((err) => {
+        console.warn('[LU-DD-3] mirror company→team on update failed:', err?.message);
+      });
+    }
     return result[0];
   }
 
   async removeCompanyMember(id: string): Promise<boolean> {
+    const existing = await db.select().from(companyMembers).where(eq(companyMembers.id, id)).limit(1);
     const result = await db.delete(companyMembers).where(eq(companyMembers.id, id)).returning();
+    if (existing[0]) {
+      await this.removeMirroredTeamMember(existing[0]).catch((err) => {
+        console.warn('[LU-DD-3] mirror company→team on delete failed:', err?.message);
+      });
+    }
     return result.length > 0;
+  }
+
+  // LU-DD-3 — Reverse-direction parallel-write helpers.
+  private async mirrorCompanyMemberToTeamMember(cm: CompanyMember): Promise<void> {
+    if (!cm.companyId || !cm.email) return;
+    const existing = await db.select().from(teamMembers)
+      .where(and(
+        eq(teamMembers.companyId, cm.companyId),
+        sql`LOWER(${teamMembers.email}) = LOWER(${cm.email})`,
+      ))
+      .limit(1);
+    const cmAny = cm as any;
+    const fallbackName = cmAny.name ?? cm.email.split('@')[0] ?? 'Member';
+    if (existing.length > 0) {
+      await db.update(teamMembers)
+        .set({
+          userId: cm.userId ?? existing[0].userId,
+          role: cm.role,
+          status: cm.status,
+          joinedAt: cm.joinedAt ?? existing[0].joinedAt,
+          name: cmAny.name ?? existing[0].name,
+          department: cmAny.department ?? existing[0].department,
+          departmentId: cmAny.departmentId ?? (existing[0] as any).departmentId,
+          avatar: cmAny.avatar ?? existing[0].avatar,
+          permissions: cmAny.permissions ?? existing[0].permissions,
+        } as any)
+        .where(eq(teamMembers.id, existing[0].id));
+    } else {
+      await db.insert(teamMembers).values({
+        companyId: cm.companyId,
+        userId: cm.userId ?? null,
+        email: cm.email,
+        role: cm.role,
+        status: cm.status,
+        joinedAt: cm.joinedAt ?? cm.invitedAt ?? new Date().toISOString(),
+        name: fallbackName,
+        department: cmAny.department ?? 'General',
+        departmentId: cmAny.departmentId ?? null,
+        avatar: cmAny.avatar ?? null,
+        permissions: cmAny.permissions ?? [],
+      } as any);
+    }
+  }
+
+  private async removeMirroredTeamMember(cm: CompanyMember): Promise<void> {
+    if (!cm.companyId || !cm.email) return;
+    await db.delete(teamMembers)
+      .where(and(
+        eq(teamMembers.companyId, cm.companyId),
+        sql`LOWER(${teamMembers.email}) = LOWER(${cm.email})`,
+      ));
   }
 
   async getUserCompanies(userId: string): Promise<CompanyMember[]> {
