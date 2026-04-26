@@ -644,56 +644,129 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== TEAM ====================
+  // LU-DD-3 Phase 3 / AUD-DD-TEAM-001 — reads now hit company_members
+  // (the consolidated source of truth). The TeamMember shape is
+  // synthesized from CompanyMember columns — both tables now carry the
+  // same fields, so the mapping is direct except joinedAt which is
+  // nullable on company_members; we fall back to invitedAt to preserve
+  // the existing TeamMember.joinedAt: string contract.
+  private companyMemberToTeamMember(cm: CompanyMember): TeamMember {
+    const cmAny = cm as any;
+    return {
+      id: cm.id,
+      companyId: cm.companyId,
+      userId: cm.userId ?? null,
+      email: cm.email,
+      role: cm.role,
+      status: cm.status,
+      joinedAt: cm.joinedAt ?? cm.invitedAt,
+      name: cmAny.name ?? cm.email.split('@')[0] ?? 'Member',
+      department: cmAny.department ?? 'General',
+      departmentId: cmAny.departmentId ?? null,
+      avatar: cmAny.avatar ?? null,
+      permissions: cmAny.permissions ?? [],
+    } as unknown as TeamMember;
+  }
+
   async getTeam(companyId?: string): Promise<TeamMember[]> {
-    if (companyId) {
-      const result = await db.select().from(teamMembers)
-        .where(eq(teamMembers.companyId, companyId));
-      return result;
-    }
-    const result = await db.select().from(teamMembers);
-    return result;
+    const rows = companyId
+      ? await db.select().from(companyMembers).where(eq(companyMembers.companyId, companyId))
+      : await db.select().from(companyMembers);
+    return rows.map((cm) => this.companyMemberToTeamMember(cm));
   }
 
   async getTeamMember(id: string): Promise<TeamMember | undefined> {
-    const result = await db.select().from(teamMembers).where(eq(teamMembers.id, id)).limit(1);
-    return result[0];
+    // ID could be from either table during the soak. Try company_members
+    // first; fall back to team_members for backward-compat with anything
+    // that's holding an old ID.
+    const cmResult = await db.select().from(companyMembers).where(eq(companyMembers.id, id)).limit(1);
+    if (cmResult[0]) return this.companyMemberToTeamMember(cmResult[0]);
+    const tmResult = await db.select().from(teamMembers).where(eq(teamMembers.id, id)).limit(1);
+    return tmResult[0];
   }
 
   async createTeamMember(member: CreateTeamMember): Promise<TeamMember> {
-    const result = await db.insert(teamMembers).values(member as any).returning();
-    // LU-DD-3 / AUD-DD-TEAM-001 — parallel-write: also upsert the matching
-    // company_members row so the consolidated table stays in sync during
-    // the soak window. Errors here do NOT fail the primary write.
-    await this.mirrorTeamMemberToCompanyMember(result[0]).catch((err) => {
-      console.warn('[LU-DD-3] mirror team→company failed:', err?.message);
+    // LU-DD-3 Phase 3 — primary insert now goes to company_members; the
+    // team_members table is the mirror, kept in sync via the reverse
+    // helper for back-compat reads from non-migrated callers.
+    const memberAny = member as any;
+    const cmRow = await db.insert(companyMembers).values({
+      companyId: memberAny.companyId,
+      userId: memberAny.userId ?? null,
+      email: memberAny.email,
+      role: memberAny.role ?? 'EMPLOYEE',
+      status: memberAny.status ?? 'active',
+      invitedAt: memberAny.joinedAt ?? new Date().toISOString(),
+      joinedAt: memberAny.joinedAt ?? null,
+      name: memberAny.name ?? null,
+      department: memberAny.department ?? null,
+      departmentId: memberAny.departmentId ?? null,
+      avatar: memberAny.avatar ?? null,
+      permissions: memberAny.permissions ?? [],
+    } as any).returning();
+    await this.mirrorCompanyMemberToTeamMember(cmRow[0]).catch((err) => {
+      console.warn('[LU-DD-3] mirror company→team on createTeamMember failed:', err?.message);
     });
-    return result[0];
+    return this.companyMemberToTeamMember(cmRow[0]);
   }
 
   async updateTeamMember(id: string, member: Partial<Omit<TeamMember, 'id'>>): Promise<TeamMember | undefined> {
-    const result = await db.update(teamMembers).set(member as any).where(eq(teamMembers.id, id)).returning();
-    if (result[0]) {
-      await this.mirrorTeamMemberToCompanyMember(result[0]).catch((err) => {
-        console.warn('[LU-DD-3] mirror team→company on update failed:', err?.message);
+    const memberAny = member as any;
+    // Try update on company_members first (the new source of truth).
+    const cmExisting = await db.select().from(companyMembers).where(eq(companyMembers.id, id)).limit(1);
+    if (cmExisting[0]) {
+      const cmRow = await db.update(companyMembers)
+        .set({
+          ...(memberAny.userId !== undefined ? { userId: memberAny.userId } : {}),
+          ...(memberAny.role !== undefined ? { role: memberAny.role } : {}),
+          ...(memberAny.status !== undefined ? { status: memberAny.status } : {}),
+          ...(memberAny.joinedAt !== undefined ? { joinedAt: memberAny.joinedAt } : {}),
+          ...(memberAny.name !== undefined ? { name: memberAny.name } : {}),
+          ...(memberAny.department !== undefined ? { department: memberAny.department } : {}),
+          ...(memberAny.departmentId !== undefined ? { departmentId: memberAny.departmentId } : {}),
+          ...(memberAny.avatar !== undefined ? { avatar: memberAny.avatar } : {}),
+          ...(memberAny.permissions !== undefined ? { permissions: memberAny.permissions } : {}),
+        } as any)
+        .where(eq(companyMembers.id, id))
+        .returning();
+      if (cmRow[0]) {
+        await this.mirrorCompanyMemberToTeamMember(cmRow[0]).catch((err) => {
+          console.warn('[LU-DD-3] mirror company→team on updateTeamMember failed:', err?.message);
+        });
+        return this.companyMemberToTeamMember(cmRow[0]);
+      }
+    }
+    // Back-compat: ID belonged to team_members only (pre-consolidation
+    // row that hasn't been mirrored). Fall back to the legacy path,
+    // which itself mirrors into company_members.
+    const tmResult = await db.update(teamMembers).set(member as any).where(eq(teamMembers.id, id)).returning();
+    if (tmResult[0]) {
+      await this.mirrorTeamMemberToCompanyMember(tmResult[0]).catch((err) => {
+        console.warn('[LU-DD-3] mirror team→company on updateTeamMember (fallback) failed:', err?.message);
       });
     }
-    return result[0];
+    return tmResult[0];
   }
 
   async deleteTeamMember(id: string): Promise<boolean> {
-    // Read the row first so we can mirror the delete to company_members.
-    const existing = await db.select().from(teamMembers).where(eq(teamMembers.id, id)).limit(1);
-    const result = await db.delete(teamMembers).where(eq(teamMembers.id, id)).returning();
-    if (existing[0]) {
-      // Only delete the company_members row if it was a pure mirror — i.e.
-      // no userId attached suggesting it's actively being managed elsewhere.
-      // Conservative deletion: match on (companyId, email) and only remove
-      // when the row hasn't been promoted to an active membership.
-      await this.removeMirroredCompanyMember(existing[0]).catch((err) => {
-        console.warn('[LU-DD-3] mirror team→company on delete failed:', err?.message);
+    // Try company_members first (new source of truth), then fall back
+    // to team_members for legacy IDs.
+    const cmExisting = await db.select().from(companyMembers).where(eq(companyMembers.id, id)).limit(1);
+    if (cmExisting[0]) {
+      const cmRow = await db.delete(companyMembers).where(eq(companyMembers.id, id)).returning();
+      await this.removeMirroredTeamMember(cmExisting[0]).catch((err) => {
+        console.warn('[LU-DD-3] mirror company→team on deleteTeamMember failed:', err?.message);
+      });
+      return cmRow.length > 0;
+    }
+    const tmExisting = await db.select().from(teamMembers).where(eq(teamMembers.id, id)).limit(1);
+    const tmRow = await db.delete(teamMembers).where(eq(teamMembers.id, id)).returning();
+    if (tmExisting[0]) {
+      await this.removeMirroredCompanyMember(tmExisting[0]).catch((err) => {
+        console.warn('[LU-DD-3] mirror team→company on deleteTeamMember (fallback) failed:', err?.message);
       });
     }
-    return result.length > 0;
+    return tmRow.length > 0;
   }
 
   // LU-DD-3 — Parallel-write helpers. Idempotent UPSERT keyed by
@@ -754,12 +827,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getTeamMemberByEmail(email: string): Promise<TeamMember | undefined> {
-    const result = await db.select().from(teamMembers).where(eq(teamMembers.email, email)).limit(1);
-    return result[0];
+    // LU-DD-3 Phase 3 — read from company_members (source of truth).
+    const result = await db.select().from(companyMembers)
+      .where(sql`LOWER(${companyMembers.email}) = LOWER(${email})`)
+      .limit(1);
+    if (!result[0]) return undefined;
+    return this.companyMemberToTeamMember(result[0]);
   }
 
   async getTeamMembersByEmail(email: string): Promise<TeamMember[]> {
-    return db.select().from(teamMembers).where(eq(teamMembers.email, email));
+    const result = await db.select().from(companyMembers)
+      .where(sql`LOWER(${companyMembers.email}) = LOWER(${email})`);
+    return result.map((cm) => this.companyMemberToTeamMember(cm));
   }
 
   // ==================== TRANSFER TRACKING FOR SECURITY ====================
