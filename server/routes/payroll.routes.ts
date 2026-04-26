@@ -169,13 +169,15 @@ router.get("/payroll/tax-estimate", requireAuth, async (req, res) => {
 
 router.get("/payroll/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
+    // AUD-PR-002 — fail-closed if no company context; storage-level
+    // companyId AND-clause prevents cross-tenant id-guessing.
     const company = await resolveUserCompany(req);
-    const entry = await storage.getPayrollEntry(param(req.params.id));
+    if (!company?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
+    const entry = await storage.getPayrollEntryInCompany(param(req.params.id), company.companyId);
     if (!entry) {
       return res.status(404).json({ error: "Payroll entry not found" });
-    }
-    if (company && !await verifyCompanyAccess(entry.companyId, company.companyId)) {
-      return res.status(403).json({ error: "Access denied" });
     }
     res.json(entry);
   } catch (error) {
@@ -191,12 +193,18 @@ router.post("/payroll", requireAuth, requireAdmin, async (req, res) => {
     }
     const { employeeId, employeeName, department, country, currency, salary, bonus, deductions, deductionBreakdown, payDate, recurring, frequency, email } = result.data;
     const company = await resolveUserCompany(req);
+    // AUD-PR-007 — fail-closed when company resolution is missing so we
+    // never write a payroll row with NULL companyId (which would be
+    // visible to /payroll/process across tenants under the old code).
+    if (!company?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
     const payoutDestinationId = req.body.payoutDestinationId || null;
 
     // Default country/currency from company settings when not provided
     let resolvedCountry = country || null;
     let resolvedCurrency = currency || null;
-    if (company?.companyId && (!resolvedCountry || !resolvedCurrency)) {
+    if (!resolvedCountry || !resolvedCurrency) {
       const companyRecord = await storage.getCompany(company.companyId);
       if (companyRecord) {
         resolvedCountry = resolvedCountry || (companyRecord as any).country || 'US';
@@ -252,7 +260,7 @@ router.post("/payroll", requireAuth, requireAdmin, async (req, res) => {
       recurring: recurring || false,
       frequency: recurring ? (frequency || 'monthly') : 'once',
       nextPayDate: recurring ? computeNextDate(actualPayDate, frequency || 'monthly') : null,
-      companyId: company?.companyId,
+      companyId: company.companyId,
       email: email || null,
       bankName,
       accountNumber,
@@ -272,7 +280,13 @@ router.patch("/payroll/:id", requireAuth, requireAdmin, async (req, res) => {
     if (!result.success) {
       return res.status(400).json({ error: "Invalid payroll data", details: result.error.issues });
     }
-    const entry = await storage.updatePayrollEntry(param(req.params.id), result.data);
+    // AUD-PR-004 — companyId AND-clause at the storage layer; cross-tenant
+    // ids return undefined (treat as not-found, do not leak existence).
+    const company = await resolveUserCompany(req);
+    if (!company?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
+    const entry = await storage.updatePayrollEntryInCompany(param(req.params.id), company.companyId, result.data);
     if (!entry) {
       return res.status(404).json({ error: "Payroll entry not found" });
     }
@@ -284,7 +298,12 @@ router.patch("/payroll/:id", requireAuth, requireAdmin, async (req, res) => {
 
 router.delete("/payroll/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
-    const deleted = await storage.deletePayrollEntry(param(req.params.id));
+    // AUD-PR-005 — same companyId guard as PATCH.
+    const company = await resolveUserCompany(req);
+    if (!company?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
+    const deleted = await storage.deletePayrollEntryInCompany(param(req.params.id), company.companyId);
     if (!deleted) {
       return res.status(404).json({ error: "Payroll entry not found" });
     }
@@ -296,7 +315,17 @@ router.delete("/payroll/:id", requireAuth, requireAdmin, async (req, res) => {
 
 router.post("/payroll/process", financialLimiter, requireAuth, requireAdmin, requirePin, async (req, res) => {
   try {
-    const entries = await storage.getPayroll();
+    // AUD-PR-001 — fail-closed if no company context, then scope the
+    // pending-entries query to the caller's tenant. The previous code
+    // called storage.getPayroll() with NO companyId, which returns ALL
+    // payroll rows from ALL companies — meaning a "Run payroll" click in
+    // Tenant A could initiate real Stripe / Paystack transfers for
+    // employees in Tenants B / C / etc.
+    const company = await resolveUserCompany(req);
+    if (!company?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
+    const entries = await storage.getPayroll(company.companyId);
     // Idempotency: only process entries that are strictly 'pending'
     // Skip any already in 'processing', 'completed', or 'paid' to prevent double-pay
     const pendingEntries = entries.filter(
@@ -458,7 +487,13 @@ router.post("/payroll/process", financialLimiter, requireAuth, requireAdmin, req
 // Pay individual employee — initiates REAL bank transfer via Stripe/Paystack
 router.post("/payroll/:id/pay", requireAuth, requireAdmin, requirePin, async (req, res) => {
   try {
-    const entry = await storage.getPayrollEntry(param(req.params.id));
+    // AUD-PR-002 — scoped fetch. Cross-tenant ids surface as 404 to avoid
+    // leaking which payroll IDs exist in other companies.
+    const company = await resolveUserCompany(req);
+    if (!company?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
+    const entry = await storage.getPayrollEntryInCompany(param(req.params.id), company.companyId);
     if (!entry) {
       return res.status(404).json({ error: "Payroll entry not found" });
     }
@@ -641,12 +676,30 @@ router.post("/payroll/batch-payout", requireAuth, requireAdmin, requirePin, asyn
     // Never trust client-supplied initiator identity
     const initiatedBy = (req as any).user?.uid || 'unknown';
 
+    // AUD-PR-003 — fail-closed if no company context, then resolve the
+    // requested ids through a scoped lookup. Any client-supplied id that
+    // belongs to a different tenant is silently dropped (returned in
+    // results[] as a 'skipped' entry rather than echoed as 'created').
+    const company = await resolveUserCompany(req);
+    if (!company?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
+    const ownedEntries = await storage.getPayrollEntriesByIdsInCompany(payrollIds, company.companyId);
+    const ownedById = new Map<string, typeof ownedEntries[number]>();
+    for (const e of ownedEntries) ownedById.set(e.id, e);
+
     const results: any[] = [];
 
     for (const payrollId of payrollIds) {
       try {
-        const entry = await storage.getPayrollEntry(payrollId);
-        if (!entry || entry.status === 'paid') continue;
+        const entry = ownedById.get(payrollId);
+        if (!entry) {
+          // Either the id doesn't exist or it belongs to another tenant —
+          // either way, refuse without leaking which.
+          results.push({ payrollId, status: 'skipped', reason: 'not-found-or-cross-tenant' });
+          continue;
+        }
+        if (entry.status === 'paid') continue;
 
         // Get employee's payout destination
         const destinations = await storage.getPayoutDestinations(entry.employeeId);
