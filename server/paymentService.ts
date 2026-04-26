@@ -1,6 +1,50 @@
 import { getUncachableStripeClient, getStripeClient } from './stripeClient';
 import { paystackClient, validateTransferDetails, validateStripeBankDetails } from './paystackClient';
 import { Money, paymentLogger, validateCurrencyForProvider, mapPaymentError } from './utils/paymentUtils';
+import { storage } from './storage';
+
+// LU-DD-2 / AUD-DD-MT-005
+// Server-issued companyId index for payment intents. Best-effort write —
+// failure to index a payment intent does NOT fail the payment itself, but
+// is logged as a warning so ops can spot the gap. The webhook resolver
+// falls back to metadata.companyId when no index row is present.
+async function indexProviderIntent(input: {
+  provider: 'stripe' | 'paystack';
+  providerIntentId: string | null | undefined;
+  kind: 'payment_intent' | 'charge' | 'transfer' | 'payout';
+  metadata: Record<string, unknown> | undefined;
+}): Promise<void> {
+  if (!input.providerIntentId) return;
+  const meta = (input.metadata ?? {}) as Record<string, unknown>;
+  const companyId = (meta.companyId as string | undefined) ?? null;
+  const userId = (meta.userId as string | undefined) ?? null;
+
+  try {
+    const result = await storage.createPaymentIntentIndex({
+      provider: input.provider,
+      providerIntentId: input.providerIntentId,
+      kind: input.kind,
+      companyId,
+      userId,
+      metadataCompanyId: companyId,
+      metadata: meta,
+    } as any);
+    if (!result) {
+      paymentLogger.warn('payment_intent_index_write_skipped', {
+        provider: input.provider,
+        providerIntentId: input.providerIntentId,
+        kind: input.kind,
+      });
+    }
+  } catch (err) {
+    paymentLogger.warn('payment_intent_index_write_failed', {
+      provider: input.provider,
+      providerIntentId: input.providerIntentId,
+      kind: input.kind,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 // Import from shared constants — single source of truth
 export { REGION_CONFIGS, getRegionConfig, getPaymentProvider, SUPPORTED_COUNTRIES, getCountryConfig, getProviderForCountry, isPaystackCountry, getBankListKey } from '../shared/constants';
@@ -33,6 +77,13 @@ export const paymentService = {
           `${process.env.APP_URL}/api/paystack/callback` :
           undefined);
         const result = await paystackClient.initializeTransaction(email, amount, currency, metadata, paystackCallback);
+        // LU-DD-2: server-issue the (provider, reference) → companyId mapping
+        await indexProviderIntent({
+          provider: 'paystack',
+          providerIntentId: result.data.reference,
+          kind: 'charge',
+          metadata,
+        });
         return {
           provider: 'paystack' as const,
           authorizationUrl: result.data.authorization_url,
@@ -52,6 +103,13 @@ export const paymentService = {
         }, {
           idempotencyKey,
         });
+        // LU-DD-2: server-issue the (provider, payment_intent.id) → companyId mapping
+        await indexProviderIntent({
+          provider: 'stripe',
+          providerIntentId: paymentIntent.id,
+          kind: 'payment_intent',
+          metadata,
+        });
         return {
           provider: 'stripe' as const,
           clientSecret: paymentIntent.client_secret,
@@ -61,7 +119,7 @@ export const paymentService = {
     });
   },
 
-  async initiateTransfer(amount: number, recipientDetails: any, countryCode: string, reason: string) {
+  async initiateTransfer(amount: number, recipientDetails: any, countryCode: string, reason: string, metadata?: Record<string, unknown>) {
     const provider = getPaymentProvider(countryCode);
     const { currency } = getCurrencyForCountry(countryCode);
 
@@ -93,6 +151,22 @@ export const paymentService = {
           recipientResult.data.recipient_code,
           reason
         );
+        // LU-DD-2: index by transfer_code (the canonical webhook key for
+        // Paystack transfer events) AND by reference (some events use it).
+        await indexProviderIntent({
+          provider: 'paystack',
+          providerIntentId: transfer.data.transfer_code,
+          kind: 'transfer',
+          metadata,
+        });
+        if (transfer.data.reference && transfer.data.reference !== transfer.data.transfer_code) {
+          await indexProviderIntent({
+            provider: 'paystack',
+            providerIntentId: transfer.data.reference,
+            kind: 'transfer',
+            metadata,
+          });
+        }
         return {
           provider: 'paystack' as const,
           transferCode: transfer.data.transfer_code,
@@ -126,6 +200,13 @@ export const paymentService = {
             description: reason,
           }, {
             idempotencyKey: transferIdempotencyKey,
+          });
+          // LU-DD-2: index Stripe Connect transfer by id
+          await indexProviderIntent({
+            provider: 'stripe',
+            providerIntentId: transfer.id,
+            kind: 'transfer',
+            metadata,
           });
           return {
             provider: 'stripe' as const,
@@ -196,7 +277,19 @@ export const paymentService = {
             countryCode,
             recipientAccount: recipientDetails.accountNumber || recipientDetails.iban || '',
             recipientBank: recipientDetails.routingNumber || recipientDetails.sortCode || recipientDetails.bsb || '',
+            // LU-DD-2: thread the caller's companyId/userId into Stripe metadata
+            // so the resolver's fallback path still works for in-flight events.
+            ...((metadata?.companyId as string) ? { companyId: metadata!.companyId as string } : {}),
+            ...((metadata?.userId as string) ? { userId: metadata!.userId as string } : {}),
           },
+        });
+
+        // LU-DD-2: index Stripe payout by payout.id
+        await indexProviderIntent({
+          provider: 'stripe',
+          providerIntentId: payout.id,
+          kind: 'payout',
+          metadata,
         });
 
         return {

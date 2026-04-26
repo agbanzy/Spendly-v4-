@@ -246,6 +246,20 @@ async function processScheduledPayments() {
               `Scheduled payment - ${payment.type}`
             );
             reference = transferResponse.data?.transfer_code || '';
+            // LU-DD-2: index the scheduled-payment-driven Paystack transfer
+            if (reference) {
+              await storage.createPaymentIntentIndex({
+                provider: 'paystack',
+                providerIntentId: reference,
+                kind: 'transfer',
+                companyId: (payment as any).companyId ?? null,
+                userId: null,
+                metadataCompanyId: (payment as any).companyId ?? null,
+                metadata: { scheduledPaymentId: payment.id, type: payment.type, source: 'scheduler' },
+              } as any).catch((err: any) =>
+                logger.warn({ err, reference }, 'payment_intent_index write failed for scheduled Paystack transfer'),
+              );
+            }
           } catch (transferErr: any) {
             await storage.updateBalances({ [balanceField]: String(currentBalance) });
             throw transferErr;
@@ -258,9 +272,28 @@ async function processScheduledPayments() {
               currency: currency.toLowerCase(),
               method: 'standard',
               description: `Scheduled payment - ${payment.type}`,
-              metadata: { scheduledPaymentId: payment.id, type: payment.type },
+              metadata: {
+                scheduledPaymentId: payment.id,
+                type: payment.type,
+                // LU-DD-2: include companyId in Stripe metadata as the
+                // fallback path; the index row below is the authoritative
+                // source.
+                ...((payment as any).companyId ? { companyId: (payment as any).companyId } : {}),
+              },
             });
             reference = payout.id;
+            // LU-DD-2: index the scheduled-payment-driven Stripe payout
+            await storage.createPaymentIntentIndex({
+              provider: 'stripe',
+              providerIntentId: payout.id,
+              kind: 'payout',
+              companyId: (payment as any).companyId ?? null,
+              userId: null,
+              metadataCompanyId: (payment as any).companyId ?? null,
+              metadata: { scheduledPaymentId: payment.id, type: payment.type, source: 'scheduler' },
+            } as any).catch((err: any) =>
+              logger.warn({ err, payoutId: payout.id }, 'payment_intent_index write failed for scheduled Stripe payout'),
+            );
           } catch (stripeErr: any) {
             await storage.updateBalances({ [balanceField]: String(currentBalance) });
             throw stripeErr;
