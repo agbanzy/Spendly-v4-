@@ -269,13 +269,61 @@ router.get("/payouts/:id", requireAuth, async (req, res) => {
   }
 });
 
+// AUD-DB-001 — strict Zod schema for payout creation. Previously the
+// endpoint accepted arbitrary body fields with no validation, including
+// negative amounts, NaN, exponential notation, and a client-supplied
+// `initiatedBy` fallback that could forge audit-trail attribution.
+const createPayoutSchema = z.object({
+  type: z.enum(['expense_reimbursement', 'payroll', 'vendor_payment', 'other']),
+  amount: z
+    .union([z.string(), z.number()])
+    .transform((v) => (typeof v === 'number' ? v.toString() : v))
+    .pipe(
+      z.string().regex(/^\d+(\.\d{1,2})?$/, 'amount must be a non-negative decimal with up to 2 places')
+        .refine((v) => parseFloat(v) > 0, 'amount must be greater than zero'),
+    ),
+  currency: z.string().regex(/^[A-Z]{3}$/, 'currency must be a 3-letter ISO code'),
+  recipientType: z.enum(['employee', 'vendor', 'self', 'partner']),
+  recipientId: z.string().min(1).max(64),
+  recipientName: z.string().min(1).max(120),
+  destinationId: z.string().min(1).max(64).optional(),
+  relatedEntityType: z.enum(['expense', 'payroll', 'invoice', 'manual']).optional(),
+  relatedEntityId: z.string().min(1).max(64).optional(),
+});
+
 // Initiate payout (expense reimbursement, payroll, vendor payment)
-router.post("/payouts", requireAuth, async (req, res) => {
+//
+// AUD-DB-001 — this endpoint used to be open to any authenticated user
+// (only `requireAuth`), with no Zod validation, no companyId scoping,
+// and a client-supplied `initiatedBy` fallback. That combined with
+// AUD-DB-002 (cancel-credits-wallet bug) gave any admin a one-click
+// money-creation primitive. Now: requireAdmin + requirePin + Zod +
+// server-issued companyId + server-issued initiatedBy.
+router.post("/payouts", requireAuth, requireAdmin, requirePin, async (req, res) => {
   try {
+    const parsed = createPayoutSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid payout data", details: parsed.error.issues });
+    }
     const {
       type, amount, currency, recipientType, recipientId, recipientName,
-      destinationId, relatedEntityType, relatedEntityId, initiatedBy
-    } = req.body;
+      destinationId, relatedEntityType, relatedEntityId,
+    } = parsed.data;
+
+    // AUD-DB-001 — fail-closed if no company context. The created row
+    // is server-stamped with companyId so /process and /cancel can
+    // never operate on an orphan row.
+    const company = await resolveUserCompany(req);
+    if (!company?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
+
+    // AUD-DB-008 — require a valid initiator from the authenticated
+    // session. Drop the client-supplied `initiatedBy` body fallback.
+    const initiatedBy = (req as any).user?.uid || (req as any).user?.cognitoSub;
+    if (!initiatedBy) {
+      return res.status(401).json({ error: "Authenticated initiator required" });
+    }
 
     // Get payout destination
     let destination: any = null;
@@ -287,9 +335,8 @@ router.post("/payouts", requireAuth, async (req, res) => {
         provider = destination.provider;
 
         // Validate currency matches destination country
-        const payoutCurrency = currency || 'USD';
         const countryCode = destination.country || 'US';
-        const currencyCheck = validatePayoutCurrency(payoutCurrency, countryCode);
+        const currencyCheck = validatePayoutCurrency(currency, countryCode);
         if (!currencyCheck.valid) {
           return res.status(400).json({
             error: currencyCheck.error,
@@ -303,8 +350,8 @@ router.post("/payouts", requireAuth, async (req, res) => {
     // Create payout record
     const payout = await storage.createPayout({
       type,
-      amount: amount.toString(),
-      currency: currency || 'USD',
+      amount,
+      currency,
       status: 'pending',
       recipientType,
       recipientId,
@@ -313,8 +360,9 @@ router.post("/payouts", requireAuth, async (req, res) => {
       provider,
       relatedEntityType,
       relatedEntityId,
-      initiatedBy: (req as any).user?.cognitoSub || initiatedBy,
-    });
+      initiatedBy,
+      companyId: company.companyId,
+    } as any);
 
     res.status(201).json(payout);
   } catch (error: any) {
@@ -342,16 +390,20 @@ router.post("/payouts/:id/approve", requireAuth, requireAdmin, requirePin, async
     const settings = await getSettingsForRequest(req);
     const dualApprovalThreshold = parseFloat((settings as any)?.dualApprovalThreshold?.toString() || '5000');
 
+    // AUD-DB-009 — initiator-cannot-approve-self is now enforced at ALL
+    // amounts, not just above threshold. The dual-approval REQUIREMENT
+    // remains gated by the threshold; the four-eyes invariant is
+    // independent of amount and was previously the precondition for
+    // the AUD-DB-002 money-creation chain.
+    if (payout.initiatedBy && payout.initiatedBy === userId) {
+      return res.status(403).json({
+        error: "Maker-checker policy: the admin who initiated this payout cannot approve it",
+        initiatedBy: payout.initiatedBy,
+      });
+    }
+
     // Check if dual approval is needed
     if (amount >= dualApprovalThreshold) {
-      // Maker-checker: initiator cannot be the approver
-      if (payout.initiatedBy === userId) {
-        return res.status(403).json({
-          error: "High-value payouts require approval from a different admin (maker-checker policy)",
-          requiresDualApproval: true,
-          threshold: dualApprovalThreshold,
-        });
-      }
 
       // Check if already has first approval
       const metadata = payout.metadata ? JSON.parse(JSON.stringify(payout.metadata)) : {};
@@ -908,7 +960,17 @@ router.post("/payouts/batch", requireAuth, requireAdmin, requirePin, async (req,
 
 // ==================== PAYOUT CANCELLATION ====================
 
-router.post("/payouts/:id/cancel", requireAuth, requireAdmin, async (req, res) => {
+// AUD-DB-002 + AUD-DB-003 — cancel is now PIN-gated and the
+// recipient-wallet-credit branch is removed. The previous code credited
+// the recipient's wallet when status='approved' on the (false) belief
+// that approval implied a debit; in fact `atomicPayoutDebit` only fires
+// in /process, so crediting at cancel created money out of nothing.
+//
+// `cancellableStatuses` already excludes any state past which the company
+// has been debited (anything ≥ 'processing'), so removing the credit
+// branch is correct: if /process never ran, there is nothing to undo;
+// if /process ran, cancel is already disallowed.
+router.post("/payouts/:id/cancel", requireAuth, requireAdmin, requirePin, async (req, res) => {
   try {
     const userId = (req as any).user?.uid;
     const userName = await getAuditUserName(req);
@@ -930,29 +992,12 @@ router.post("/payouts/:id/cancel", requireAuth, requireAdmin, async (req, res) =
 
     const previousStatus = payout.status;
 
-    // If the payout was approved, the balance may have been debited — refund it
-    let balanceRefunded = false;
-    if (payout.status === 'approved' && payout.recipientType === 'employee' && payout.recipientId) {
-      try {
-        // Check if a wallet debit was made for this payout
-        const recipientWallet = await storage.getWalletByUserId(payout.recipientId, payout.currency);
-        if (recipientWallet) {
-          // Credit back the amount (reverse the debit)
-          await storage.creditWallet(
-            recipientWallet.id,
-            parseFloat(payout.amount),
-            'payout_cancellation_refund',
-            `Refund for cancelled payout: ${payout.id}`,
-            `CANCEL-${payout.id}`,
-            { payoutId: payout.id, cancelledBy: userId }
-          );
-          balanceRefunded = true;
-        }
-      } catch (refundErr: any) {
-        console.error(`Failed to refund balance for cancelled payout ${payout.id}:`, refundErr.message);
-        // Continue with cancellation even if refund fails — log for manual review
-      }
-    }
+    // AUD-DB-002 — DELETED: previous code credited recipient wallet on
+    // status='approved'. That credit had no corresponding company debit
+    // (debit lives in /process, line 535) and was therefore ex-nihilo
+    // money creation. Cancel from any cancellableStatus has nothing to
+    // undo on the company ledger because /process never fired.
+    const balanceRefunded = false;
 
     // Update payout status to cancelled
     const updatedPayout = await storage.updatePayout(payout.id, {
@@ -1007,7 +1052,9 @@ router.post("/payouts/:id/cancel", requireAuth, requireAdmin, async (req, res) =
 
 // ==================== PAYOUT REJECTION ====================
 
-router.post("/payouts/:id/reject", requireAuth, requireAdmin, async (req, res) => {
+// AUD-DB-003 — requirePin added. Reject changes payout state and
+// blocks any further processing; PIN gate matches /approve and /cancel.
+router.post("/payouts/:id/reject", requireAuth, requireAdmin, requirePin, async (req, res) => {
   try {
     const userId = (req as any).user?.uid;
     const userName = await getAuditUserName(req);
