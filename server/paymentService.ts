@@ -151,7 +151,15 @@ export const paymentService = {
       throw new Error('Invalid transfer amount');
     }
 
-    return paymentLogger.trackOperation('initiate_transfer', { provider, amount, currency, countryCode, reason }, async () => {
+    // AUD-DB-004 / 005 / 006 / 011 — derive idempotency tokens from the
+    // server-issued payout id in metadata. A retry that lands more than 60
+    // seconds after the first attempt now produces the SAME token, so
+    // Stripe / Paystack dedup correctly. Falls back to a time-windowed key
+    // only when no payoutId is present (legacy callers); fallback path is
+    // tracked under follow-up cleanup.
+    const payoutId = (metadata?.payoutId as string | undefined) || undefined;
+
+    return paymentLogger.trackOperation('initiate_transfer', { provider, amount, currency, countryCode, reason, payoutId }, async () => {
       if (provider === 'paystack') {
         const { accountNumber, bankCode, accountName } = recipientDetails;
         const recipientType = recipientDetails.type; // Allow override (e.g., 'mobile_money')
@@ -170,10 +178,16 @@ export const paymentService = {
           countryCode,
           recipientType
         );
+        // AUD-DB-005 — pass the payout id through Paystack's `reference`
+        // field. Paystack dedups transfers by reference; a retry with the
+        // same reference returns the original transfer rather than
+        // creating a second one.
+        const paystackReference = payoutId ? `payout-${payoutId}` : undefined;
         const transfer = await paystackClient.initiateTransfer(
           amount,
           recipientResult.data.recipient_code,
-          reason
+          reason,
+          paystackReference,
         );
         // LU-DD-2: index by transfer_code (the canonical webhook key for
         // Paystack transfer events) AND by reference (some events use it).
@@ -216,7 +230,13 @@ export const paymentService = {
         // If stripeAccountId is provided, use Connect Transfer (marketplace model)
         if (recipientDetails.stripeAccountId) {
           const userRef = recipientDetails.accountName || 'unknown';
-          const transferIdempotencyKey = `txfr-${recipientDetails.stripeAccountId}-${amount}-${Math.floor(Date.now() / 60000)}`;
+          // AUD-DB-006 — derive idempotency key from payout id (stable
+          // across retries) instead of the previous time-windowed key
+          // (`txfr-${stripeAccountId}-${amount}-${Math.floor(Date.now() / 60000)}`)
+          // which let retries > 60s apart produce duplicate transfers.
+          const transferIdempotencyKey = payoutId
+            ? `txfr-payout-${payoutId}`
+            : `txfr-${recipientDetails.stripeAccountId}-${amount}-${Math.floor(Date.now() / 60000)}`;
           const transfer = await stripe.transfers.create({
             amount: Money.toMinor(amount),
             currency: recipientDetails.currency || currency.toLowerCase(),
@@ -289,24 +309,33 @@ export const paymentService = {
           console.error('Failed to create bank token:', tokenErr.message);
         }
 
+        // AUD-DB-004 — derive idempotency key from payout id. Previously
+        // stripe.payouts.create was called with no second-arg options
+        // object, so any retry produced a duplicate payout. Now: a retry
+        // with the same payoutId returns the original payout from Stripe.
+        const payoutIdempotencyKey = payoutId ? `payout-${payoutId}` : undefined;
         // Create a Stripe payout (requires the platform to have sufficient balance)
-        const payout = await stripe.payouts.create({
-          amount: Money.toMinor(amount),
-          currency: currency.toLowerCase(),
-          method: 'standard',
-          description: reason,
-          ...(destinationBankAccountId ? { destination: destinationBankAccountId } : {}),
-          metadata: {
-            recipientName: recipientDetails.accountName,
-            countryCode,
-            recipientAccount: recipientDetails.accountNumber || recipientDetails.iban || '',
-            recipientBank: recipientDetails.routingNumber || recipientDetails.sortCode || recipientDetails.bsb || '',
-            // LU-DD-2: thread the caller's companyId/userId into Stripe metadata
-            // so the resolver's fallback path still works for in-flight events.
-            ...((metadata?.companyId as string) ? { companyId: metadata!.companyId as string } : {}),
-            ...((metadata?.userId as string) ? { userId: metadata!.userId as string } : {}),
+        const payout = await stripe.payouts.create(
+          {
+            amount: Money.toMinor(amount),
+            currency: currency.toLowerCase(),
+            method: 'standard',
+            description: reason,
+            ...(destinationBankAccountId ? { destination: destinationBankAccountId } : {}),
+            metadata: {
+              recipientName: recipientDetails.accountName,
+              countryCode,
+              recipientAccount: recipientDetails.accountNumber || recipientDetails.iban || '',
+              recipientBank: recipientDetails.routingNumber || recipientDetails.sortCode || recipientDetails.bsb || '',
+              // LU-DD-2: thread the caller's companyId/userId into Stripe metadata
+              // so the resolver's fallback path still works for in-flight events.
+              ...((metadata?.companyId as string) ? { companyId: metadata!.companyId as string } : {}),
+              ...((metadata?.userId as string) ? { userId: metadata!.userId as string } : {}),
+              ...(payoutId ? { payoutId } : {}),
+            },
           },
-        });
+          payoutIdempotencyKey ? { idempotencyKey: payoutIdempotencyKey } : undefined,
+        );
 
         // LU-DD-2: index Stripe payout by payout.id
         await indexProviderIntent({

@@ -343,13 +343,18 @@ export const paystackClient = {
     return paystackRequest('/transferrecipient', 'POST', payload);
   },
 
-  async initiateTransfer(amount: number, recipientCode: string, reason: string) {
+  // AUD-DB-005 — `reference` is Paystack's idempotency mechanism for
+  // /transfer. A retry with the same reference returns the original
+  // transfer rather than creating a second one. Caller (paymentService)
+  // passes `payout-${ourPayoutId}` so the key is stable across retries.
+  async initiateTransfer(amount: number, recipientCode: string, reason: string, reference?: string) {
     const amountInKobo = Math.round(amount * 100);
     return paystackRequest('/transfer', 'POST', {
       source: 'balance',
       amount: amountInKobo,
       recipient: recipientCode,
       reason,
+      ...(reference ? { reference } : {}),
     });
   },
 
