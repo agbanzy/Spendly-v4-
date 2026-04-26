@@ -16,6 +16,30 @@ import { notificationService } from "../services/notification-service";
 
 const router = express.Router();
 
+// AUD-DB-007 — daily-payout limits (per company, per currency).
+// Mirrors the per-currency `DAILY_LIMITS` map used by
+// /api/payment/transfer (payments.routes.ts:357). The values are in
+// the local currency unit; the audit doc proposed making these
+// configurable per-company via a settings UI as a follow-up — until
+// that ships, the hardcoded defaults below are the floor. Setting the
+// per-company override to a higher value is the planned next step
+// once the Settings UI lands (out of scope for this PR).
+const DAILY_PAYOUT_LIMITS: Record<string, number> = {
+  USD: 100000,    // $100k
+  EUR: 90000,     // €90k
+  GBP: 80000,     // £80k
+  AUD: 150000,    // A$150k
+  CAD: 130000,    // C$130k
+  NGN: 100000000, // ₦100M
+  GHS: 1000000,   // GH₵1M
+  ZAR: 2000000,   // R2M
+  KES: 10000000,  // KSh10M
+  EGP: 4000000,   // E£4M
+  RWF: 100000000, // RF100M
+  XOF: 60000000,  // CFA60M
+  DEFAULT: 100000,
+};
+
 // ==================== PAYOUT CURRENCY VALIDATION ====================
 
 /**
@@ -565,6 +589,23 @@ router.post("/payouts/:id/process", requireAuth, requireAdmin, requirePin, async
     // `payout = claimed` reassignment below.
     const companyIdForDebit: string = payout.companyId;
 
+    // AUD-DB-007 — daily payout limit gate (per company, per currency).
+    // Mirrors the per-currency limits in /api/payment/transfer
+    // (payments.routes.ts:357). Checked BEFORE the claim so a
+    // limit-exceeded request doesn't dirty the row.
+    const requestedAmount = parseFloat(payout.amount);
+    const dailyLimit = DAILY_PAYOUT_LIMITS[payout.currency] ?? DAILY_PAYOUT_LIMITS.DEFAULT;
+    const dailyTotal = await storage.getDailyPayoutTotalForCompany(payout.companyId, payout.currency);
+    if (dailyTotal + requestedAmount > dailyLimit) {
+      return res.status(429).json({
+        error: "Daily payout limit exceeded",
+        limit: dailyLimit,
+        used: dailyTotal,
+        requested: requestedAmount,
+        currency: payout.currency,
+      });
+    }
+
     // Step 1 — atomically claim the payout. If a concurrent caller
     // already moved status off pending/approved, claim returns null and
     // we reject without doing anything.
@@ -831,6 +872,23 @@ router.post("/payouts/batch", requireAuth, requireAdmin, requirePin, async (req,
           continue;
         }
         const companyIdForDebit: string = payout.companyId;
+
+        // AUD-DB-007 — daily payout limit gate. Same per-currency limits
+        // as /payouts/:id/process. Counted separately per row so a
+        // batch that crosses the threshold mid-iteration cuts off
+        // cleanly (the running total is the live DB sum on each loop).
+        const requestedAmount = parseFloat(payout.amount);
+        const dailyLimit = DAILY_PAYOUT_LIMITS[payout.currency] ?? DAILY_PAYOUT_LIMITS.DEFAULT;
+        const dailyTotal = await storage.getDailyPayoutTotalForCompany(payout.companyId, payout.currency);
+        if (dailyTotal + requestedAmount > dailyLimit) {
+          results.push({
+            payoutId,
+            status: 'skipped',
+            error: `Daily ${payout.currency} payout limit ${dailyLimit} would be exceeded (used: ${dailyTotal}, requested: ${requestedAmount})`,
+          });
+          skipped++;
+          continue;
+        }
 
         // Atomic claim — skip silently if the row was already taken.
         const claimed = await storage.claimPayoutForProcessing(payout.id);

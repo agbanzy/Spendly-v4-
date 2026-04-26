@@ -104,6 +104,10 @@ export interface IStorage {
   // AUD-DD-MT-008 — Optional companyId scopes the running total to a
   // single tenant. Pre-existing single-arg call sites continue to work.
   getDailyTransferTotal(userId: string, companyId?: string): Promise<number>;
+  // AUD-DB-007 — daily-payout-total for the disbursement /process and
+  // /batch routes. Sums today's live (non-cancelled / rejected / failed)
+  // payouts for a company in a given currency.
+  getDailyPayoutTotalForCompany(companyId: string, currency: string): Promise<number>;
   
   // Webhook idempotency
   isWebhookProcessed(eventId: string): Promise<boolean>;
@@ -2465,6 +2469,23 @@ export class DatabaseStorage implements IStorage {
   async getPayout(id: string): Promise<Payout | undefined> {
     const result = await db.select().from(payouts).where(eq(payouts.id, id)).limit(1);
     return result[0];
+  }
+
+  // AUD-DB-007 — sum today's "live" payouts for a company in a given
+  // currency. Excludes cancelled / rejected / failed because those did
+  // not move money out (or had compensating credits applied) and so
+  // shouldn't count against the daily limit. Statuses we DO count:
+  // pending, pending_second_approval, approved, processing, paid.
+  async getDailyPayoutTotalForCompany(companyId: string, currency: string): Promise<number> {
+    const today = new Date().toISOString().split('T')[0];
+    const rows = await db.select().from(payouts)
+      .where(and(
+        eq(payouts.companyId, companyId),
+        eq(payouts.currency, currency),
+        sql`DATE(${payouts.createdAt}) = ${today}`,
+        sql`${payouts.status} NOT IN ('cancelled', 'rejected', 'failed')`,
+      ));
+    return rows.reduce((sum, r) => sum + parseFloat(String(r.amount || 0)), 0);
   }
 
   async createPayout(payout: InsertPayout): Promise<Payout> {
