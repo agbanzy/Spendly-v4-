@@ -12,8 +12,7 @@ import { PhoneInput } from "@/components/phone-input";
 import { Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, User, Building2, CheckCircle2, Sparkles, Shield, Globe2, Zap } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SUPPORTED_COUNTRIES } from "@/lib/constants";
-
-const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+import { signupSchema, fieldErrorsFromZod } from "@shared/auth-schemas";
 
 type SignupField = "fullName" | "email" | "password" | "confirmPassword" | "terms";
 
@@ -41,28 +40,22 @@ export default function SignupPage() {
   const [errors, setErrors] = useState<Partial<Record<SignupField, string>>>({});
   const [touched, setTouched] = useState<Partial<Record<SignupField, boolean>>>({});
 
+  // LU-009 / AUD-FE-005: validation rules now live in shared/auth-schemas.ts
+  // so client and server share the same source of truth. The "terms" field
+  // in this form maps to the schema's `agreedToTerms` literal-true field.
   const validateField = (field: SignupField, value?: string): string | undefined => {
-    switch (field) {
-      case "fullName":
-        if (!(value || formData.fullName).trim()) return "Full name is required.";
-        if ((value || formData.fullName).trim().length < 2) return "Name must be at least 2 characters.";
-        return undefined;
-      case "email":
-        if (!(value || formData.email).trim()) return "Email is required.";
-        if (!emailRegex.test(value || formData.email)) return "Please enter a valid email.";
-        return undefined;
-      case "password":
-        if (!(value || formData.password)) return "Password is required.";
-        if ((value || formData.password).length < 8) return "Password must be at least 8 characters.";
-        return undefined;
-      case "confirmPassword":
-        if (!(value || formData.confirmPassword)) return "Please confirm your password.";
-        if ((value || formData.confirmPassword) !== formData.password) return "Passwords do not match.";
-        return undefined;
-      case "terms":
-        if (!agreedToTerms) return "You must agree to the terms.";
-        return undefined;
+    const draft: Record<string, unknown> = {
+      fullName: formData.fullName,
+      email: formData.email,
+      password: formData.password,
+      confirmPassword: formData.confirmPassword,
+      agreedToTerms,
+    };
+    if (field !== "terms" && value !== undefined) {
+      draft[field] = value;
     }
+    const errors = fieldErrorsFromZod(signupSchema, draft);
+    return field === "terms" ? errors.agreedToTerms : errors[field];
   };
 
   const handleBlur = (field: SignupField) => {
