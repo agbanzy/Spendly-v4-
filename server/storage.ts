@@ -1551,6 +1551,23 @@ export class DatabaseStorage implements IStorage {
     paidBy: string;
   }): Promise<{ walletTx: WalletTransaction; bill: Bill }> {
     return await db.transaction(async (tx) => {
+      // AUD-DD-BILL-003 — lock the BILL row first so the
+      // "already paid?" decision and the wallet debit happen under the
+      // same lock window. The route's outer status check still does
+      // first-pass rejection, but a concurrent caller that slipped past
+      // it is caught here.
+      const billLockRows = await tx.execute(
+        sql`SELECT id, status FROM bills WHERE id = ${params.billId} FOR UPDATE`
+      );
+      const billLock = billLockRows.rows[0] as any;
+      if (!billLock) {
+        throw new Error('Bill not found');
+      }
+      if (typeof billLock.status === 'string' && billLock.status.toLowerCase() === 'paid') {
+        // Caller (or a concurrent caller that won the race) already paid.
+        throw new Error('BILL_ALREADY_PAID');
+      }
+
       const walletRows = await tx.execute(
         sql`SELECT * FROM wallets WHERE id = ${params.walletId} FOR UPDATE`
       );
@@ -1588,6 +1605,13 @@ export class DatabaseStorage implements IStorage {
         createdAt: now,
       } as any).returning();
 
+      // AUD-DD-BILL-003 — additional defensive guard: the WHERE clause
+      // now matches the bill ID AND its status (still not 'paid'), so
+      // the second of two truly-simultaneous calls (which we tried to
+      // catch above with FOR UPDATE) cannot mark the bill paid twice
+      // even on schemas where row locks behave differently. Combined
+      // with the lock-then-check above, this gives belt-and-braces
+      // protection.
       const billResult = await tx.update(bills)
         .set({
           status: 'paid',
@@ -1599,8 +1623,17 @@ export class DatabaseStorage implements IStorage {
           walletTransactionId: walletTxResult[0].id,
           updatedAt: now,
         } as any)
-        .where(eq(bills.id, params.billId))
+        .where(and(
+          eq(bills.id, params.billId),
+          sql`LOWER(${bills.status}) <> 'paid'`,
+        ))
         .returning();
+      if (billResult.length === 0) {
+        // Race winner already updated the bill — abort so the wallet
+        // debit rolls back. Rare given the FOR UPDATE above, but cheap
+        // insurance.
+        throw new Error('BILL_ALREADY_PAID');
+      }
 
       // LU-001: also record in user-facing transactions ledger
       await this.bridgeWalletToTransaction(tx, {
