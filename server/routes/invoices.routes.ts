@@ -18,6 +18,20 @@ import { db } from "../db";
 
 const router = express.Router();
 
+// AUD-DD-INV-006 — invoice status state machine. Forward-only ranks
+// give the PATCH guard a way to refuse backwards transitions (e.g.
+// paid → pending) without enumerating every legal pair. Cancel is the
+// documented escape hatch for invalidating a wrongly-issued invoice.
+const INVOICE_STATUS_RANK: Record<string, number> = {
+  draft: 0,
+  pending: 1,
+  sent: 1,
+  partially_paid: 2,
+  overdue: 2,
+  paid: 3,
+  cancelled: 4,
+};
+
 // ==================== INVOICE PAYMENT TRACKING ====================
 
 /**
@@ -563,6 +577,26 @@ router.patch("/invoices/:id", requireAuth, async (req, res) => {
     if (userCompany?.companyId && !(await verifyCompanyAccess((existing as any).companyId, userCompany.companyId))) {
       return res.status(403).json({ error: "Access denied" });
     }
+
+    // AUD-DD-INV-006 — invoice status state-machine guard. Refuse a
+    // backwards transition (e.g. paid → pending) to keep the audit
+    // trail honest. Forward transitions are unconstrained — admins
+    // can always cancel or mark a stuck invoice.
+    const incomingStatus = (result.data as any).status;
+    if (incomingStatus && existing.status) {
+      const currentRank = INVOICE_STATUS_RANK[String(existing.status).toLowerCase()] ?? 0;
+      const incomingRank = INVOICE_STATUS_RANK[String(incomingStatus).toLowerCase()] ?? 0;
+      // Allow same-or-forward transitions and the cancel terminal;
+      // refuse a step backward (e.g. paid → pending) unless the
+      // target is 'cancelled', the documented escape hatch.
+      if (incomingRank < currentRank && String(incomingStatus).toLowerCase() !== 'cancelled') {
+        return res.status(409).json({
+          error: `Invoice status cannot move backwards from '${existing.status}' to '${incomingStatus}'. Use 'cancelled' to invalidate.`,
+          code: 'INVALID_INVOICE_STATUS_TRANSITION',
+        });
+      }
+    }
+
     const invoice = await storage.updateInvoice(param(req.params.id), result.data as any);
     if (!invoice) {
       return res.status(404).json({ error: "Invoice not found" });
