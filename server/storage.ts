@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and, sql, inArray } from "drizzle-orm";
 import { 
   users, expenses, transactions, bills, budgets, virtualCards, 
   teamMembers, payrollEntries, invoices, vendors, reports,
@@ -122,9 +122,17 @@ export interface IStorage {
   
   getPayroll(companyId?: string): Promise<PayrollEntry[]>;
   getPayrollEntry(id: string): Promise<PayrollEntry | undefined>;
+  // AUD-PR-001..005 — scoped variants enforce companyId at the storage
+  // layer so callers can't accidentally fetch / mutate cross-tenant rows.
+  // The unscoped versions remain for legacy callers but should be replaced
+  // over time. New money-moving routes MUST use the scoped versions.
+  getPayrollEntryInCompany(id: string, companyId: string): Promise<PayrollEntry | undefined>;
+  getPayrollEntriesByIdsInCompany(ids: string[], companyId: string): Promise<PayrollEntry[]>;
   createPayrollEntry(entry: CreatePayroll): Promise<PayrollEntry>;
   updatePayrollEntry(id: string, entry: Partial<Omit<PayrollEntry, 'id'>>): Promise<PayrollEntry | undefined>;
+  updatePayrollEntryInCompany(id: string, companyId: string, entry: Partial<Omit<PayrollEntry, 'id'>>): Promise<PayrollEntry | undefined>;
   deletePayrollEntry(id: string): Promise<boolean>;
+  deletePayrollEntryInCompany(id: string, companyId: string): Promise<boolean>;
   
   getInvoices(companyId?: string): Promise<Invoice[]>;
   getInvoice(id: string): Promise<Invoice | undefined>;
@@ -1129,6 +1137,27 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  // AUD-PR-002 — fetch-by-id with mandatory companyId AND-clause. Returns
+  // undefined when the id exists but belongs to another tenant, which the
+  // caller surfaces as 404 (treat unauthorized as not-found to avoid
+  // leaking which IDs exist across tenant boundaries).
+  async getPayrollEntryInCompany(id: string, companyId: string): Promise<PayrollEntry | undefined> {
+    const result = await db.select().from(payrollEntries)
+      .where(and(eq(payrollEntries.id, id), eq(payrollEntries.companyId, companyId)))
+      .limit(1);
+    return result[0];
+  }
+
+  // AUD-PR-003 — batch fetch with company AND-clause. Used by
+  // /payroll/batch-payout to filter client-supplied IDs to the caller's
+  // tenant before any payout side-effect runs.
+  async getPayrollEntriesByIdsInCompany(ids: string[], companyId: string): Promise<PayrollEntry[]> {
+    if (ids.length === 0) return [];
+    const result = await db.select().from(payrollEntries)
+      .where(and(inArray(payrollEntries.id, ids), eq(payrollEntries.companyId, companyId)));
+    return result;
+  }
+
   async createPayrollEntry(entry: CreatePayroll): Promise<PayrollEntry> {
     const result = await db.insert(payrollEntries).values(entry as any).returning();
     return result[0];
@@ -1139,8 +1168,30 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  // AUD-PR-004 — update with mandatory companyId AND-clause. Caller must
+  // already have verified the row belongs to the company; this is the
+  // belt-and-braces tier (no row affected if the id is cross-tenant).
+  async updatePayrollEntryInCompany(
+    id: string,
+    companyId: string,
+    entry: Partial<Omit<PayrollEntry, 'id'>>,
+  ): Promise<PayrollEntry | undefined> {
+    const result = await db.update(payrollEntries).set(entry as any)
+      .where(and(eq(payrollEntries.id, id), eq(payrollEntries.companyId, companyId)))
+      .returning();
+    return result[0];
+  }
+
   async deletePayrollEntry(id: string): Promise<boolean> {
     const result = await db.delete(payrollEntries).where(eq(payrollEntries.id, id)).returning();
+    return result.length > 0;
+  }
+
+  // AUD-PR-005 — delete with mandatory companyId AND-clause.
+  async deletePayrollEntryInCompany(id: string, companyId: string): Promise<boolean> {
+    const result = await db.delete(payrollEntries)
+      .where(and(eq(payrollEntries.id, id), eq(payrollEntries.companyId, companyId)))
+      .returning();
     return result.length > 0;
   }
 
