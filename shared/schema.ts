@@ -157,7 +157,15 @@ export const companies = pgTable("companies", {
   updatedAt: text("updated_at").notNull().default(sql`now()`),
 });
 
-// Company Members table - links users to companies with roles
+// Company Members table - links users to companies with roles.
+//
+// LU-DD-3 / AUD-DD-TEAM-001 — extended with the columns previously
+// unique to team_members (name, department, departmentId, avatar,
+// permissions) so this table can become the single source of truth for
+// company membership. Migration 0013 backfills these columns from
+// team_members. During the soak window, application code writes to BOTH
+// tables; reads still go to team_members where applicable. A future PR
+// will switch reads to company_members and drop team_members.
 export const companyMembers = pgTable("company_members", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
   companyId: text("company_id").notNull().references(() => companies.id, { onDelete: 'cascade' }),
@@ -167,6 +175,13 @@ export const companyMembers = pgTable("company_members", {
   status: text("status").notNull().default('active'),
   invitedAt: text("invited_at").notNull().default(sql`now()`),
   joinedAt: text("joined_at"),
+  // LU-DD-3 additive columns from team_members. Nullable/defaulted so
+  // existing inserts (that omit them) still pass.
+  name: text("name"),
+  department: text("department"),
+  departmentId: text("department_id"),
+  avatar: text("avatar"),
+  permissions: jsonb("permissions").$type<string[]>().default([]),
 }, (t) => [
   index("company_members_company_id_idx").on(t.companyId),
   index("company_members_user_id_idx").on(t.userId),
