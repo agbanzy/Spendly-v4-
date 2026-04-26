@@ -111,7 +111,7 @@ export interface IStorage {
   getBalances(companyId?: string): Promise<CompanyBalances>;
   updateBalances(balances: Partial<CompanyBalances>, companyId?: string): Promise<CompanyBalances>;
   
-  getInsights(): Promise<AIInsight[]>;
+  getInsights(companyId?: string): Promise<AIInsight[]>;
   
   getPayroll(companyId?: string): Promise<PayrollEntry[]>;
   getPayrollEntry(id: string): Promise<PayrollEntry | undefined>;
@@ -416,8 +416,14 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  // AUD-DD-TXN-001: hard-delete replaced with soft-delete. Schema column
+  // exists since PR #1 but the delete path still hard-deleted, breaking the
+  // soft-delete contract. Now sets deletedAt; queries filter on it.
   async deleteTransaction(id: string): Promise<boolean> {
-    const result = await db.delete(transactions).where(eq(transactions.id, id)).returning();
+    const result = await db.update(transactions)
+      .set({ deletedAt: new Date().toISOString() } as any)
+      .where(and(eq(transactions.id, id), sql`${transactions.deletedAt} IS NULL`))
+      .returning();
     return result.length > 0;
   }
 
@@ -799,9 +805,22 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== INSIGHTS ====================
-  async getInsights(): Promise<AIInsight[]> {
-    const allExpenses = await this.getExpenses();
-    const allBudgets = await this.getBudgets();
+  // AUD-DD-MT-001 — was leaking cross-tenant data when called without companyId.
+  // Now scopes to the caller's company; the route resolves and passes it.
+  async getInsights(companyId?: string): Promise<AIInsight[]> {
+    if (!companyId) {
+      // Per AUD-DD-MT-003 hardening: warn but return an empty array rather
+      // than aggregate the global dataset. This is a behaviour change for any
+      // legacy caller that relied on the previous unscoped result; see
+      // docs/audit-2026-04-26/AUDIT_DEEP_DIVE_2026_04_26.md §10.
+      // Use the lazy-loaded logger to avoid a circular import at module top.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { logger } = require('./lib/logger');
+      logger.warn({ method: 'getInsights' }, 'getInsights called without companyId — returning empty');
+      return [];
+    }
+    const allExpenses = await this.getExpenses(companyId);
+    const allBudgets = await this.getBudgets(companyId);
     const insights: AIInsight[] = [];
     
     const totalSpent = allExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
@@ -893,23 +912,32 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== INVOICES ====================
-  async getInvoices(companyId?: string): Promise<Invoice[]> {
-    if (companyId) {
-      const result = await db.select().from(invoices)
-        .where(eq(invoices.companyId, companyId))
-        .orderBy(desc(invoices.issuedDate));
-      return result;
-    }
-    const result = await db.select().from(invoices).orderBy(desc(invoices.issuedDate));
-    return result;
+  // AUD-DD-INV-001: every invoice query now filters out soft-deleted rows
+  // by default. Pass { includeDeleted: true } to opt out (admin reporting).
+  async getInvoices(companyId?: string, opts: { includeDeleted?: boolean } = {}): Promise<Invoice[]> {
+    const conditions: any[] = [];
+    if (companyId) conditions.push(eq(invoices.companyId, companyId));
+    if (!opts.includeDeleted) conditions.push(sql`${invoices.deletedAt} IS NULL`);
+
+    const query = db.select().from(invoices);
+    const filtered = conditions.length > 0
+      ? query.where(and(...conditions))
+      : query;
+
+    return await filtered.orderBy(desc(invoices.issuedDate));
   }
 
-  async getInvoice(id: string): Promise<Invoice | undefined> {
-    const result = await db.select().from(invoices).where(eq(invoices.id, id)).limit(1);
+  async getInvoice(id: string, opts: { includeDeleted?: boolean } = {}): Promise<Invoice | undefined> {
+    const conditions: any[] = [eq(invoices.id, id)];
+    if (!opts.includeDeleted) conditions.push(sql`${invoices.deletedAt} IS NULL`);
+    const result = await db.select().from(invoices).where(and(...conditions)).limit(1);
     return result[0];
   }
 
   async getInvoicePublic(id: string): Promise<Partial<Invoice> | undefined> {
+    // AUD-DD-INV-001: deleted invoices must NOT be visible on the public
+    // /pay/:id page even with the right ID — soft-delete is also a customer
+    // signal that the invoice is no longer outstanding.
     const result = await db.select({
       id: invoices.id,
       invoiceNumber: invoices.invoiceNumber,
@@ -924,7 +952,7 @@ export class DatabaseStorage implements IStorage {
       status: invoices.status,
       items: invoices.items,
       notes: invoices.notes,
-    }).from(invoices).where(eq(invoices.id, id)).limit(1);
+    }).from(invoices).where(and(eq(invoices.id, id), sql`${invoices.deletedAt} IS NULL`)).limit(1);
     return result[0];
   }
 
@@ -952,8 +980,16 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  // AUD-DD-INV-002: hard-delete replaced with soft-delete. The schema column
+  // was added in PR #1 but invoice deletion still hard-deleted. Now sets
+  // deletedAt = now() so the invoice is hidden from queries while the row
+  // remains for audit trail. The data-retention scheduler is responsible for
+  // eventual hard-delete after the retention window.
   async deleteInvoice(id: string): Promise<boolean> {
-    const result = await db.delete(invoices).where(eq(invoices.id, id)).returning();
+    const result = await db.update(invoices)
+      .set({ deletedAt: new Date().toISOString() } as any)
+      .where(and(eq(invoices.id, id), sql`${invoices.deletedAt} IS NULL`))
+      .returning();
     return result.length > 0;
   }
 

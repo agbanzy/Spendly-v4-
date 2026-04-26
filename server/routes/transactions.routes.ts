@@ -16,8 +16,16 @@ const router = express.Router();
 
 router.get("/transactions", requireAuth, async (req, res) => {
   try {
+    // AUD-DD-TXN-002: honour client-supplied pagination. Defaults match the
+    // storage layer (limit 100, hard-cap 500). Invalid values fall back to
+    // defaults rather than failing the request.
+    const limitRaw = Number.parseInt(String(req.query.limit ?? ''), 10);
+    const offsetRaw = Number.parseInt(String(req.query.offset ?? ''), 10);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+    const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : undefined;
+
     const userCompany = await resolveUserCompany(req);
-    const transactions = await storage.getTransactions(userCompany?.companyId);
+    const transactions = await storage.getTransactions(userCompany?.companyId, { limit, offset });
     res.json(transactions);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch transactions" });

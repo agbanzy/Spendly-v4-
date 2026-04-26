@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/auth";
 import {
   param,
   resolveUserCompany,
+  verifyCompanyAccess,
   escapeCSV,
   filterByDateRange,
   getDateRangeFilter,
@@ -15,7 +16,14 @@ const router = express.Router();
 
 router.get("/insights", requireAuth, async (req, res) => {
   try {
-    const insights = await storage.getInsights();
+    // AUD-DD-MT-001: previously called getInsights() with no companyId,
+    // which aggregated expenses + budgets across every company in the
+    // system. Now scopes to the caller's company.
+    const company = await resolveUserCompany(req);
+    if (!company) {
+      return res.status(403).json({ error: "No active company membership" });
+    }
+    const insights = await storage.getInsights(company.companyId);
     res.json(insights);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch insights" });
@@ -172,6 +180,20 @@ router.post("/reports", requireAuth, async (req, res) => {
 
 router.delete("/reports/:id", requireAuth, async (req, res) => {
   try {
+    // AUD-DD-RPT-001: previously had no ownership check, so any authenticated
+    // user with a report ID could delete it across tenant boundaries. Now we
+    // resolve the caller's company and verify the report belongs to it.
+    const company = await resolveUserCompany(req);
+    if (!company) {
+      return res.status(403).json({ error: "No active company membership" });
+    }
+    const report = await storage.getReport(param(req.params.id));
+    if (!report) {
+      return res.status(404).json({ error: "Report not found" });
+    }
+    if (!(await verifyCompanyAccess((report as any).companyId, company.companyId))) {
+      return res.status(403).json({ error: "Access denied" });
+    }
     await storage.deleteReport(param(req.params.id));
     res.json({ success: true });
   } catch (error) {
