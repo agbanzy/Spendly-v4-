@@ -62,6 +62,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, pinProtectedRequest, getAuthHeaders } from "@/lib/queryClient";
 import { usePinVerification } from "@/components/pin-verification-dialog";
 import type { Expense, TeamMember, Vendor, CompanySettings } from "@shared/schema";
+import { expenseFormSchema, fieldErrorsFromZod } from "@shared/form-schemas";
 import { motion } from "framer-motion";
 import {
   PageWrapper,
@@ -177,7 +178,11 @@ export default function Expenses() {
     });
   }, [expenses, searchQuery, statusFilter, categoryFilter, typeFilter]);
 
-  const { register, handleSubmit, reset, setValue, watch } = useForm({
+  // LU-009 Phase 2 — pre-submit validation against shared/form-schemas.ts
+  // so client and server agree on required fields, amount positivity, etc.
+  // Errors are surfaced via the existing toast pattern + a per-field
+  // `formErrors` state so they render inline.
+  const { register, handleSubmit, reset, setValue, watch, formState: { errors: rhfErrors }, setError, clearErrors } = useForm({
     defaultValues: {
       merchant: "",
       amount: "",
@@ -353,11 +358,25 @@ export default function Expenses() {
   };
 
   const onSubmit = async (data: any) => {
-    const amount = parseFloat(data.amount);
-    if (isNaN(amount) || amount <= 0) {
-      toast({ title: "Invalid amount", description: "Amount must be greater than zero", variant: "destructive" });
+    // LU-009 Phase 2 — validate against the shared expense schema so
+    // client and server agree on required fields and amount semantics.
+    // Falls into the existing toast UX on the first failure.
+    const errors = fieldErrorsFromZod(expenseFormSchema, {
+      ...data,
+      attachments: [], // these are populated server-side after upload
+      taggedReviewers: selectedReviewers,
+    });
+    if (Object.keys(errors).length > 0) {
+      // Surface the first field error inline + via toast.
+      for (const [field, msg] of Object.entries(errors)) {
+        if (msg) setError(field as any, { type: 'manual', message: msg });
+      }
+      const firstMsg = Object.values(errors).find(Boolean) || 'Please correct the highlighted fields.';
+      toast({ title: 'Invalid expense', description: firstMsg, variant: 'destructive' });
       return;
     }
+    clearErrors();
+    const amount = parseFloat(data.amount);
     if (amount > 1_000_000_000) {
       toast({ title: "Invalid amount", description: "Amount exceeds maximum limit", variant: "destructive" });
       return;

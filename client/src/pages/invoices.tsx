@@ -49,6 +49,7 @@ import {
   Repeat,
 } from "lucide-react";
 import type { Invoice, CompanySettings } from "@shared/schema";
+import { invoiceFormSchema, fieldErrorsFromZod } from "@shared/form-schemas";
 
 interface VirtualAccount {
   id: string;
@@ -258,25 +259,11 @@ export default function InvoicesPage() {
   );
 
   const handleCreateInvoice = async () => {
-    if (!invoiceForm.clientName || !invoiceForm.clientEmail) {
-      toast({
-        title: "Error",
-        description: "Please fill in client name and email.",
-        variant: "destructive"
-      });
-      return;
-    }
-    
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (invoiceForm.clientEmail && !emailRegex.test(invoiceForm.clientEmail)) {
-      toast({
-        title: "Validation Error",
-        description: "Please enter a valid client email address.",
-        variant: "destructive"
-      });
-      return;
-    }
-
+    // Front-line line-item check: each row must have a description and a
+    // positive unit price + quantity. The shared schema's items array
+    // doesn't enforce this (line items are typed loosely for legacy
+    // back-compat); keep these targeted checks as a UX layer above
+    // the schema validation below.
     if (lineItems.some(item => !item.description || item.unitPrice <= 0)) {
       toast({
         title: "Error",
@@ -291,6 +278,38 @@ export default function InvoicesPage() {
         title: "Validation Error",
         description: "All line item quantities must be greater than 0.",
         variant: "destructive"
+      });
+      return;
+    }
+
+    // LU-009 Phase 2 — validate the full submit payload against the
+    // shared invoiceFormSchema. Catches client/server divergence on
+    // required fields, email format, line-item subtotal mismatch, and
+    // tax-rate/amount mismatch — same rules the server enforces.
+    const submitPayload = {
+      client: invoiceForm.clientName,
+      clientEmail: invoiceForm.clientEmail,
+      amount: calculateTotal(),
+      subtotal: calculateSubtotal(),
+      taxRate: parseFloat(invoiceForm.taxRate) || 0,
+      taxAmount: calculateTaxAmount(),
+      currency: invoiceForm.invoiceCurrency || currency,
+      notes: invoiceForm.notes || undefined,
+      dueDate: invoiceForm.dueDate,
+      items: lineItems.map((it: any) => ({
+        description: it.description,
+        quantity: it.quantity,
+        price: it.unitPrice,
+        amount: it.amount,
+      })),
+    };
+    const formErrors = fieldErrorsFromZod(invoiceFormSchema, submitPayload);
+    if (Object.keys(formErrors).length > 0) {
+      const firstMsg = Object.values(formErrors).find(Boolean) || 'Please correct the highlighted fields.';
+      toast({
+        title: 'Invalid invoice',
+        description: firstMsg,
+        variant: 'destructive',
       });
       return;
     }
