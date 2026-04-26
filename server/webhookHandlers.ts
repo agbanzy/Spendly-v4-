@@ -4,6 +4,7 @@ import Stripe from 'stripe';
 import { getStripeClient } from './stripeClient';
 import { storage } from './storage';
 import { paymentLogger } from './utils/paymentUtils';
+import { resolveCompanyForWebhook } from './lib/webhook-company-resolver';
 
 // ==================== TYPES ====================
 
@@ -145,7 +146,13 @@ export class StripeWebhookHandler {
       paymentLogger.info('payment_intent_succeeded', { reference, amount, currency, metadata });
 
       const userId = metadata.userId;
-      const companyId = metadata.companyId;
+      // LU-DD-2: companyId is read from the server-issued payment_intent_index
+      // (keyed by paymentIntent.id), with metadata.companyId as a fallback for
+      // in-flight events created before the index started being written.
+      // Mismatches between the two are logged as security alerts inside the
+      // resolver and the index value wins.
+      const companyResolution = await resolveCompanyForWebhook('stripe', paymentIntent.id, metadata.companyId);
+      const companyId = companyResolution.companyId;
       const walletId = metadata.walletId;
       const purpose = metadata.purpose || metadata.type;
 
@@ -330,9 +337,13 @@ export class StripeWebhookHandler {
         status: 'paid',
       } as any);
 
-      // Credit company wallet if companyId present
-      if (metadata.companyId) {
-        const companyWallets = await storage.getWallets(metadata.companyId);
+      // LU-DD-2: resolve companyId from the index, fall back to metadata
+      const checkoutCompanyResolution = await resolveCompanyForWebhook('stripe', paymentIntentId, metadata.companyId);
+      const checkoutCompanyId = checkoutCompanyResolution.companyId;
+
+      // Credit company wallet if companyId resolved
+      if (checkoutCompanyId) {
+        const companyWallets = await storage.getWallets(checkoutCompanyId);
         const matchingWallet = companyWallets.find((w: any) => w.currency?.toUpperCase() === currency);
         if (matchingWallet) {
           await storage.creditWallet(
@@ -357,7 +368,7 @@ export class StripeWebhookHandler {
         date: new Date().toISOString(),
         reference: paymentIntentId,
         userId: null,
-        companyId: metadata.companyId || null,
+        companyId: checkoutCompanyId || null,
       });
 
       await storage.markWebhookProcessed(eventId, 'stripe', 'checkout.session.completed', {
@@ -416,6 +427,15 @@ export class StripeWebhookHandler {
         originalTransaction = await storage.getTransactionByReference(chargeId);
       }
 
+      // LU-DD-2: refund company resolved from index by paymentIntentId,
+      // falling back to metadata.companyId or the original transaction's
+      // companyId (the linked txn was itself written from a verified
+      // webhook, so trusting it is safe).
+      const refundCompanyResolution = paymentIntentId
+        ? await resolveCompanyForWebhook('stripe', paymentIntentId, metadata.companyId)
+        : { companyId: metadata.companyId ?? null, source: 'metadata-fallback' as const, mismatch: false };
+      const refundCompanyId = refundCompanyResolution.companyId || originalTransaction?.companyId || null;
+
       // Create a refund transaction record
       const refundReference = `refund_${chargeId}`;
       await storage.createTransaction({
@@ -428,7 +448,7 @@ export class StripeWebhookHandler {
         currency,
         reference: refundReference,
         userId: metadata.userId || originalTransaction?.userId || null,
-        companyId: metadata.companyId || originalTransaction?.companyId || null,
+        companyId: refundCompanyId,
       });
 
       // If the original payment credited a wallet, debit it back
@@ -477,9 +497,10 @@ export class StripeWebhookHandler {
           });
         }
       } else {
-        // Fallback: debit company balance
+        // Fallback: debit company balance — reuse the resolution computed
+        // above to keep the index value as the authoritative source.
         try {
-          const companyId = metadata.companyId || originalTransaction?.companyId || undefined;
+          const companyId = refundCompanyId || undefined;
           const balances = await storage.getBalances(companyId);
           const balanceField = currency.toLowerCase() === 'usd' ? 'usd'
             : currency.toLowerCase() === 'ngn' ? 'ngn'
