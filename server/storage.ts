@@ -128,6 +128,12 @@ export interface IStorage {
   // over time. New money-moving routes MUST use the scoped versions.
   getPayrollEntryInCompany(id: string, companyId: string): Promise<PayrollEntry | undefined>;
   getPayrollEntriesByIdsInCompany(ids: string[], companyId: string): Promise<PayrollEntry[]>;
+  // AUD-PR-006 — atomic claim helper. Flips status pending → processing
+  // in a single UPDATE ... WHERE status='pending' RETURNING. Two
+  // concurrent /payroll/:id/pay calls cannot both proceed; the second
+  // gets undefined and reports a 409. Mirrors claimPayoutForProcessing.
+  claimPayrollEntryForProcessing(id: string, companyId: string): Promise<PayrollEntry | undefined>;
+  releasePayrollEntryClaim(id: string, companyId: string, restoreStatus: string): Promise<PayrollEntry | undefined>;
   createPayrollEntry(entry: CreatePayroll): Promise<PayrollEntry>;
   updatePayrollEntry(id: string, entry: Partial<Omit<PayrollEntry, 'id'>>): Promise<PayrollEntry | undefined>;
   updatePayrollEntryInCompany(id: string, companyId: string, entry: Partial<Omit<PayrollEntry, 'id'>>): Promise<PayrollEntry | undefined>;
@@ -1156,6 +1162,36 @@ export class DatabaseStorage implements IStorage {
     const result = await db.select().from(payrollEntries)
       .where(and(inArray(payrollEntries.id, ids), eq(payrollEntries.companyId, companyId)));
     return result;
+  }
+
+  // AUD-PR-006 — atomically claim a pending payroll entry for processing.
+  // Single UPDATE ... WHERE status='pending' RETURNING. Two concurrent
+  // payment calls can't both succeed: only the first sees status='pending'
+  // when the WHERE evaluates, the second gets zero rows and undefined back.
+  async claimPayrollEntryForProcessing(id: string, companyId: string): Promise<PayrollEntry | undefined> {
+    const result = await db.update(payrollEntries).set({ status: 'processing' } as any)
+      .where(and(
+        eq(payrollEntries.id, id),
+        eq(payrollEntries.companyId, companyId),
+        eq(payrollEntries.status, 'pending'),
+      ))
+      .returning();
+    return result[0];
+  }
+
+  // AUD-PR-006 — release a claim by flipping status back. Used when the
+  // external transfer fails and we need the row to be reprocessable
+  // (rather than stuck in 'processing'). Caller must specify the
+  // restoreStatus explicitly so the audit trail is unambiguous.
+  async releasePayrollEntryClaim(id: string, companyId: string, restoreStatus: string): Promise<PayrollEntry | undefined> {
+    const result = await db.update(payrollEntries).set({ status: restoreStatus } as any)
+      .where(and(
+        eq(payrollEntries.id, id),
+        eq(payrollEntries.companyId, companyId),
+        eq(payrollEntries.status, 'processing'),
+      ))
+      .returning();
+    return result[0];
   }
 
   async createPayrollEntry(entry: CreatePayroll): Promise<PayrollEntry> {
