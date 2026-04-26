@@ -61,6 +61,84 @@ export const otpSchema = z
   .string()
   .regex(/^\d{6}$/, "Enter the 6-digit verification code.");
 
+// LU-009 Phase 2 — forgot-password reset (verify + new password) step.
+// Used by client/src/pages/forgot-password.tsx after Cognito has emailed
+// the verification code. Server has no direct equivalent (Cognito owns
+// confirmation), but co-locating the schema keeps the auth-schema module
+// the single source of truth for password rules.
+export const forgotPasswordResetSchema = z
+  .object({
+    code: z.string().regex(/^\d{6}$/, "Enter the 6-digit code from your email."),
+    newPassword: passwordSchema,
+    confirmPassword: z.string().min(1, "Please confirm your new password."),
+  })
+  .refine((d) => d.newPassword === d.confirmPassword, {
+    path: ["confirmPassword"],
+    message: "Passwords do not match.",
+  });
+export type ForgotPasswordResetInput = z.infer<typeof forgotPasswordResetSchema>;
+
+// LU-009 Phase 2 — onboarding step schemas. Onboarding's existing
+// `validateStep` is truthiness-only and fires a generic toast. Wiring to
+// these schemas via fieldErrorsFromZod surfaces per-field messages
+// consistent with login/signup.
+export const onboardingStep1Schema = z.discriminatedUnion("isBusinessAccount", [
+  z.object({
+    isBusinessAccount: z.literal(false),
+  }),
+  z.object({
+    isBusinessAccount: z.literal(true),
+    businessName: z
+      .string()
+      .min(1, "Business name is required.")
+      .transform((v) => v.trim())
+      .pipe(z.string().min(2, "Business name must be at least 2 characters.")),
+    businessType: z.string().min(1, "Please select a business type."),
+  }),
+]);
+export type OnboardingStep1Input = z.infer<typeof onboardingStep1Schema>;
+
+export const onboardingStep2Schema = z.object({
+  firstName: z
+    .string()
+    .min(1, "First name is required.")
+    .transform((v) => v.trim())
+    .pipe(z.string().min(1, "First name is required.")),
+  lastName: z
+    .string()
+    .min(1, "Last name is required.")
+    .transform((v) => v.trim())
+    .pipe(z.string().min(1, "Last name is required.")),
+  country: z.string().min(1, "Please select a country."),
+  phoneNumber: z
+    .string()
+    .min(1, "Phone number is required.")
+    .regex(/^\+?[\d\s-]{7,20}$/, "Please enter a valid phone number."),
+  dateOfBirth: z
+    .string()
+    .min(1, "Date of birth is required.")
+    .refine((v) => !Number.isNaN(Date.parse(v)), "Please enter a valid date."),
+});
+export type OnboardingStep2Input = z.infer<typeof onboardingStep2Schema>;
+
+export const onboardingStep3Schema = z.object({
+  idNumber: z
+    .string()
+    .min(1, "ID number is required.")
+    .min(5, "ID number looks too short."),
+  addressLine1: z
+    .string()
+    .min(1, "Address is required.")
+    .transform((v) => v.trim())
+    .pipe(z.string().min(3, "Please enter a valid address.")),
+  city: z
+    .string()
+    .min(1, "City is required.")
+    .transform((v) => v.trim())
+    .pipe(z.string().min(2, "Please enter a valid city.")),
+});
+export type OnboardingStep3Input = z.infer<typeof onboardingStep3Schema>;
+
 /**
  * Convenience helper that runs a zod schema against an arbitrary input and
  * returns a per-field error map matching the existing useState shape used by
