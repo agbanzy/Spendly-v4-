@@ -437,7 +437,13 @@ export const invoices = pgTable("invoices", {
   dueDate: text("due_date").notNull(),
   issuedDate: text("issued_date").notNull(),
   status: text("status").notNull().default('pending'),
-  items: jsonb("items").$type<{ description: string; quantity: number; rate: number }[]>().default([]),
+  // Line-item shape kept lenient for back-compat with three legacy keys:
+  // - 'rate' is the canonical schema field
+  // - 'price' was written by some post-LU-009 client paths
+  // - 'amount' is the per-line total written by older code paths
+  // Renderers should fall back across all three. New writers should
+  // populate at minimum description + quantity + rate.
+  items: jsonb("items").$type<{ description: string; quantity: number; rate?: number; price?: number; amount?: number }[]>().default([]),
   // LU-004 / AUD-BE-014: soft-delete for audit-trail preservation
   deletedAt: text("deleted_at").default(sql`null`),
 }, (t) => [

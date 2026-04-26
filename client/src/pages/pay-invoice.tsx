@@ -24,7 +24,11 @@ interface PublicInvoiceData {
     dueDate: string;
     issuedDate: string;
     status: string;
-    items: { description: string; quantity: number; rate: number }[];
+    // Line items can be persisted under several legacy keys: 'rate' (the
+    // canonical schema), 'price' (used by the post-LU-009 client), or
+    // 'amount' (per-line total written by some older code paths). We
+    // accept any and resolve at render time.
+    items: { description: string; quantity: number; rate?: number; price?: number; amount?: number }[];
     notes: string | null;
   };
   companyName: string;
@@ -101,9 +105,17 @@ export default function PayInvoicePage() {
   const handlePayOnline = async () => {
     setIsPayingOnline(true);
     try {
+      // Production-bug fix: the POST was missing X-Requested-With, so the
+      // CSRF middleware rejected it with 403 Forbidden ("Payment Error /
+      // Forbidden" toast). The header is OWASP's recommended CSRF defense
+      // for token-auth APIs and is set by the rest of the app via
+      // queryClient.apiRequest. The public pay flow uses raw fetch.
       const res = await fetch(`/api/public/invoices/${invoiceId}/pay`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
       });
       const result = await res.json();
       if (result.checkoutUrl) {
@@ -196,14 +208,27 @@ export default function PayInvoicePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {invoice.items.map((item, idx) => (
+                  {invoice.items.map((item, idx) => {
+                    // Production-bug fix: read the per-line rate from any
+                    // of the legacy keys the data layer uses (rate / price
+                    // / amount-divided-by-qty). Renders ₦NaN if all are
+                    // missing AND quantity is zero, but the calculation
+                    // is now safe even when one or more is undefined.
+                    const qty = Number(item.quantity) || 0;
+                    const rate = Number(
+                      item.rate ?? item.price ??
+                      (typeof item.amount === 'number' && qty > 0 ? item.amount / qty : 0),
+                    ) || 0;
+                    const lineTotal = qty * rate;
+                    return (
                     <tr key={idx} className="border-b border-slate-100">
                       <td className="p-3">{item.description}</td>
-                      <td className="p-3 text-right">{item.quantity}</td>
-                      <td className="p-3 text-right">{sym}{Number(item.rate).toFixed(2)}</td>
-                      <td className="p-3 text-right font-medium">{sym}{(item.quantity * item.rate).toFixed(2)}</td>
+                      <td className="p-3 text-right">{qty}</td>
+                      <td className="p-3 text-right">{sym}{rate.toFixed(2)}</td>
+                      <td className="p-3 text-right font-medium">{sym}{lineTotal.toFixed(2)}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             )}
