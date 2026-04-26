@@ -30,19 +30,11 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        # NOTE: `npm ci` is intentionally not used here. The dependency tree
-        # contains esbuild platform-specific native bindings (@esbuild/aix-
-        # ppc64, etc.) declared as optional in package.json but not always
-        # marked optional in the resolved lock when generated on macOS.
-        # `npm ci` then errors with EBADPLATFORM on the Linux runner instead
-        # of silently skipping the inapplicable platform binding. `npm
-        # install` handles platform skipping correctly and produces an
-        # equivalent install for our purposes (the lock is still consulted;
-        # only the strictness about platform-mismatched optionals differs).
-        # Once the upstream behaviour is fixed (or the lock is regenerated
-        # in a Linux build context), the gate can be tightened back to
-        # `npm ci`.
-        run: npm install --no-audit --no-fund
+        # `npm ci` is the strict path. The lock file was regenerated in a
+        # Linux build context (node:22-alpine) so it now resolves
+        # cross-platform optional bindings (@esbuild/*) correctly without
+        # the previous EBADPLATFORM issue on the Linux runner.
+        run: npm ci --no-audit --no-fund
 
       - name: Typecheck
         run: npm run check
