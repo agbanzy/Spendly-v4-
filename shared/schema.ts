@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, jsonb, decimal, serial, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, jsonb, decimal, serial, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -419,6 +419,43 @@ export const payrollEntries = pgTable("payroll_entries", {
 }, (t) => [
   index("payroll_entries_company_id_idx").on(t.companyId),
   index("payroll_entries_employee_id_idx").on(t.employeeId),
+]);
+
+// AUD-PR-012 — versioned tax brackets table.
+// The /payroll/tax-estimate endpoint previously hard-coded 2024-era
+// brackets per country (NG / GH / KE / ZA / US / GB) inside a switch
+// statement, with no `effectiveAsOf` parameter and no datasource
+// attribution. Tax tables change (NG TAT 2024, KE Finance Act amendments,
+// etc.); a payroll calculation in 2027 would silently use 2024 numbers.
+// This table holds country × effective-window slices so /tax-estimate
+// can pick the correct bracket set for a given pay date.
+export const taxBrackets = pgTable("tax_brackets", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  country: text("country").notNull(),
+  // Lower bound (inclusive) of the validity window in YYYY-MM-DD form.
+  effectiveFrom: text("effective_from").notNull(),
+  // Upper bound (exclusive) — null means "open-ended; current".
+  effectiveTo: text("effective_to"),
+  // Cadence the brackets are computed on. 'annual' for most countries;
+  // 'monthly' for KE which is computed on monthly gross (existing
+  // implementation parity).
+  cadence: text("cadence").notNull().default('annual'),
+  // Ordered list of {limit, rate} tiers. limit is the SLICE width
+  // (not cumulative), matching the existing in-route logic. The last
+  // tier uses limit=null (or a sentinel) for "remainder".
+  tiers: jsonb("tiers").$type<Array<{ limit: number | null; rate: number }>>().notNull(),
+  // Optional flat reduction applied at the end (KE-style "personal
+  // relief" - Math.max(0, monthlyTax - 2400); ZA-style rebate).
+  flatReduction: decimal("flat_reduction", { precision: 14, scale: 2 }).default('0'),
+  // Datasource label so the /tax-estimate response can surface
+  // provenance ("Source: KRA Finance Act 2024").
+  source: text("source"),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+}, (t) => [
+  index("tax_brackets_country_effective_idx").on(t.country, t.effectiveFrom),
+  // AUD-PR-012 — UNIQUE (country, effective_from) is the idempotency
+  // key the seed migration relies on (ON CONFLICT DO NOTHING).
+  uniqueIndex("tax_brackets_country_effective_unique").on(t.country, t.effectiveFrom),
 ]);
 
 // Invoices table

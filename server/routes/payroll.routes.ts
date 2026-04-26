@@ -35,127 +35,83 @@ router.get("/payroll", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// AUD-PR-012 — generic progressive-tax engine. Applied uniformly to
+// every country's bracket set (sourced from the tax_brackets table).
+// Mirrors the per-country switch logic that used to live inline:
+//
+// - Each tier has SLICE width (`limit`) and a rate. limit:null means
+//   "remainder of income above prior tiers" (the JS Infinity sentinel
+//   in the old code).
+// - `cadence: 'monthly'` divides salary by 12 before bracketing
+//   (KE behaviour) and multiplies the result by 12 for the annual
+//   total. Annual brackets do not divide.
+// - `flatReduction` is subtracted at the end (KE personal relief,
+//   ZA rebate) and clamped non-negative.
+// - The response retains shape compatibility with the previous handler.
+function applyProgressiveTax(
+  salary: number,
+  cadence: 'annual' | 'monthly',
+  tiers: Array<{ limit: number | null; rate: number }>,
+  flatReduction: number,
+): { tax: number; brackets: Array<{ rate: number; amount: number }> } {
+  const base = cadence === 'monthly' ? salary / 12 : salary;
+  let remaining = base;
+  let tax = 0;
+  const brackets: Array<{ rate: number; amount: number }> = [];
+  for (const tier of tiers) {
+    const cap = tier.limit ?? Number.POSITIVE_INFINITY;
+    const taxable = Math.min(remaining, cap);
+    if (taxable <= 0) break;
+    const amt = taxable * tier.rate;
+    tax += amt;
+    if (tier.rate > 0) {
+      // Suppress zero-rate (personal-allowance) bands from the
+      // response, matching the historical GH / GB behaviour. Other
+      // countries don't have zero-rate tiers, so this is a no-op
+      // for them. Monthly KE collapses its breakdown to a single
+      // weighted-rate row below regardless.
+      brackets.push({ rate: tier.rate * 100, amount: amt });
+    }
+    remaining -= taxable;
+  }
+  if (cadence === 'monthly') {
+    const monthlyTax = Math.max(0, tax - flatReduction);
+    const annual = monthlyTax * 12;
+    return {
+      tax: annual,
+      brackets: [{ rate: salary > 0 ? (annual / salary) * 100 : 0, amount: annual }],
+    };
+  }
+  tax = Math.max(0, tax - flatReduction);
+  return { tax, brackets };
+}
+
 router.get("/payroll/tax-estimate", requireAuth, async (req, res) => {
   try {
-    const { country, annualSalary } = req.query;
+    const { country, annualSalary, asOf } = req.query;
     const salary = parseFloat(annualSalary as string) || 0;
     const countryCode = (country as string || 'US').toUpperCase();
+    const asOfDate = typeof asOf === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(asOf)
+      ? asOf
+      : undefined;
 
+    // AUD-PR-012 — query the versioned tax_brackets table. Falls back
+    // to a flat 20% if no row matches (preserves the old default arm).
+    const config = await storage.getTaxBracketsForCountry(countryCode, asOfDate);
     let tax = 0;
-    const brackets: { rate: number; amount: number }[] = [];
+    let brackets: Array<{ rate: number; amount: number }> = [];
+    let source: string | null = null;
+    let effectiveFrom: string | null = null;
 
-    switch (countryCode) {
-      case 'NG': {
-        const tiers = [
-          { limit: 300000, rate: 0.07 }, { limit: 300000, rate: 0.11 },
-          { limit: 500000, rate: 0.15 }, { limit: 500000, rate: 0.19 },
-          { limit: 1600000, rate: 0.21 }, { limit: Infinity, rate: 0.24 },
-        ];
-        let remaining = salary;
-        for (const tier of tiers) {
-          const taxable = Math.min(remaining, tier.limit);
-          if (taxable <= 0) break;
-          const amt = taxable * tier.rate;
-          tax += amt;
-          brackets.push({ rate: tier.rate * 100, amount: amt });
-          remaining -= taxable;
-        }
-        break;
-      }
-      case 'GH': {
-        const tiers = [
-          { limit: 4380, rate: 0 }, { limit: 1320, rate: 0.05 },
-          { limit: 1560, rate: 0.10 }, { limit: 36000, rate: 0.175 },
-          { limit: 196740, rate: 0.25 }, { limit: Infinity, rate: 0.30 },
-        ];
-        let remaining = salary;
-        for (const tier of tiers) {
-          const taxable = Math.min(remaining, tier.limit);
-          if (taxable <= 0) break;
-          const amt = taxable * tier.rate;
-          tax += amt;
-          if (tier.rate > 0) brackets.push({ rate: tier.rate * 100, amount: amt });
-          remaining -= taxable;
-        }
-        break;
-      }
-      case 'KE': {
-        const monthlyGross = salary / 12;
-        const tiers = [
-          { limit: 24000, rate: 0.10 }, { limit: 8333, rate: 0.25 },
-          { limit: 467667, rate: 0.30 }, { limit: 300000, rate: 0.325 },
-          { limit: Infinity, rate: 0.35 },
-        ];
-        let remaining = monthlyGross;
-        let monthlyTax = 0;
-        for (const tier of tiers) {
-          const taxable = Math.min(remaining, tier.limit);
-          if (taxable <= 0) break;
-          monthlyTax += taxable * tier.rate;
-          remaining -= taxable;
-        }
-        monthlyTax = Math.max(0, monthlyTax - 2400);
-        tax = monthlyTax * 12;
-        brackets.push({ rate: salary > 0 ? (tax / salary) * 100 : 0, amount: tax });
-        break;
-      }
-      case 'ZA': {
-        const tiers = [
-          { limit: 237100, rate: 0.18 }, { limit: 133400, rate: 0.26 },
-          { limit: 156600, rate: 0.31 }, { limit: 220200, rate: 0.36 },
-          { limit: 356600, rate: 0.39 }, { limit: 499700, rate: 0.41 },
-          { limit: Infinity, rate: 0.45 },
-        ];
-        let remaining = salary;
-        for (const tier of tiers) {
-          const taxable = Math.min(remaining, tier.limit);
-          if (taxable <= 0) break;
-          const amt = taxable * tier.rate;
-          tax += amt;
-          brackets.push({ rate: tier.rate * 100, amount: amt });
-          remaining -= taxable;
-        }
-        tax = Math.max(0, tax - 17235);
-        break;
-      }
-      case 'US': {
-        const tiers = [
-          { limit: 11600, rate: 0.10 }, { limit: 35550, rate: 0.12 },
-          { limit: 53375, rate: 0.22 }, { limit: 90750, rate: 0.24 },
-          { limit: 40525, rate: 0.32 }, { limit: 161950, rate: 0.35 },
-          { limit: Infinity, rate: 0.37 },
-        ];
-        let remaining = salary;
-        for (const tier of tiers) {
-          const taxable = Math.min(remaining, tier.limit);
-          if (taxable <= 0) break;
-          const amt = taxable * tier.rate;
-          tax += amt;
-          brackets.push({ rate: tier.rate * 100, amount: amt });
-          remaining -= taxable;
-        }
-        break;
-      }
-      case 'GB': {
-        const tiers = [
-          { limit: 12570, rate: 0 }, { limit: 37700, rate: 0.20 },
-          { limit: 99730, rate: 0.40 }, { limit: Infinity, rate: 0.45 },
-        ];
-        let remaining = salary;
-        for (const tier of tiers) {
-          const taxable = Math.min(remaining, tier.limit);
-          if (taxable <= 0) break;
-          const amt = taxable * tier.rate;
-          tax += amt;
-          if (tier.rate > 0) brackets.push({ rate: tier.rate * 100, amount: amt });
-          remaining -= taxable;
-        }
-        break;
-      }
-      default: {
-        tax = salary * 0.20;
-        brackets.push({ rate: 20, amount: tax });
-      }
+    if (!config) {
+      tax = salary * 0.20;
+      brackets = [{ rate: 20, amount: tax }];
+    } else {
+      const result = applyProgressiveTax(salary, config.cadence, config.tiers, config.flatReduction);
+      tax = result.tax;
+      brackets = result.brackets;
+      source = config.source;
+      effectiveFrom = config.effectiveFrom;
     }
 
     res.json({
@@ -163,6 +119,10 @@ router.get("/payroll/tax-estimate", requireAuth, async (req, res) => {
       monthlyTax: Math.round((tax / 12) * 100) / 100,
       effectiveRate: salary > 0 ? Math.round((tax / salary) * 10000) / 100 : 0,
       brackets,
+      // AUD-PR-012 — provenance + bracket-version metadata so callers
+      // can surface how dated the underlying tax tables are.
+      source,
+      effectiveFrom,
     });
   } catch (error) {
     res.status(500).json({ error: "Failed to estimate tax" });
