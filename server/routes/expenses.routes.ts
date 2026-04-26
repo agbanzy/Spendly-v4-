@@ -546,7 +546,15 @@ router.post("/expenses/:id/request-changes", requireAuth, requireAdmin, async (r
 // Approve expense and initiate payout
 router.post("/expenses/:id/approve-and-pay", requireAuth, requireAdmin, requirePin, async (req, res) => {
   try {
-    const { approvedBy, vendorId } = req.body;
+    const { vendorId } = req.body;
+    // SECURITY: never trust client-supplied approvedBy. The verified
+    // Cognito sub from requireAuth is the ONLY identity that should be
+    // recorded as the approver. Previously the route accepted
+    // `approvedBy` from the body and the client hardcoded it as
+    // "admin" — both audit-log corruption and an impersonation vector.
+    const approverSub = (req as any).user?.uid as string | undefined;
+    const approverName = await getAuditUserName(req);
+    const nowIso = new Date().toISOString();
 
     const expense = await storage.getExpense(param(req.params.id));
     if (!expense) {
@@ -557,12 +565,16 @@ router.post("/expenses/:id/approve-and-pay", requireAuth, requireAdmin, requireP
       return res.status(400).json({ error: "Expense is not pending" });
     }
 
-    // Update expense status
+    // Update expense status + populate the audit columns the schema
+    // already has (approvedBy, approvedAt). These were previously left
+    // unset — bills.approvedBy worked but expense.approvedBy did not.
     const updatedExpense = await storage.updateExpense(expense.id, {
       status: "APPROVED",
       vendorId: vendorId || expense.vendorId,
       payoutStatus: "pending",
-    });
+      approvedBy: approverSub ?? null,
+      approvedAt: nowIso,
+    } as any);
 
     // Determine recipient (employee or vendor)
     const recipientType = vendorId ? "vendor" : "employee";
@@ -596,7 +608,9 @@ router.post("/expenses/:id/approve-and-pay", requireAuth, requireAdmin, requireP
       provider: defaultDestination?.provider || "stripe",
       relatedEntityType: "expense",
       relatedEntityId: expense.id,
-      initiatedBy: approvedBy,
+      initiatedBy: approverSub ?? null,
+      approvedBy: approverSub ?? null,
+      approvedAt: nowIso,
     });
 
     // Update expense with payout ID
@@ -604,18 +618,18 @@ router.post("/expenses/:id/approve-and-pay", requireAuth, requireAdmin, requireP
       payoutId: payout.id,
     });
 
-    // Log audit trail for expense approval
-    const userId = (req as any).user?.uid;
-    const userName = await getAuditUserName(req);
+    // Log audit trail for expense approval — both action-actor and
+    // approval-target identity come from the verified token, never
+    // from the request body.
     await logAudit(
       "expense",
       expense.id,
       "approved",
-      userId,
-      userName,
+      approverSub ?? "unknown",
+      approverName,
       { status: "PENDING", payoutStatus: "not_started" },
       { status: "APPROVED", payoutStatus: "pending", payoutId: payout.id },
-      { approvedBy, vendorId, amount: expense.amount, currency: expense.currency }
+      { approvedBy: approverSub, vendorId, amount: expense.amount, currency: expense.currency }
     );
 
     // Send notification

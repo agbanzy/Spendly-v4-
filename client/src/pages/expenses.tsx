@@ -250,8 +250,9 @@ export default function Expenses() {
 
   const approveExpense = useMutation({
     mutationFn: async ({ id, vendorId }: { id: string; vendorId?: string }) => {
+      // Server reads approver identity from the Cognito token — never
+      // from this body. Don't send a hardcoded "admin" placeholder.
       return pinProtectedRequest("POST", `/api/expenses/${id}/approve-and-pay`, {
-        approvedBy: "admin",
         vendorId,
       });
     },
