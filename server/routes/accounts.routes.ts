@@ -13,6 +13,7 @@ import { paystackClient } from "../paystackClient";
 import { notificationService } from "../services/notification-service";
 import { mapPaymentError, paymentLogger } from "../utils/paymentUtils";
 import { requireAuth, requirePin } from "../middleware/auth";
+import { financialLimiter } from "../middleware/rateLimiter";
 import {
   param,
   resolveUserCompany,
@@ -31,8 +32,15 @@ const router = express.Router();
 
 router.get("/virtual-accounts", requireAuth, async (req, res) => {
   try {
+    // Mirrors the AUD-DD-MT-* fixes elsewhere: fail-closed when the
+    // caller has no active company. Previously a missing companyContext
+    // resolved to `undefined`, which getVirtualAccounts treats as "no
+    // filter" and returns every tenant's accounts.
     const companyContext = await resolveUserCompany(req);
-    const accounts = await storage.getVirtualAccounts(companyContext?.companyId);
+    if (!companyContext) {
+      return res.status(403).json({ error: "No active company membership" });
+    }
+    const accounts = await storage.getVirtualAccounts(companyContext.companyId);
     res.json(accounts);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch virtual accounts" });
@@ -371,7 +379,7 @@ router.get("/virtual-accounts/:id", requireAuth, async (req, res) => {
 // Fund virtual account via real payment provider
 // For Paystack DVAs: Returns bank transfer instructions (user sends money to DVA number externally)
 // For Stripe Treasury: Initiates an inbound transfer from a linked payment method
-router.post("/virtual-accounts/:id/deposit", requireAuth, async (req, res) => {
+router.post("/virtual-accounts/:id/deposit", financialLimiter, requireAuth, requirePin, async (req, res) => {
   try {
     const { amount, originPaymentMethod } = req.body;
     if (!amount || amount <= 0) {

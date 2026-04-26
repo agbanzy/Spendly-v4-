@@ -296,9 +296,14 @@ export default function InvoicesPage() {
       currency: invoiceForm.invoiceCurrency || currency,
       notes: invoiceForm.notes || undefined,
       dueDate: invoiceForm.dueDate,
+      // Write all three legacy keys so any renderer (the public pay
+      // page reads `rate`; some admin reports read `price`) sees the
+      // expected shape. The schema accepts all three; the canonical
+      // one going forward is `rate`.
       items: lineItems.map((it: any) => ({
         description: it.description,
         quantity: it.quantity,
+        rate: it.unitPrice,
         price: it.unitPrice,
         amount: it.amount,
       })),
