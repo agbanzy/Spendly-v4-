@@ -9,7 +9,7 @@ import {
   wallets, walletTransactions, exchangeRates, exchangeRateSettings, payoutDestinations, payouts, fundingSources, adminSettings,
   companies, companyMembers, companyInvitations,
   analyticsSnapshots, businessInsights,
-  subscriptions,
+  subscriptions, taxBrackets,
   type User, type InsertUser, type Expense, type Transaction, type Bill, 
   type Budget, type VirtualCard, type TeamMember, type PayrollEntry, 
   type Invoice, type Vendor, type Report, type CardTransaction, 
@@ -143,7 +143,18 @@ export interface IStorage {
   updatePayrollEntryInCompany(id: string, companyId: string, entry: Partial<Omit<PayrollEntry, 'id'>>): Promise<PayrollEntry | undefined>;
   deletePayrollEntry(id: string): Promise<boolean>;
   deletePayrollEntryInCompany(id: string, companyId: string): Promise<boolean>;
-  
+  // AUD-PR-012 — versioned tax brackets lookup. Picks the row whose
+  // [effective_from, effective_to) window contains `asOfDate`. Returns
+  // undefined if no row matches.
+  getTaxBracketsForCountry(country: string, asOfDate?: string): Promise<{
+    country: string;
+    cadence: 'annual' | 'monthly';
+    tiers: Array<{ limit: number | null; rate: number }>;
+    flatReduction: number;
+    source: string | null;
+    effectiveFrom: string;
+  } | undefined>;
+
   getInvoices(companyId?: string): Promise<Invoice[]>;
   getInvoice(id: string): Promise<Invoice | undefined>;
   getInvoicePublic(id: string): Promise<Partial<Invoice> | undefined>;
@@ -1233,6 +1244,40 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(payrollEntries.id, id), eq(payrollEntries.companyId, companyId)))
       .returning();
     return result.length > 0;
+  }
+
+  // AUD-PR-012 — versioned tax-brackets lookup. Picks the row whose
+  // [effective_from, effective_to) window contains asOfDate. If no
+  // asOfDate is supplied, defaults to today. Returns undefined when no
+  // row matches (caller's choice whether to fall back to a hardcoded
+  // default or refuse to estimate).
+  async getTaxBracketsForCountry(country: string, asOfDate?: string): Promise<{
+    country: string;
+    cadence: 'annual' | 'monthly';
+    tiers: Array<{ limit: number | null; rate: number }>;
+    flatReduction: number;
+    source: string | null;
+    effectiveFrom: string;
+  } | undefined> {
+    const target = asOfDate || new Date().toISOString().split('T')[0];
+    const rows = await db.select().from(taxBrackets)
+      .where(and(
+        eq(taxBrackets.country, country.toUpperCase()),
+        sql`${taxBrackets.effectiveFrom} <= ${target}`,
+        sql`(${taxBrackets.effectiveTo} IS NULL OR ${taxBrackets.effectiveTo} > ${target})`,
+      ))
+      .orderBy(desc(taxBrackets.effectiveFrom))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return undefined;
+    return {
+      country: row.country,
+      cadence: (row.cadence === 'monthly' ? 'monthly' : 'annual') as 'annual' | 'monthly',
+      tiers: (row.tiers as any) || [],
+      flatReduction: parseFloat(String(row.flatReduction || 0)),
+      source: row.source,
+      effectiveFrom: row.effectiveFrom,
+    };
   }
 
   // ==================== INVOICES ====================
