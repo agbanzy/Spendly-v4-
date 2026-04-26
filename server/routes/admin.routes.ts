@@ -14,9 +14,16 @@ const router = express.Router();
 // ==================== ADMIN ROUTES ====================
 
 // Get audit logs
-router.get("/admin/audit-logs", requireAdmin, async (req, res) => {
+// AUD-DD-MT-002: previously called getAuditLogs() with no companyId,
+// returning every audit log across every tenant to any admin caller.
+// Now scopes to the caller's company.
+router.get("/admin/audit-logs", requireAuth, requireAdmin, async (req, res) => {
   try {
-    const logs = await storage.getAuditLogs();
+    const company = await resolveUserCompany(req);
+    if (!company) {
+      return res.status(403).json({ error: "No active company membership" });
+    }
+    const logs = await storage.getAuditLogs(company.companyId);
     res.json(logs);
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Failed to fetch audit logs" });
