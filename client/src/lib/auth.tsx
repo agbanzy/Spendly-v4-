@@ -52,6 +52,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // AUD-FE-002: clear SMS-login token if past its 15-minute TTL.
+    try {
+      const expiresAt = Number(localStorage.getItem('sms_id_token_expires_at') ?? '0');
+      if (expiresAt && Date.now() > expiresAt) {
+        localStorage.removeItem('sms_id_token');
+        localStorage.removeItem('sms_id_token_expires_at');
+      }
+    } catch {
+      // localStorage unavailable — ignore
+    }
+
     // Check for existing Cognito session on mount
     const initAuth = async () => {
       try {
@@ -112,8 +123,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         name: payload.name || payload['cognito:username'] || payload.email?.split('@')[0] || 'User',
         photoURL: payload.picture || undefined,
       };
-      // Store token for API calls
+      // Store token for API calls.
+      // AUD-FE-002: cap the SMS token at 15 minutes so a stale token left on a
+      // shared device doesn't extend session life indefinitely. Cognito tokens
+      // themselves remain valid per Cognito's TTL; this is a client-side
+      // freshness guard for the SMS-OTP-only login path.
+      const SMS_TOKEN_TTL_MS = 15 * 60 * 1000;
       localStorage.setItem('sms_id_token', idToken);
+      localStorage.setItem('sms_id_token_expires_at', String(Date.now() + SMS_TOKEN_TTL_MS));
       const serverRole = await ensureUserProfile(userInfo);
       setUser(mapCognitoUser(userInfo, serverRole));
     } catch (error: any) {
