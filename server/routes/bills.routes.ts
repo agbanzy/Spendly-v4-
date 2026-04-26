@@ -89,7 +89,7 @@ router.patch("/bills/:id", requireAuth, async (req, res) => {
     }
 
     // SECURITY: Prevent setting status to paid via PATCH — use POST /api/bills/:id/pay instead
-    if (result.data.status === 'paid' || result.data.status === 'Paid') {
+    if (result.data.status?.toLowerCase() === 'paid') {
       return res.status(400).json({ error: 'Use POST /api/bills/:id/pay to pay a bill through the wallet' });
     }
 
@@ -98,7 +98,7 @@ router.patch("/bills/:id", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Bill not found" });
     }
 
-    if (result.data.status === 'Paid') {
+    if (result.data.status?.toLowerCase() === 'paid') {
       try {
         const auditName = await getAuditUserName(req);
         await storage.createAuditLog({
@@ -123,6 +123,19 @@ router.patch("/bills/:id", requireAuth, async (req, res) => {
 
 router.delete("/bills/:id", requireAuth, async (req, res) => {
   try {
+    // AUD-DD-BILL-001: previously DELETE /bills/:id had no tenancy check —
+    // any authenticated user could delete any tenant's bill. Now resolves
+    // the caller's company and verifies the bill belongs to it before
+    // deleting. Mirrors the same `verifyCompanyAccess` pattern used by
+    // GET /bills/:id and PATCH /bills/:id.
+    const bill = await storage.getBill(param(req.params.id));
+    if (!bill) {
+      return res.status(404).json({ error: "Bill not found" });
+    }
+    const company = await resolveUserCompany(req);
+    if (company && !await verifyCompanyAccess(bill.companyId, company.companyId)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
     const deleted = await storage.deleteBill(param(req.params.id));
     if (!deleted) {
       return res.status(404).json({ error: "Bill not found" });
@@ -451,6 +464,11 @@ router.post("/bills/:id/pay", financialLimiter, requireAuth, requirePin, async (
 
     res.json({ bill: updatedBill, walletTransaction: walletTx });
   } catch (error: any) {
+    // AUD-DD-BILL-003 — surface the new BILL_ALREADY_PAID race-loser
+    // error from atomicBillPayment as a clean 409 instead of a generic 500.
+    if (error?.message === 'BILL_ALREADY_PAID') {
+      return res.status(409).json({ error: 'Bill already paid' });
+    }
     const mapped = mapPaymentError(error, 'bill_payment');
     res.status(mapped.statusCode).json({ error: mapped.userMessage, correlationId: mapped.correlationId });
   }
