@@ -1,6 +1,6 @@
 import express from "express";
 import { param, resolveUserCompany, logAudit, getAuditUserName, header } from "./shared";
-import { requireAuth, requireAdmin, requirePin } from "../middleware/auth";
+import { requireAuth, requireAdmin, requirePin, invalidateRolePermissionsCache } from "../middleware/auth";
 import { authLimiter, sensitiveLimiter } from "../middleware/rateLimiter";
 import { storage } from "../storage";
 import { notificationService } from "../services/notification-service";
@@ -185,6 +185,10 @@ router.put("/admin/roles/:role", requireAdmin, async (req, res) => {
       description,
       updatedAt: new Date().toISOString(),
     });
+    // LU-DD-4 — drop the role's cached permissions so subsequent
+    // requirePermission checks see the new mapping immediately rather
+    // than after the 60s TTL expires.
+    invalidateRolePermissionsCache(role);
     res.json(updated);
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Failed to update role permissions" });
