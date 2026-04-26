@@ -32,10 +32,12 @@ import {
   type BusinessInsight, type InsertBusinessInsight,
   processedWebhooks,
   pendingDestructiveActions,
+  paymentIntentIndex,
   type CreateTransaction, type CreateExpense, type CreateBill,
   type CreatePayroll, type CreateTeamMember,
   type Subscription, type InsertSubscription,
   type PendingDestructiveAction, type InsertPendingDestructiveAction,
+  type PaymentIntentIndex, type InsertPaymentIntentIndex,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -104,6 +106,9 @@ export interface IStorage {
   // Webhook idempotency
   isWebhookProcessed(eventId: string): Promise<boolean>;
   markWebhookProcessed(eventId: string, provider: string, eventType?: string, metadata?: any): Promise<void>;
+  // LU-DD-2 / AUD-DD-MT-005 — Server-issued payment-intent index
+  createPaymentIntentIndex(input: InsertPaymentIntentIndex): Promise<PaymentIntentIndex | null>;
+  getPaymentIntentIndex(provider: string, providerIntentId: string): Promise<PaymentIntentIndex | undefined>;
   
   // Transaction status updates
   updateTransactionByReference(reference: string, data: Partial<Transaction>): Promise<Transaction | undefined>;
@@ -697,6 +702,36 @@ export class DatabaseStorage implements IStorage {
         throw error;
       }
     }
+  }
+
+  // ==================== PAYMENT INTENT INDEX (LU-DD-2 / AUD-DD-MT-005) ====================
+  // Server-issued mapping from (provider, provider_intent_id) →
+  // (companyId, userId, kind), written authoritatively at the moment a
+  // payment intent / transfer / payout is created. Read by webhook
+  // handlers in place of the previously-trusted metadata.companyId.
+
+  async createPaymentIntentIndex(input: InsertPaymentIntentIndex): Promise<PaymentIntentIndex | null> {
+    try {
+      const result = await db.insert(paymentIntentIndex)
+        .values(input as any)
+        .onConflictDoNothing()
+        .returning();
+      return result[0] ?? null;
+    } catch (error: any) {
+      // Don't propagate — payment-flow failure should not be caused by
+      // an index-write failure. Caller logs the warn.
+      return null;
+    }
+  }
+
+  async getPaymentIntentIndex(provider: string, providerIntentId: string): Promise<PaymentIntentIndex | undefined> {
+    const result = await db.select().from(paymentIntentIndex)
+      .where(and(
+        eq(paymentIntentIndex.provider, provider),
+        eq(paymentIntentIndex.providerIntentId, providerIntentId),
+      ))
+      .limit(1);
+    return result[0];
   }
 
   async updateTransactionByReference(reference: string, data: Partial<Transaction>): Promise<Transaction | undefined> {
