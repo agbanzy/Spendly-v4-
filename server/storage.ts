@@ -50,7 +50,7 @@ export interface IStorage {
   updateExpense(id: string, expense: Partial<Omit<Expense, 'id'>>): Promise<Expense | undefined>;
   deleteExpense(id: string): Promise<boolean>;
   
-  getTransactions(companyId?: string): Promise<Transaction[]>;
+  getTransactions(companyId?: string, opts?: { limit?: number; offset?: number }): Promise<Transaction[]>;
   getTransaction(id: string): Promise<Transaction | undefined>;
   getTransactionByReference(reference: string): Promise<Transaction | undefined>;
   createTransaction(transaction: CreateTransaction): Promise<Transaction>;
@@ -368,15 +368,30 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== TRANSACTIONS ====================
-  async getTransactions(companyId?: string): Promise<Transaction[]> {
-    if (companyId) {
-      const result = await db.select().from(transactions)
-        .where(eq(transactions.companyId, companyId))
-        .orderBy(desc(transactions.date));
-      return result;
-    }
-    const result = await db.select().from(transactions).orderBy(desc(transactions.date));
-    return result;
+  // AUD-BE-010: pagination is now mandatory in code (caps unbounded reads).
+  // Default page size 100; hard cap 500 to keep result sets bounded even
+  // when callers pass huge values. AUD-BE-014 soft-delete: filter rows where
+  // deleted_at IS NOT NULL by default.
+  async getTransactions(
+    companyId?: string,
+    opts: { limit?: number; offset?: number; includeDeleted?: boolean } = {},
+  ): Promise<Transaction[]> {
+    const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
+    const offset = Math.max(opts.offset ?? 0, 0);
+
+    const conditions: any[] = [];
+    if (companyId) conditions.push(eq(transactions.companyId, companyId));
+    if (!opts.includeDeleted) conditions.push(sql`${transactions.deletedAt} IS NULL`);
+
+    const query = db.select().from(transactions);
+    const filtered = conditions.length > 0
+      ? query.where(and(...conditions))
+      : query;
+
+    return await filtered
+      .orderBy(desc(transactions.date))
+      .limit(limit)
+      .offset(offset);
   }
 
   async getTransaction(id: string): Promise<Transaction | undefined> {
@@ -1904,10 +1919,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getExchangeRate(baseCurrency: string, targetCurrency: string): Promise<ExchangeRate | undefined> {
+    // AUD-BE-011: filter by the rate's validity window. A rate must satisfy
+    //   validFrom <= now AND (validTo IS NULL OR validTo >= now)
+    // Otherwise the latest historical rate would be returned even after it
+    // expired, which silently corrupts FX-conversion results.
+    const now = new Date().toISOString();
     const result = await db.select().from(exchangeRates)
       .where(and(
         eq(exchangeRates.baseCurrency, baseCurrency),
-        eq(exchangeRates.targetCurrency, targetCurrency)
+        eq(exchangeRates.targetCurrency, targetCurrency),
+        sql`${exchangeRates.validFrom} <= ${now}`,
+        sql`(${exchangeRates.validTo} IS NULL OR ${exchangeRates.validTo} >= ${now})`,
       ))
       .orderBy(desc(exchangeRates.createdAt))
       .limit(1);
