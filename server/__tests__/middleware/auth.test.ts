@@ -16,17 +16,26 @@ vi.mock('../../cognito-verifier', () => ({
 }));
 
 // Mock storage — extended in this PR with getUserCompanies + getSystemSettings
-// for the LU-DD-1 requireAdmin per-company-role path.
+// for the LU-DD-1 requireAdmin per-company-role path, and getPermissionsForRole
+// for the LU-DD-4 requirePermission middleware.
 vi.mock('../../storage', () => ({
   storage: {
     getUserProfileByCognitoSub: vi.fn(),
     getUserByEmail: vi.fn(),
     getUserCompanies: vi.fn(),
     getSystemSettings: vi.fn().mockResolvedValue([]),
+    getPermissionsForRole: vi.fn(),
   },
 }));
 
-import { requireAuth, requireAdmin, requireOwnership } from '../../middleware/auth';
+import {
+  requireAuth,
+  requireAdmin,
+  requireOwnership,
+  requirePermission,
+  invalidateRolePermissionsCache,
+  _setRolePermissionsForTesting,
+} from '../../middleware/auth';
 import { idTokenVerifier } from '../../cognito-verifier';
 import { storage } from '../../storage';
 import { _setFeatureFlagForTesting, invalidateFeatureFlagCache } from '../../lib/feature-flags';
@@ -404,5 +413,211 @@ describe('requireAdmin', () => {
       expect(next).toHaveBeenCalledOnce();
       expect(req.adminCompany?.companyId).toBe('co-real');
     });
+  });
+});
+
+// ============================================================================
+// requirePermission — LU-DD-4 / AUD-DD-TEAM-002
+// ============================================================================
+//
+// Middleware factory that gates an endpoint on a specific permission name.
+// Effective permissions = role's permissions (from role_permissions table) ∪
+// per-member overrides (companyMembers.permissions). Cache lives in the
+// middleware module; invalidate via invalidateRolePermissionsCache.
+describe('requirePermission', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    invalidateRolePermissionsCache();
+  });
+
+  // ---- shared token gate ----
+
+  it('returns 401 with no Authorization header', async () => {
+    const gate = requirePermission('VIEW_REPORTS');
+    const { req, res, next } = createMocks({ headers: {} });
+    await gate(req, res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res._status).toBe(401);
+  });
+
+  it('returns 401 when token verification fails', async () => {
+    (idTokenVerifier.verify as any).mockRejectedValue(new Error('expired'));
+    const gate = requirePermission('VIEW_REPORTS');
+    const { req, res, next } = createMocks({
+      headers: { authorization: 'Bearer bad' },
+    });
+    await gate(req, res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res._status).toBe(401);
+  });
+
+  // ---- membership requirement ----
+
+  it('returns 403 when user has no active company membership', async () => {
+    (idTokenVerifier.verify as any).mockResolvedValue({ sub: 'orphan' });
+    (storage.getUserCompanies as any).mockResolvedValue([]);
+
+    const gate = requirePermission('VIEW_REPORTS');
+    const { req, res, next } = createMocks({
+      headers: { authorization: 'Bearer t' },
+    });
+    await gate(req, res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res._status).toBe(403);
+    expect(res._json.message).toContain('No active company membership');
+  });
+
+  // ---- happy path: role grants permission ----
+
+  it('grants when the role has the required permission', async () => {
+    _setRolePermissionsForTesting('MANAGER', ['VIEW_TREASURY', 'VIEW_REPORTS', 'CREATE_EXPENSE']);
+    (idTokenVerifier.verify as any).mockResolvedValue({ sub: 'mgr-1' });
+    (storage.getUserCompanies as any).mockResolvedValue([
+      { companyId: 'co-1', role: 'MANAGER', userId: 'mgr-1', permissions: [] },
+    ]);
+
+    const gate = requirePermission('VIEW_REPORTS');
+    const { req, res, next } = createMocks({
+      headers: { authorization: 'Bearer t' },
+    });
+    await gate(req, res, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(req.adminCompany).toEqual({ companyId: 'co-1', role: 'MANAGER' });
+  });
+
+  it('rejects when the role does not have the required permission', async () => {
+    _setRolePermissionsForTesting('VIEWER', ['VIEW_TREASURY', 'VIEW_REPORTS']);
+    (idTokenVerifier.verify as any).mockResolvedValue({ sub: 'viewer-1' });
+    (storage.getUserCompanies as any).mockResolvedValue([
+      { companyId: 'co-2', role: 'VIEWER', userId: 'viewer-1', permissions: [] },
+    ]);
+
+    const gate = requirePermission('APPROVE_EXPENSE');
+    const { req, res, next } = createMocks({
+      headers: { authorization: 'Bearer t' },
+    });
+    await gate(req, res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res._status).toBe(403);
+    expect(res._json.requiredPermission).toBe('APPROVE_EXPENSE');
+    expect(res._json.message).toContain('Missing required permission');
+  });
+
+  // ---- per-member overrides ----
+
+  it('grants via per-member permission override even when role lacks it', async () => {
+    _setRolePermissionsForTesting('EDITOR', ['VIEW_TREASURY', 'CREATE_EXPENSE', 'VIEW_REPORTS']);
+    (idTokenVerifier.verify as any).mockResolvedValue({ sub: 'editor-special-1' });
+    (storage.getUserCompanies as any).mockResolvedValue([
+      // EDITOR doesn't normally have APPROVE_EXPENSE — this single member
+      // does via the per-member override.
+      {
+        companyId: 'co-3',
+        role: 'EDITOR',
+        userId: 'editor-special-1',
+        permissions: ['APPROVE_EXPENSE'],
+      },
+    ]);
+
+    const gate = requirePermission('APPROVE_EXPENSE');
+    const { req, res, next } = createMocks({
+      headers: { authorization: 'Bearer t' },
+    });
+    await gate(req, res, next);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('treats a non-array per-member permissions value as empty', async () => {
+    _setRolePermissionsForTesting('EMPLOYEE', ['CREATE_EXPENSE']);
+    (idTokenVerifier.verify as any).mockResolvedValue({ sub: 'emp-1' });
+    (storage.getUserCompanies as any).mockResolvedValue([
+      { companyId: 'co-4', role: 'EMPLOYEE', userId: 'emp-1', permissions: 'not-an-array' as any },
+    ]);
+
+    const gate = requirePermission('APPROVE_EXPENSE');
+    const { req, res, next } = createMocks({
+      headers: { authorization: 'Bearer t' },
+    });
+    await gate(req, res, next);
+    // Should reject — we shouldn't crash on bad data, just deny.
+    expect(next).not.toHaveBeenCalled();
+    expect(res._status).toBe(403);
+  });
+
+  // ---- multi-company X-Company-Id ----
+
+  it('uses X-Company-Id to disambiguate when the user is in multiple companies', async () => {
+    _setRolePermissionsForTesting('OWNER', ['MANAGE_TEAM', 'VIEW_REPORTS']);
+    _setRolePermissionsForTesting('VIEWER', ['VIEW_REPORTS']);
+    (idTokenVerifier.verify as any).mockResolvedValue({ sub: 'multi-perm-1' });
+    (storage.getUserCompanies as any).mockResolvedValue([
+      { companyId: 'co-A', role: 'VIEWER', userId: 'multi-perm-1', permissions: [] },
+      { companyId: 'co-B', role: 'OWNER', userId: 'multi-perm-1', permissions: [] },
+    ]);
+
+    // VIEWER on co-A doesn't have MANAGE_TEAM; OWNER on co-B does.
+    const gate = requirePermission('MANAGE_TEAM');
+    const { req, res, next } = createMocks({
+      headers: { authorization: 'Bearer t', 'x-company-id': 'co-B' },
+    });
+    await gate(req, res, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(req.adminCompany?.companyId).toBe('co-B');
+  });
+
+  it('falls back to first membership when X-Company-Id is missing', async () => {
+    _setRolePermissionsForTesting('OWNER', ['MANAGE_TEAM']);
+    _setRolePermissionsForTesting('VIEWER', ['VIEW_REPORTS']);
+    (idTokenVerifier.verify as any).mockResolvedValue({ sub: 'multi-perm-2' });
+    (storage.getUserCompanies as any).mockResolvedValue([
+      { companyId: 'co-X', role: 'VIEWER', userId: 'multi-perm-2', permissions: [] },
+      { companyId: 'co-Y', role: 'OWNER', userId: 'multi-perm-2', permissions: [] },
+    ]);
+
+    // First membership is VIEWER (no MANAGE_TEAM) — even though OWNER on
+    // co-Y would grant it.
+    const gate = requirePermission('MANAGE_TEAM');
+    const { req, res, next } = createMocks({
+      headers: { authorization: 'Bearer t' },
+    });
+    await gate(req, res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res._status).toBe(403);
+  });
+
+  // ---- DB lookup path ----
+
+  it('falls through to storage.getPermissionsForRole on cache miss', async () => {
+    invalidateRolePermissionsCache();
+    (storage.getPermissionsForRole as any).mockResolvedValue(['CREATE_EXPENSE', 'VIEW_REPORTS']);
+    (idTokenVerifier.verify as any).mockResolvedValue({ sub: 'fresh-1' });
+    (storage.getUserCompanies as any).mockResolvedValue([
+      { companyId: 'co-fresh', role: 'EDITOR', userId: 'fresh-1', permissions: [] },
+    ]);
+
+    const gate = requirePermission('VIEW_REPORTS');
+    const { req, res, next } = createMocks({
+      headers: { authorization: 'Bearer t' },
+    });
+    await gate(req, res, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect((storage.getPermissionsForRole as any).mock.calls[0][0]).toBe('EDITOR');
+  });
+
+  it('rejects with 403 when the role is unknown (storage returns null)', async () => {
+    invalidateRolePermissionsCache();
+    (storage.getPermissionsForRole as any).mockResolvedValue(null);
+    (idTokenVerifier.verify as any).mockResolvedValue({ sub: 'weird-1' });
+    (storage.getUserCompanies as any).mockResolvedValue([
+      { companyId: 'co-weird', role: 'NONEXISTENT_ROLE', userId: 'weird-1', permissions: [] },
+    ]);
+
+    const gate = requirePermission('VIEW_REPORTS');
+    const { req, res, next } = createMocks({
+      headers: { authorization: 'Bearer t' },
+    });
+    await gate(req, res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res._status).toBe(403);
   });
 });

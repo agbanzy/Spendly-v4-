@@ -95,20 +95,159 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
  * users with multiple memberships, otherwise picks the first active row.
  *
  * Returns `null` when the user has no active membership.
+ *
+ * Also returns the per-member `permissions` jsonb (an additive override on
+ * top of the role's default permissions) so `requirePermission` can merge
+ * them in a single round-trip.
  */
 async function resolveActiveCompanyRole(
   cognitoSub: string,
   headerCompanyId: string | undefined,
-): Promise<{ companyId: string; role: string } | null> {
+): Promise<{ companyId: string; role: string; memberPermissions: string[] } | null> {
   const memberships = await storage.getUserCompanies(cognitoSub);
   if (!memberships || memberships.length === 0) return null;
 
+  const pickPermissions = (m: any): string[] => {
+    const raw = m?.permissions;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((p: unknown): p is string => typeof p === 'string');
+  };
+
   if (headerCompanyId) {
     const match = memberships.find((m) => m.companyId === headerCompanyId);
-    if (match) return { companyId: match.companyId, role: match.role };
+    if (match) {
+      return {
+        companyId: match.companyId,
+        role: match.role,
+        memberPermissions: pickPermissions(match),
+      };
+    }
   }
   const first = memberships[0];
-  return { companyId: first.companyId, role: first.role };
+  return {
+    companyId: first.companyId,
+    role: first.role,
+    memberPermissions: pickPermissions(first),
+  };
+}
+
+// LU-DD-4 / AUD-DD-TEAM-002 — Permission cache. Role → permissions
+// rarely changes, but `requirePermission` runs on every gated request.
+// 60-second TTL matches the feature-flag cache and keeps the hot path off
+// the database. Invalidated explicitly when an admin edits a role via
+// PUT /admin/roles/:role (see `invalidateRolePermissionsCache`).
+const ROLE_PERMS_CACHE_TTL_MS = 60_000;
+type RoleCacheEntry = { permissions: string[] | null; expiresAt: number };
+const rolePermissionsCache = new Map<string, RoleCacheEntry>();
+
+async function getCachedRolePermissions(role: string): Promise<string[] | null> {
+  const hit = rolePermissionsCache.get(role);
+  if (hit && hit.expiresAt > Date.now()) return hit.permissions;
+  const fresh = await storage.getPermissionsForRole(role);
+  rolePermissionsCache.set(role, {
+    permissions: fresh,
+    expiresAt: Date.now() + ROLE_PERMS_CACHE_TTL_MS,
+  });
+  return fresh;
+}
+
+/**
+ * Test/ops helper — drop the role-permissions cache so a permission edit
+ * is visible to subsequent requests immediately. Called by the
+ * PUT /admin/roles/:role route after a successful update; also exported
+ * for unit tests.
+ */
+export function invalidateRolePermissionsCache(role?: string): void {
+  if (role) rolePermissionsCache.delete(role);
+  else rolePermissionsCache.clear();
+}
+
+/**
+ * Test helper — pre-seed the cache with a known value, bypassing the DB
+ * lookup. Only intended for unit tests.
+ */
+export function _setRolePermissionsForTesting(role: string, permissions: string[] | null): void {
+  rolePermissionsCache.set(role, {
+    permissions,
+    expiresAt: Date.now() + ROLE_PERMS_CACHE_TTL_MS,
+  });
+}
+
+/**
+ * Middleware factory: gate an endpoint on a specific permission.
+ *
+ * LU-DD-4 / AUD-DD-TEAM-002 — replaces the historical pattern of using
+ * `requireAdmin` (which only checks role membership in OWNER/ADMIN) for
+ * actions that semantically only need a finer-grained permission such as
+ * VIEW_REPORTS or APPROVE_EXPENSE.
+ *
+ * Effective permissions = role's permissions (from `role_permissions`) ∪
+ * per-member overrides (from `companyMembers.permissions`). The union
+ * lets an org grant an EDITOR access to APPROVE_EXPENSE without changing
+ * everyone's role.
+ *
+ * Like `requireAdmin`, this middleware verifies the Cognito token first
+ * and resolves the user's active company-membership row. Pass the
+ * `X-Company-Id` header to disambiguate when the user is in multiple
+ * companies.
+ *
+ * Usage:
+ *   router.get('/admin/audit-logs', requirePermission('VIEW_REPORTS'), handler);
+ */
+export function requirePermission(name: string) {
+  return async function permissionGate(req: Request, res: Response, next: NextFunction) {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ') || !idTokenVerifier || !isCognitoConfigured) {
+        return res.status(401).json({
+          error: 'Unauthorized',
+          message: 'Authentication token required',
+        });
+      }
+
+      const token = authHeader.split('Bearer ')[1];
+      let cognitoSub: string;
+      try {
+        const payload = await idTokenVerifier.verify(token);
+        cognitoSub = payload.sub;
+      } catch {
+        return res.status(401).json({
+          error: 'Unauthorized',
+          message: 'Invalid or expired authentication token',
+        });
+      }
+
+      const headerCompanyId = req.headers['x-company-id'] as string | undefined;
+      const active = await resolveActiveCompanyRole(cognitoSub, headerCompanyId);
+      if (!active) {
+        return res.status(403).json({
+          error: 'Forbidden',
+          message: 'No active company membership',
+        });
+      }
+
+      const rolePerms = await getCachedRolePermissions(active.role);
+      const effective = new Set<string>([
+        ...(rolePerms ?? []),
+        ...active.memberPermissions,
+      ]);
+
+      if (!effective.has(name)) {
+        return res.status(403).json({
+          error: 'Forbidden',
+          message: `Missing required permission: ${name}`,
+          requiredPermission: name,
+        });
+      }
+
+      // Attach context so downstream handlers don't need to re-resolve.
+      req.adminCompany = { companyId: active.companyId, role: active.role };
+      return next();
+    } catch (error) {
+      console.error('requirePermission error:', error);
+      return res.status(500).json({ error: 'Permission check failed' });
+    }
+  };
 }
 
 /**
@@ -191,7 +330,9 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
         email: userProfile.email,
         role: active.role,
       };
-      req.adminCompany = active;
+      // Only expose the public shape on req.adminCompany; memberPermissions
+      // is an internal helper for requirePermission's union math.
+      req.adminCompany = { companyId: active.companyId, role: active.role };
       return next();
     }
 

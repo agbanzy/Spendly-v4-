@@ -189,6 +189,10 @@ export interface IStorage {
   getSystemSettings(): Promise<SystemSettings[]>;
   updateSystemSetting(key: string, data: Partial<SystemSettings>): Promise<SystemSettings>;
   getRolePermissions(): Promise<RolePermissions[]>;
+  // LU-DD-4 / AUD-DD-TEAM-002 — Single-role lookup. Returns the array of
+  // permission strings for a role, or null when the role has no row in
+  // role_permissions. Caller layers a cache on top of this.
+  getPermissionsForRole(role: string): Promise<string[] | null>;
   updateRolePermissions(role: string, data: Partial<RolePermissions>): Promise<RolePermissions>;
   
   // Wallet methods
@@ -1440,6 +1444,18 @@ export class DatabaseStorage implements IStorage {
 
   async getRolePermissions(): Promise<RolePermissions[]> {
     return await db.select().from(rolePermissions);
+  }
+
+  // LU-DD-4 / AUD-DD-TEAM-002 — single-role lookup
+  async getPermissionsForRole(role: string): Promise<string[] | null> {
+    const result = await db.select({ permissions: rolePermissions.permissions })
+      .from(rolePermissions)
+      .where(eq(rolePermissions.role, role))
+      .limit(1);
+    if (result.length === 0) return null;
+    const perms = (result[0] as any).permissions;
+    if (!Array.isArray(perms)) return [];
+    return perms.filter((p): p is string => typeof p === 'string');
   }
 
   async updateRolePermissions(role: string, data: Partial<RolePermissions>): Promise<RolePermissions> {
