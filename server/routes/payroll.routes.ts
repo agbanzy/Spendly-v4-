@@ -11,6 +11,8 @@ import {
   payrollUpdateSchema,
   validateAmount,
   getSettingsForRequest,
+  logAudit,
+  getAuditUserName,
 } from "./shared";
 import { getPaymentProvider } from "../paymentService";
 import { getStripeClient } from "../stripeClient";
@@ -268,6 +270,21 @@ router.post("/payroll", requireAuth, requireAdmin, async (req, res) => {
       payoutDestinationId,
     } as any);
 
+    // AUD-PR-008 — audit-log emission on create.
+    const actorId = (req as any).user?.uid || 'unknown';
+    const actorName = await getAuditUserName(req);
+    await logAudit(
+      'payroll',
+      entry.id,
+      'created',
+      actorId,
+      actorName,
+      undefined,
+      { status: entry.status, salary: entry.salary, netPay: entry.netPay, employeeId: entry.employeeId },
+      { companyId: entry.companyId, currency: entry.currency },
+      (req as any).ip,
+    );
+
     res.status(201).json(entry);
   } catch (error) {
     res.status(500).json({ error: "Failed to create payroll entry" });
@@ -290,6 +307,20 @@ router.patch("/payroll/:id", requireAuth, requireAdmin, async (req, res) => {
     if (!entry) {
       return res.status(404).json({ error: "Payroll entry not found" });
     }
+    // AUD-PR-008 — audit-log emission on update.
+    const actorId = (req as any).user?.uid || 'unknown';
+    const actorName = await getAuditUserName(req);
+    await logAudit(
+      'payroll',
+      entry.id,
+      'updated',
+      actorId,
+      actorName,
+      undefined,
+      result.data,
+      { companyId: entry.companyId },
+      (req as any).ip,
+    );
     res.json(entry);
   } catch (error) {
     res.status(500).json({ error: "Failed to update payroll entry" });
@@ -307,6 +338,20 @@ router.delete("/payroll/:id", requireAuth, requireAdmin, async (req, res) => {
     if (!deleted) {
       return res.status(404).json({ error: "Payroll entry not found" });
     }
+    // AUD-PR-008 — audit-log emission on delete.
+    const actorId = (req as any).user?.uid || 'unknown';
+    const actorName = await getAuditUserName(req);
+    await logAudit(
+      'payroll',
+      param(req.params.id),
+      'deleted',
+      actorId,
+      actorName,
+      undefined,
+      undefined,
+      { companyId: company.companyId },
+      (req as any).ip,
+    );
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ error: "Failed to delete payroll entry" });
@@ -467,6 +512,23 @@ router.post("/payroll/process", financialLimiter, requireAuth, requireAdmin, req
         return sum + parseFloat(String(entry?.netPay || 0));
       }, 0);
 
+    // AUD-PR-008 — audit-log emission at run-payroll boundary. Records
+    // the bulk action with the per-entry counts so investigators can
+    // reconstruct what a "Run payroll" click did.
+    const actorId = (req as any).user?.uid || 'unknown';
+    const actorName = await getAuditUserName(req);
+    await logAudit(
+      'payroll',
+      `bulk-${company.companyId}-${Date.now()}`,
+      'bulk-process',
+      actorId,
+      actorName,
+      undefined,
+      { initiated: totalInitiated, failed: totalFailed, needsBankingDetails: totalNoBanking },
+      { companyId: company.companyId, totalAmount: totalPaid, entryIds: pendingEntries.map(e => e.id) },
+      (req as any).ip,
+    );
+
     res.json({
       message: `Payroll processing complete: ${totalInitiated} initiated, ${totalFailed} failed, ${totalNoBanking} need banking details`,
       results,
@@ -506,6 +568,32 @@ router.post("/payroll/:id/pay", requireAuth, requireAdmin, requirePin, async (re
     if (netPayAmount <= 0) {
       return res.status(400).json({ error: "Invalid net pay amount" });
     }
+
+    // AUD-PR-006 — atomic claim. Two concurrent /pay calls on the same id
+    // can't both proceed: only the caller whose UPDATE sees status='pending'
+    // wins. The second gets undefined and we return 409.
+    const claimed = await storage.claimPayrollEntryForProcessing(entry.id, company.companyId);
+    if (!claimed) {
+      return res.status(409).json({ error: "Payroll entry was claimed by another process or is no longer pending" });
+    }
+
+    // AUD-PR-008 — audit-log emission at the claim boundary. We log the
+    // pending → processing transition before the external transfer so
+    // there's a record of the intent even if the process is killed before
+    // the provider call completes.
+    const actorId = (req as any).user?.uid || 'unknown';
+    const actorName = await getAuditUserName(req);
+    await logAudit(
+      'payroll',
+      entry.id,
+      'pay-claimed',
+      actorId,
+      actorName,
+      { status: 'pending' },
+      { status: 'processing', netPay: entry.netPay },
+      { companyId: company.companyId, employeeId: entry.employeeId },
+      (req as any).ip,
+    );
 
     const settings = await storage.getOrganizationSettings();
     const currency = settings?.currency || 'USD';
@@ -701,6 +789,21 @@ router.post("/payroll/batch-payout", requireAuth, requireAdmin, requirePin, asyn
         }
         if (entry.status === 'paid') continue;
 
+        // AUD-PR-011 — refuse to create a payout when netPay is missing
+        // or non-positive instead of silently falling back to gross
+        // salary (which would skip tax / deduction policy). Skip with a
+        // clear reason; admin must fix the entry first.
+        const netPay = entry.netPay;
+        if (!netPay || parseFloat(String(netPay)) <= 0) {
+          results.push({
+            payrollId,
+            status: 'skipped',
+            reason: 'invalid-netpay',
+            netPay: netPay ?? null,
+          });
+          continue;
+        }
+
         // Get employee's payout destination
         const destinations = await storage.getPayoutDestinations(entry.employeeId);
         const defaultDestination = destinations.find(d => d.isDefault) || destinations[0];
@@ -713,7 +816,7 @@ router.post("/payroll/batch-payout", requireAuth, requireAdmin, requirePin, asyn
         const payout = await db.transaction(async () => {
           const payout = await storage.createPayout({
             type: 'payroll',
-            amount: entry.netPay || entry.salary,
+            amount: netPay,
             currency,
             status: 'pending',
             recipientType: 'employee',
@@ -739,6 +842,22 @@ router.post("/payroll/batch-payout", requireAuth, requireAdmin, requirePin, asyn
         results.push({ payrollId, error: err.message });
       }
     }
+
+    // AUD-PR-008 — audit-log emission for batch-payout. Captures the
+    // result-by-id matrix so investigators can see exactly which IDs
+    // generated payouts and which were skipped.
+    const batchActorName = await getAuditUserName(req);
+    await logAudit(
+      'payroll',
+      `batch-${company.companyId}-${Date.now()}`,
+      'batch-payout',
+      initiatedBy,
+      batchActorName,
+      undefined,
+      { results },
+      { companyId: company.companyId, requestedIds: payrollIds, ownedCount: ownedEntries.length },
+      (req as any).ip,
+    );
 
     res.json({ results });
   } catch (error: any) {
