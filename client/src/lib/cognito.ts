@@ -179,8 +179,9 @@ export function signOut(): void {
       },
     });
   }
-  // Clear SMS login token
+  // Clear SMS login token + AUD-FE-002 expiry sentinel
   localStorage.removeItem('sms_id_token');
+  localStorage.removeItem('sms_id_token_expires_at');
 }
 
 // --- Google OAuth (Cognito Hosted UI redirect) ---

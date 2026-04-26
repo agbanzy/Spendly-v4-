@@ -20,6 +20,31 @@ function maskPII(value: string): string {
   return masked;
 }
 
+// LU-013 / AUD-OB-001 — Recursively walk a log payload object and apply
+// maskPII to every string leaf. The maxDepth and key cap prevent runaway
+// traversal of pathological objects.
+const REDACTION_MAX_DEPTH = 6;
+const REDACTION_MAX_KEYS = 200;
+
+function maskPIIInValue(value: unknown, depth = 0): unknown {
+  if (depth > REDACTION_MAX_DEPTH) return value;
+  if (value == null) return value;
+  if (typeof value === 'string') return maskPII(value);
+  if (Array.isArray(value)) {
+    return value.slice(0, REDACTION_MAX_KEYS).map((v) => maskPIIInValue(v, depth + 1));
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    let count = 0;
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (count++ >= REDACTION_MAX_KEYS) break;
+      out[k] = maskPIIInValue(v, depth + 1);
+    }
+    return out;
+  }
+  return value;
+}
+
 const isProduction = process.env.NODE_ENV === 'production';
 
 export const logger = pino({
@@ -37,6 +62,12 @@ export const logger = pino({
     res: (res) => ({
       statusCode: res.statusCode,
     }),
+  },
+  // LU-013 / AUD-OB-001: auto-redact PII (email, phone, card, CVV, NUBAN,
+  // BVN) from every log payload's string leaves before write. Header
+  // redaction below remains as a strict-replace belt-and-braces.
+  formatters: {
+    log: (payload) => maskPIIInValue(payload) as Record<string, unknown>,
   },
   redact: {
     paths: [

@@ -10,8 +10,7 @@ import { useAuth } from "@/lib/auth";
 import { apiRequest } from "@/lib/queryClient";
 import { PhoneInput } from "@/components/phone-input";
 import { Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, Sparkles, Phone, MessageSquare } from "lucide-react";
-
-const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+import { loginSchema, fieldErrorsFromZod } from "@shared/auth-schemas";
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
@@ -41,16 +40,11 @@ export default function LoginPage() {
   const searchParams = new URLSearchParams(window.location.search);
   const inviteToken = searchParams.get("invite");
 
-  const validateField = (field: "email" | "password", value: string) => {
-    if (field === "email") {
-      if (!value.trim()) return "Email is required.";
-      if (!emailRegex.test(value)) return "Please enter a valid email.";
-    }
-    if (field === "password") {
-      if (!value) return "Password is required.";
-      if (value.length < 8) return "Password must be at least 8 characters.";
-    }
-    return undefined;
+  // LU-009 / AUD-FE-005: validation rules now live in shared/auth-schemas.ts
+  // so client and server share the same source of truth.
+  const validateField = (field: "email" | "password", value: string): string | undefined => {
+    const draft = { email, password, [field]: value };
+    return fieldErrorsFromZod(loginSchema, draft)[field];
   };
 
   const handleBlur = (field: "email" | "password") => {

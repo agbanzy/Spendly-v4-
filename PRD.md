@@ -1,8 +1,34 @@
 # Financiar — Product Requirements Document (PRD)
 
-> **Version:** 1.0 | **Date:** 2026-03-14 | **Author:** Godwin Agbane (Guru)
-> **Product:** Financiar (formerly Spendly v4) | **Domain:** `app.thefinanciar.com`
-> **Package:** `com.financiar.app` | **Brand Color:** `#6B2346`
+> **Version:** 2.0 (refresh) | **Date:** 2026-04-26 | **Author:** Godwin Agbane (Guru)
+> **Product:** Financiar (codename: Spendly v4) | **Domain:** `app.thefinanciar.com`
+> **Package:** `com.financiar.app` | **Brand colour:** `#6B2346`
+> **Supersedes:** PRD v1.0 dated 2026-03-14
+> **Companion documents:** [`docs/audit-2026-04-26/AUDIT_2026_04_26.md`](docs/audit-2026-04-26/AUDIT_2026_04_26.md), [`docs/audit-2026-04-26/BRD_2026_04_26.md`](docs/audit-2026-04-26/BRD_2026_04_26.md), [`docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md`](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md)
+
+---
+
+## What changed since v1.0 (2026-03-14)
+
+This refresh consolidates the changes that landed in commits `0a93cec`, `d99c31a`, `acb67e7`, `be62fc2`, and `4e79399` and brings the spec back in sync with the codebase as of HEAD `e831622`.
+
+| Area | v1.0 said | Reality at 2026-04-26 |
+|---|---|---|
+| Backend route file | One monolithic `server/routes.ts` (~11,000 lines) | **24 domain modules** under `server/routes/` plus `index.ts` and `shared.ts` (26 files total). A legacy `routes.legacy.ts` still exists and is being retired (see [AUD-BE-009](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)). |
+| Database tables | "41 tables" | **42 `pgTable` definitions** in `shared/schema.ts` (the v1.0 count was off by one) |
+| Stripe webhook handler | "Empty" (per 2026-03-03 audit) | **Fully implemented** — `webhookHandlers.ts` covers payment_intent, checkout, charge, issuing, transfer, payout, treasury events with signature verification |
+| Reversal idempotency | "Missing" | **Implemented** at `storage.ts:1722-1725`; `walletTransactions.reversedAt` and `reversedByTxId` columns added |
+| Multi-tenant scoping | "Transactions table has no `companyId`" | **Closed** — `transactions.companyId` FK present at `schema.ts:262`; index at line 267 |
+| Bill payment field tracking | "Atomic op leaves bills.paidBy/etc blank" | **Closed** — all 7 tracking fields populated atomically at `storage.ts:1530-1538` |
+| Auth security | localStorage tokens, no PIN | **Triple-gate** (`requireAuth + requireAdmin + requirePin`) on financial mutations; CSP enabled in production; Helmet hardened |
+| Currency selectors on UI | Missing on Expenses/Bills/Payroll/Budgets | **Closed** — all four pages now offer currency selection |
+| KYC | Stripe Identity only | **Multi-provider** — Stripe Identity for Stripe markets, Paystack BVN for NG, manual upload + admin review fallback |
+| Payment routing | Hardcoded | **Per-country** via `shared/constants.ts`; Paystack for NG/GH/KE/ZA/TZ/RW/SN/UG/ZM/ZW; Stripe everywhere else |
+| OpenAPI documentation | Not present | **Generated** at [`docs/openapi.yaml`](docs/openapi.yaml) (~5,000 lines) |
+| Email | AWS SES only | **AWS SES + Microsoft 365 SMTP** (Nodemailer fallback) |
+| Test count | Unstated | **353 unit tests passing** (claim from commit `4e79399`); 1 Playwright spec in `e2e/` |
+
+The remaining open audit findings — single-instance scheduler, single-NAT/single-AZ infrastructure, no CI test gate, mobile hardening gaps, client-side Cognito tokens — are tracked in [`AUDIT_2026_04_26.md`](docs/audit-2026-04-26/AUDIT_2026_04_26.md) and [`LOGIC_UPGRADE_PROPOSALS.md`](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md).
 
 ---
 
@@ -23,221 +49,256 @@
 13. [Supported Countries & Currencies](#13-supported-countries--currencies)
 14. [Mobile App](#14-mobile-app)
 15. [Infrastructure & Deployment](#15-infrastructure--deployment)
-16. [Non-Functional Requirements](#16-non-functional-requirements)
-17. [Known Limitations & Tech Debt](#17-known-limitations--tech-debt)
-18. [Roadmap Considerations](#18-roadmap-considerations)
+16. [Operational Runbooks](#16-operational-runbooks)
+17. [Mobile–Web Parity Matrix](#17-mobile-web-parity-matrix)
+18. [Feature Flags](#18-feature-flags)
+19. [Non-Functional Requirements](#19-non-functional-requirements)
+20. [Known Limitations & Tech Debt](#20-known-limitations--tech-debt)
+21. [Roadmap](#21-roadmap)
 
 ---
 
 ## 1. Executive Summary
 
-**Financiar** is a full-stack, multi-tenant fintech SaaS platform for personal and business finance management. It provides expense tracking, bill payments, payroll processing, virtual cards, multi-currency wallets, invoicing, vendor management, team collaboration, and AI-powered financial insights — all through a unified web and mobile experience.
+**Financiar** is a multi-tenant fintech SaaS for individuals and SMBs, providing expense tracking, bill payments, payroll, virtual cards, multi-currency wallets, invoicing, vendor management, team collaboration, and AI-assisted financial insights through a unified web and mobile experience.
 
-The platform supports **dual payment processors** (Stripe for international markets, Paystack for African markets), enabling seamless global coverage across 177 countries. It features KYC/identity verification, role-based access control, transaction PIN security, and a comprehensive admin panel.
+The platform supports **dual payment processors** (Stripe for international markets, Paystack for African markets) and is engineered for global coverage across 177 countries (as listed in the Google Play Store) with **active payment integrations in 10 African countries plus Stripe's full geography**. It features Cognito authentication, multi-tier KYC, role-based access control with 9 granular permissions, transaction PIN security, audit logging, and an admin panel.
 
-### Key Metrics (Current State)
+### Key metrics (post-refactor, 2026-04-26)
 
-| Metric | Count |
-|--------|-------|
-| API endpoints | ~250 unique |
-| Database tables | 41 |
-| Web pages | 36 |
-| Mobile screens | 22 |
-| Supported countries | 177 (Play Store) / 7 with active Paystack support |
-| Payment processors | 2 (Stripe + Paystack) |
-| Notification channels | 4 (in-app, email, SMS, push) |
+| Metric | Value | Source |
+|---|---|---|
+| API endpoints | **~517** (across `server/routes/*.ts` and `routes.legacy.ts`) | `grep router.\(get\|post\|patch\|put\|delete\) server/routes/*.ts server/routes.legacy.ts` |
+| Domain route modules | **24** (+ `index.ts` + `shared.ts` = 26 files) | `ls server/routes/` |
+| Database tables | **42** | `grep -c "^export const .* = pgTable" shared/schema.ts` |
+| Web pages | **36** | `ls client/src/pages/*.tsx` |
+| Mobile screens | **22** | `ls mobile/src/screens/*.tsx` |
+| Active payment markets | **10** Paystack + Stripe global | `shared/constants.ts` |
+| Notification channels | **4** (in-app, email, SMS, push) | `server/services/notification-service.ts` |
+| Unit + integration tests | **353 passing** (claim) | commit `4e79399` |
+| E2E tests | 1 Playwright spec | `e2e/app.spec.ts` |
 
 ---
 
 ## 2. Product Vision & Goals
 
 ### Vision
-To be the go-to financial operating system for individuals and SMBs across emerging and established markets — combining treasury management, expense control, payment processing, and financial intelligence in a single platform.
+
+To be the financial operating system for individuals and SMBs across emerging and established markets — combining treasury management, expense control, payment processing, and financial intelligence in a single platform.
 
 ### Goals
-1. **Unified financial management** — One platform for all money operations (receive, hold, spend, track, report)
-2. **Global accessibility** — Dual payment rail (Stripe + Paystack) ensures coverage in both Western and African markets
-3. **SMB-first design** — Multi-tenant architecture with team roles, departments, approval workflows, and company switching
-4. **Compliance-ready** — Built-in KYC, audit logging, transaction PINs, and role-based permissions
-5. **Mobile parity** — Full-featured React Native app with biometric auth, push notifications, and offline support
+
+1. **Unified financial management** — one platform for receive / hold / spend / track / report
+2. **Global accessibility** — dual payment rails (Stripe + Paystack) ensure coverage in Western and African markets
+3. **SMB-first design** — multi-tenant architecture with team roles, departments, approval workflows, company switching
+4. **Compliance-ready** — built-in KYC, audit logging, transaction PINs, role-based permissions
+5. **Mobile parity** — full-featured React Native app with biometric auth, push notifications, and an offline mutation queue
+
+The 2026 emphasis (post-refactor) is **operational maturity**: shipping reliably, observability, multi-instance scaling, and disciplined release engineering.
 
 ---
 
 ## 3. Target Users
 
 | Persona | Description |
-|---------|-------------|
-| **Solo Entrepreneurs** | Freelancers and sole traders managing personal/business finances |
-| **SMB Owners** | Small business owners needing expense management, payroll, and invoicing |
-| **Finance Teams** | Accountants and finance managers requiring approval workflows, budgets, and reporting |
-| **Remote/Distributed Teams** | Companies with team members across multiple countries/currencies |
-| **African Businesses** | Businesses in Nigeria, Ghana, Kenya, South Africa needing local payment rails |
+|---|---|
+| **Solo entrepreneurs** | Freelancers and sole traders managing personal/business finances |
+| **SMB owners** | Small business owners needing expense management, payroll, and invoicing |
+| **Finance teams** | Accountants and finance managers requiring approval workflows, budgets, and reporting |
+| **Remote/distributed teams** | Companies with team members across countries/currencies |
+| **African businesses** | Businesses in NG, GH, KE, ZA, TZ, RW, SN, UG, ZM, ZW needing local payment rails |
 
 ---
 
 ## 4. Platform Overview
 
-### Web Application
-- **Framework:** React 18 + Vite + TypeScript
-- **UI:** Tailwind CSS + shadcn/ui (47 Radix primitives) + Framer Motion
-- **Routing:** Wouter (lightweight client-side routing)
-- **State:** TanStack React Query v5
-- **Pages:** 36 (12 public/auth, 18 dashboard, 6 admin)
+### Web
 
-### Mobile Application
+- **Framework:** React 18 + Vite + TypeScript 5.6
+- **UI:** Tailwind CSS + shadcn/ui (49 Radix primitives) + Framer Motion 11
+- **Routing:** Wouter 3.3 (lightweight client-side routing)
+- **State:** TanStack React Query 5.60
+- **Pages:** 36 (10 public/auth, 18 dashboard/feature, 10 admin)
+
+### Mobile
+
 - **Framework:** React Native 0.76 + Expo 52
-- **Navigation:** React Navigation 6 (stack + bottom tabs)
-- **Screens:** 22 (3 auth, 1 onboarding, 5 main tabs, 14 secondary)
-- **Distribution:** Google Play Store (`com.financiar.app`, v1.0.3, versionCode 6)
-- **Unique features:** Biometric auth, push notifications, offline sync, secure credential storage
+- **Navigation:** React Navigation 6 (native-stack + bottom-tabs)
+- **Screens:** 22 (3 auth, 1 onboarding, 5 main tabs, 13 secondary)
+- **Distribution:** Google Play Store (`com.financiar.app`, v1.0.3, versionCode 6) — internal track only as of 2026-04-26
+- **Unique features:** Biometric auth, push notifications, offline mutation queue, secure credential storage
 
 ### Backend
-- **Framework:** Express 5.0 + TypeScript
+
+- **Framework:** Express 5.0 + TypeScript 5.6
 - **ORM:** Drizzle ORM 0.39
-- **Database:** PostgreSQL 16.4
-- **Output:** Single CJS bundle (`dist/index.cjs`) serving both API and static client
+- **Database:** PostgreSQL 16.4 (Amazon RDS, single-AZ at present — see [AUD-IN-003](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register))
+- **Output:** Single CommonJS bundle (`dist/index.cjs`) serving both API and static client
+
+### Architecture pattern
+
+Full-stack monorepo. Single deployable unit. The Express server serves the built React client from `dist/public/` and exposes the API at `/api/*`. Static caching headers and a Vite-based dev middleware are conditioned on `NODE_ENV`.
 
 ---
 
 ## 5. Tech Stack
 
-### Core Stack
+### Core
 
 | Layer | Technology | Version |
-|-------|-----------|---------|
+|---|---|---|
 | Frontend | React + Vite + TypeScript | 18.3 / 5.4 / 5.6 |
 | Mobile | React Native + Expo | 0.76 / 52 |
 | Backend | Express + TypeScript | 5.0.1 / 5.6 |
 | Database | PostgreSQL + Drizzle ORM | 16.4 / 0.39 |
-| Auth | AWS Cognito | SDK v3 |
+| Auth | AWS Cognito | SDK v3 + amazon-cognito-identity-js (legacy) |
 | Payments (Intl) | Stripe | 20.0.0 |
 | Payments (Africa) | Paystack | REST API |
-| Email | AWS SES | SDK v3 |
+| Email | AWS SES + Microsoft 365 SMTP (Nodemailer) | SDK v3 |
 | SMS | AWS SNS | SDK v3 |
 | Push | Expo Push Notifications | — |
-| Infra | AWS ECS Fargate + RDS + ALB | CDK 2.170 |
+| Logging | pino + pino-pretty | 10.3 / 13.1 |
+| Validation | Zod 3.24 + drizzle-zod 0.7 | — |
+| Tests | Vitest + Playwright | 4.1 / 1.58 |
+| Infra | AWS CDK + ECS Fargate + RDS + ALB | 2.x |
 
-### Frontend Libraries
+### Frontend libraries
 
 | Category | Libraries |
-|----------|-----------|
-| UI Components | shadcn/ui (47 Radix primitives), Lucide icons, React Icons |
-| Animations | Framer Motion 11.13 |
+|---|---|
+| UI components | shadcn/ui (49 Radix primitives), Lucide icons, React Icons |
+| Animations | Framer Motion 11 |
 | Charts | Recharts 2.15 |
-| Forms | React Hook Form 7.55 + Zod 3.24 |
+| Forms | React Hook Form 7.55 + Zod 3.24 (planned: shared schema reuse — [LU-009](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-009-shared-zod-schemas-on-client)) |
 | Routing | Wouter 3.3 |
 | State | TanStack React Query 5.60 |
 | Date | date-fns, react-day-picker |
 | Tour | react-joyride |
 | Carousel | embla-carousel-react |
 
-### Mobile Libraries
+### Mobile libraries
 
 | Category | Libraries |
-|----------|-----------|
+|---|---|
 | Navigation | React Navigation 6 (native-stack + bottom-tabs) |
 | Auth | amazon-cognito-identity-js |
 | Biometrics | expo-local-authentication |
 | Storage | AsyncStorage + expo-secure-store |
 | Notifications | expo-notifications |
-| Camera/Gallery | expo-image-picker |
+| Camera/gallery | expo-image-picker |
 | Browser | expo-web-browser |
 | Clipboard | expo-clipboard |
 | Network | @react-native-community/netinfo |
-| Persistence | TanStack Query + AsyncStorage persister |
+| Persistence | TanStack Query + AsyncStorage persister (planned migration to encrypted store — [LU-006c](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-006c--encrypted-local-storage)) |
 
 ---
 
 ## 6. Authentication & Security
 
-### Authentication Flow
+### Authentication flow
 
 ```
-User -> Cognito (email/password or Google OAuth or SMS OTP)
-     -> JWT (id_token + access_token + refresh_token)
-     -> Server verifies via aws-jwt-verify
-     -> User profile synced to PostgreSQL (user_profiles table)
+User → Cognito (email/password OR Google OAuth OR SMS OTP)
+     → JWT (id_token + access_token + refresh_token)
+     → Server verifies via aws-jwt-verify (kid caching built-in)
+     → User profile synced to PostgreSQL (user_profiles table)
+     → req.user populated for downstream handlers
 ```
 
-### Auth Methods
-1. **Email + Password** — Standard Cognito user pool auth
-2. **Google OAuth** — Cognito Hosted UI redirect -> code exchange
-3. **SMS OTP** — Custom auth challenge flow via Cognito Lambda triggers
-4. **Biometric (Mobile)** — Face ID / Fingerprint using expo-local-authentication; credentials stored in expo-secure-store
+### Auth methods
 
-### Security Layers
+1. **Email + password** — standard Cognito user-pool auth
+2. **Google OAuth** — Cognito Hosted UI redirect → authz-code exchange (`/auth/callback`)
+3. **SMS OTP** — custom auth challenge flow via Cognito Lambda triggers
+4. **Biometric (mobile)** — Face ID / fingerprint via `expo-local-authentication`; credentials stored in `expo-secure-store`
 
-| Layer | Implementation |
-|-------|---------------|
-| JWT verification | `aws-jwt-verify` on every authenticated request |
-| Transaction PIN | 4-digit bcrypt-hashed PIN for financial operations |
-| Role-based access | 6 roles: OWNER, ADMIN, MANAGER, EDITOR, EMPLOYEE, VIEWER |
-| 9 granular permissions | VIEW_TREASURY, MANAGE_TREASURY, CREATE_EXPENSE, APPROVE_EXPENSE, SETTLE_PAYMENT, MANAGE_CARDS, MANAGE_TEAM, VIEW_REPORTS, MANAGE_SETTINGS |
-| Rate limiting | 5 tiers: API (100/15min), Auth (5/15min), Sensitive (10/15min), Financial (3/1min), Email (3/1hr) |
-| Audit logging | Every significant action logged with userId, IP, userAgent, entity details |
-| Webhook idempotency | `processed_webhooks` table prevents duplicate event processing |
-| Row-level locking | `SELECT ... FOR UPDATE` on wallet operations |
-| Atomic transactions | All financial operations use PostgreSQL transactions |
-| Input validation | Zod schemas on all API inputs |
-| Error sanitization | SQL/stack traces stripped from client-facing errors |
-| CORS | Production-locked to `thefinanciar.com` domains |
-| Non-root container | Docker runs as `appuser:appgroup` (UID 1001) |
+### Security layers
 
-### KYC / Identity Verification
+| Layer | Implementation | Status |
+|---|---|---|
+| JWT verification | `aws-jwt-verify` on every authenticated request, kid caching automatic | ✅ |
+| Transaction PIN | 4-digit bcrypt-hashed PIN; required on financial mutations | ✅ |
+| Triple-gate | `requireAuth` + `requireAdmin` + `requirePin` on sensitive endpoints | ✅ |
+| Role-based access | 6 roles: OWNER, ADMIN, MANAGER, EDITOR, EMPLOYEE, VIEWER | ✅ |
+| 9 granular permissions | VIEW_TREASURY, MANAGE_TREASURY, CREATE_EXPENSE, APPROVE_EXPENSE, SETTLE_PAYMENT, MANAGE_CARDS, MANAGE_TEAM, VIEW_REPORTS, MANAGE_SETTINGS | ✅ |
+| Rate limiting (5 tiers) | API 100/15min · Auth 5/15min · Sensitive 10/15min · Financial 3/min · Email 3/hr | ✅ |
+| Audit logging | Every significant action: userId, IP, userAgent, entity details | ✅ (purge endpoint records `'system'` instead of admin — see [AUD-BE-017](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)) |
+| Webhook idempotency | `processed_webhooks` table + `wallet_transactions(reference)` UNIQUE | ✅ |
+| Row-level locking | `SELECT ... FOR UPDATE` on wallet, card, virtual_account ops | ✅ |
+| Atomic transactions | All 4 financial atomic ops use `db.transaction(...)` | ✅ |
+| Input validation | Zod on all API inputs (server). Client-side reuse pending — see [LU-009](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-009-shared-zod-schemas-on-client). | ⚠️ |
+| Error sanitisation | SQL/stack traces stripped before client display | ✅ |
+| CORS | Production-locked to `thefinanciar.com` domains; dev permissive | ✅ |
+| CSP | Strict directives in production (self + Stripe + Paystack + S3) | ✅ |
+| Non-root container | Docker runs as `appuser:appgroup` (UID 1001) | ✅ |
+| Secrets management | AWS Secrets Manager; not in `.env.example` | ✅ |
+| Token storage (web) | localStorage (XSS exposure — see [AUD-FE-001](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)) | ❌ planned [LU-010](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-010-auth-cookie-modernization) |
+| Cert pinning (mobile) | Not implemented | ❌ planned [LU-006b](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-006b--certificate-pinning) |
+| Jailbreak detection (mobile) | Not implemented | ❌ planned [LU-006a](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-006a--jailbreak--root-detection) |
+
+### KYC / identity verification
 
 **Multi-provider KYC:**
-- **Stripe Identity** — Automated document + selfie verification (US, EU, UK)
-- **Paystack BVN** — Bank Verification Number resolution (Nigeria)
-- **Manual KYC** — Document upload + admin review
+
+- **Stripe Identity** — automated document + selfie verification (US, EU, UK, AU, CA)
+- **Paystack BVN** — Bank Verification Number resolution (Nigeria) — migrated in commit `d99c31a`
+- **Manual KYC** — document upload + admin review (markets without automated providers)
 
 **Country-specific ID types:**
-| Country | ID Types |
-|---------|----------|
+
+| Country | ID types accepted |
+|---|---|
 | Nigeria | BVN, NIN, Voter's Card, Driver's License, International Passport |
 | Ghana | Ghana Card, Voter's ID, Driver's License, Passport |
 | Kenya | National ID, Passport, Alien Card |
 | South Africa | SA ID, Passport, Asylum Document |
 | US | SSN, Driver's License, Passport, State ID |
 | UK | Passport, Driver's License, BRP |
-| General | Passport, National ID, Driver's License |
+| EU | National ID, Passport |
+| Other | Passport, National ID, Driver's License |
 
 ---
 
 ## 7. Feature Catalog
 
 ### 7.1 Dashboard
-- Balance overview (local currency + USD + escrow)
-- Virtual account details (account number, bank name, routing)
-- Fund wallet, withdraw, and send money dialogs
-- Recent transactions feed
-- AI-powered financial insights
-- KPI cards (net cash flow, pending expenses, overdue bills, budget utilization)
-- Guided product tour (8 steps, auto-starts on first visit)
-- Quick actions FAB (Fund Wallet, New Expense, Pay Bills)
 
-### 7.2 Multi-Currency Wallets
+- Balance overview (local currency + USD + escrow)
+- Virtual account details (account number, bank name, routing/SWIFT)
+- Fund wallet, withdraw, send-money dialogs
+- Recent transactions feed (currently sourced from `transactions` table — does not include wallet transfers/bill payments until [LU-001](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-001-wallet--transaction-bridge) lands)
+- AI-powered financial insights
+- KPI cards (net cash flow, pending expenses, overdue bills, budget utilisation)
+- Guided product tour (8 steps, auto-starts on first visit)
+- Quick actions FAB
+
+### 7.2 Multi-currency wallets
+
 - Per-user, per-currency wallets with real-time balances
 - `balance`, `availableBalance`, `pendingBalance` tracking
 - Atomic credit/debit operations with row-level locking
-- Full transaction ledger per wallet
-- Cross-wallet transfers with exchange rate application
-- Transaction reversals with idempotency guards
+- Full transaction ledger per wallet (`wallet_transactions`)
+- Cross-wallet transfers with exchange-rate application
+- Transaction reversals with idempotency guards (verified at `storage.ts:1722-1725`)
+- DB-level uniqueness on `(user_id, currency)` — prevents duplicate wallets ([migrations/0007](migrations/0007_add_security_constraints.sql))
 
-### 7.3 Expense Management
+### 7.3 Expense management
+
 - Create/edit/delete expenses with categories, receipts, notes
 - Receipt upload via file/camera (multer on server, image picker on mobile)
-- Approval workflow: PENDING -> APPROVED/REJECTED/CHANGES_REQUESTED
+- Approval workflow: PENDING → APPROVED / REJECTED / CHANGES_REQUESTED → PAID
 - Batch approval for admins
-- Approve-and-pay: Approve expense + initiate payout in one action
+- Approve-and-pay: approve expense + initiate payout in one action (triple-gate enforced)
 - Vendor linking on expenses
 - Department tagging
 - Tagged reviewers
 
-### 7.4 Bill Management & Utility Payments
+### 7.4 Bill management & utility payments
+
 - Bill tracking with due dates, categories, recurring schedules
-- Bill approval workflow (approve/reject/request changes)
-- Pay bills from wallet (atomic wallet debit + bill status update)
-- Recurring bill auto-generation via scheduler
+- Bill approval workflow (approve / reject / request changes)
+- Atomic bill payment from wallet (all 7 tracking fields populated atomically — verified at `storage.ts:1530-1538`)
+- Recurring bill auto-generation via scheduler (every 1h; **single-instance only — see [AUD-BE-001](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)**)
 - **Utility payments** (Paystack markets):
   - Airtime top-up
   - Data bundles
@@ -245,574 +306,582 @@ User -> Cognito (email/password or Google OAuth or SMS OTP)
   - Cable TV (DStv, GOtv, StarTimes)
   - Internet
 
-### 7.5 Budget Management
+### 7.5 Budget management
+
 - Create budgets by category with spending limits
 - Period options: monthly, quarterly, yearly
 - Real-time spent tracking with progress indicators
-- Near-limit warnings (80%+ utilization)
+- Near-limit warnings (80%+ utilisation)
 - Over-budget alerts
 
-### 7.6 Virtual Cards (Stripe Issuing)
+### 7.6 Virtual cards (Stripe Issuing)
+
 - Create virtual and physical cards
-- Fund cards from wallet (atomic operation)
+- Fund cards from wallet (atomic operation, FOR UPDATE on wallet AND card row at `storage.ts:1595-1599`)
 - Freeze/unfreeze cards
 - View sensitive card details (PAN, CVV) with rate limiting
 - Spending controls (per-transaction limits, merchant categories)
 - Cancel cards permanently
 - Card transaction history
 
-### 7.7 Virtual Bank Accounts
+### 7.7 Virtual bank accounts
+
 - Create virtual accounts for receiving payments
 - **Paystack DVA** (Dedicated Virtual Accounts) for Nigerian Naira
 - **Stripe Treasury** for USD/EUR/GBP accounts
-- Account details: number, bank name, routing number, SWIFT code
+- Account details: number, bank name, routing number, SWIFT code (verify schema completeness — [AUD-VA-1](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register))
 - Balance tracking per account
 
 ### 7.8 Invoicing
+
 - Create invoices with line items (description, quantity, rate)
-- Auto-generated sequential invoice numbers (INV-2026-001)
+- Auto-generated sequential invoice numbers (e.g. `INV-2026-001`)
 - Tax calculation (configurable rate)
 - Multi-currency support
-- Send invoices via email (AWS SES)
+- Send invoices via email (AWS SES or M365 SMTP)
 - **Public payment page** (`/pay/:id`) — clients pay invoices without authentication
 - Payment via Stripe or Paystack based on invoice currency
 - Status tracking: pending, paid, overdue
 
 ### 7.9 Payroll
+
 - Add employees with salary, bonus, deductions breakdown (tax, pension, insurance)
 - Net pay auto-calculation
 - Department assignment with bank details
 - Process payroll (batch payout to all employees)
 - Individual payroll payments
-- Recurring payroll with auto-generation
+- Recurring payroll with auto-generation (every 1h scheduler tick)
 - Tax estimation endpoint
 - Country-aware bank validation
 
-### 7.10 Vendor Management
+### 7.10 Vendor management
+
 - Vendor directory with contact info, category, payment terms
 - Track total paid and pending payments (aggregated from payouts)
 - Pay vendors directly from vendor profile
 - Link vendors to expenses
 - Payout destination management per vendor
+- (Currency on vendors is missing — see [AUD-BE-013](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register))
 
-### 7.11 Team & Company Management
-- **Multi-company:** Users can create and switch between multiple businesses
-- **Company invitations:** Email-based invites with token-based acceptance
+### 7.11 Team & company management
+
+- **Multi-company:** users can create and switch between multiple businesses (`X-Company-Id` header on all client requests)
+- **Company invitations:** email-based invites with token-based acceptance
 - **Roles:** OWNER, ADMIN, MANAGER, EDITOR, EMPLOYEE, VIEWER
-- **Departments:** Create departments with budgets, heads, and color coding
+- **Departments:** create departments with budgets, heads, and colour coding
 - **Team members:** CRUD with role/department assignment
 - **Permissions:** 9 granular permissions assignable per role
 
-### 7.12 Analytics & Reporting
-- **Dashboard analytics:** Summary totals, KPIs
-- **Cash flow analysis:** Income vs expenses over time
-- **Vendor performance:** Spending by vendor
-- **Payroll summary:** Payroll analytics
-- **Category breakdowns:** Spending by category
-- **Business insights:** AI-generated recommendations
-- **Analytics snapshots:** Historical period data (daily/weekly/monthly)
-- **Report generation:** Export to PDF/CSV with date ranges
-- **Report types:** Expense, revenue, budget, tax, custom
+### 7.12 Analytics & reporting
+
+- **Dashboard analytics:** summary totals, KPIs
+- **Cash flow analysis:** income vs expenses over time
+- **Vendor performance:** spending by vendor
+- **Payroll summary:** payroll analytics
+- **Category breakdowns:** spending by category
+- **Business insights:** AI-generated recommendations (OpenAI)
+- **Analytics snapshots:** historical period data (daily/weekly/monthly)
+- **Report generation:** export to PDF/CSV with date ranges
+- **Report types:** expense, revenue, budget, tax, custom
 
 ### 7.13 Notifications
-- **4 channels:** In-app, email (AWS SES), SMS (AWS SNS), push (Expo)
+
+- **4 channels:** in-app, email (AWS SES or M365 SMTP), SMS (AWS SNS), push (Expo)
 - **14 notification types:** expense_submitted, expense_approved, expense_rejected, payment_received, payment_sent, bill_due, bill_overdue, budget_warning, budget_exceeded, kyc_approved, kyc_rejected, card_transaction, team_invite, system_alert
-- Per-user channel preferences
-- Unread count badge
-- Mark as read (individual + bulk)
-- Push token management with device tracking
-- Test email endpoint
 
-### 7.14 Admin Panel
-- **Platform stats dashboard**
-- **User management:** View, edit, suspend users
-- **Audit logs:** Full audit trail viewer with filters
-- **Organization settings:** Platform-level configuration
-- **Security settings:** Session policies, 2FA enforcement
-- **Wallet management:** View and manage platform wallets
-- **Payout management:** Approve, process, reject payouts
-- **Exchange rate management:** Set rates, configure markup, fetch live rates
-- **Database tools:** Seed data, purge database, run scheduler
-- **Role & permission management**
+### 7.14 Admin panel
 
-### 7.15 Onboarding
-- **4-step wizard (web) / 3-step wizard (mobile):**
-  1. Account type selection (personal/business)
-  2. Profile details (name, country, currency, phone, DOB, business info)
-  3. KYC verification (country-specific ID, address)
-  4. Completion (creates company, wallet, virtual accounts, subscription)
-- Auto-provisioning: Company + wallet + virtual account + trial subscription created in one transaction
-
-### 7.16 Settings
-- **Profile:** Display name, photo, phone, timezone, language, date format
-- **Company:** Name, email, phone, address, currency, fiscal year, branding (logo, colors), invoice settings
-- **Notifications:** Per-channel toggles, per-category toggles, weekly digest
-- **Security:** Transaction PIN (enable/disable/change), 2FA, session timeout
-- **Billing:** Subscription management, plan details, payment method
-- **KYC:** Verification status and resubmission
+- User management (list, role/status updates, suspension, hard delete)
+- Audit logs (paginated, filterable by action/user)
+- Organization settings + API key generation
+- Security (2FA, IP whitelisting, session termination — feature surface present, several controls in development)
+- Wallets (balances, funding history)
+- Payouts (batch creation, settlement logs)
+- Exchange rates (manual update)
+- **Database management** — currently a one-click purge endpoint behind `requireAdmin` (see [AUD-BE-003](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register); replacement specified in [LU-008](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-008-database-purge-hardening))
 
 ---
 
 ## 8. Database Architecture
 
-### Overview
-- **41 tables** in PostgreSQL via Drizzle ORM
-- **Multi-tenant architecture** — `companies` table is the central hub with 24 foreign keys pointing to it
-- **14 enum-like constants** for type safety
-- **35 foreign key relationships**
-- **70+ database indexes**
+**42 `pgTable` definitions** in [`shared/schema.ts`](shared/schema.ts).
 
-### Core Tables
+### Tables by domain
 
-| Table | Purpose | Key Relations |
-|-------|---------|--------------|
-| `companies` | Multi-tenant root entity | Central hub — 24 FKs reference it |
-| `user_profiles` | Cognito-synced user data | -> companies |
-| `wallets` | Multi-currency balances | -> companies, virtual_accounts |
-| `wallet_transactions` | Immutable ledger entries | -> wallets |
-| `expenses` | Expense records | -> companies, departments, vendors |
-| `transactions` | General transaction log | -> companies |
-| `bills` | Bill records | -> companies |
-| `budgets` | Budget limits & tracking | -> companies |
-| `virtual_cards` | Card records | -> companies |
-| `card_transactions` | Card usage log | -> virtual_cards |
-| `virtual_accounts` | Bank accounts (DVA/Treasury) | -> companies |
-| `invoices` | Invoice records | -> companies |
-| `payroll_entries` | Payroll records | -> companies, departments |
-| `vendors` | Vendor directory | -> companies |
-| `departments` | Department structure | -> companies |
-| `team_members` | Team records | -> companies, departments |
-| `company_members` | User-company membership | -> companies |
-| `company_invitations` | Invitation tokens | -> companies |
-| `company_balances` | Aggregated balances (local + USD + escrow) | -> companies |
-| `kyc_submissions` | KYC verification data | -> user_profiles |
-| `audit_logs` | Security audit trail | -> companies |
-| `payouts` | Outbound payment records | -> payout_destinations, companies |
-| `payout_destinations` | Saved bank accounts | -> vendors |
-| `scheduled_payments` | Recurring payment schedules | -> companies |
-| `notifications` | In-app notification records | Indexed by userId |
-| `notification_settings` | Per-user notification preferences | Unique by userId |
-| `push_tokens` | Device push tokens | Indexed by userId |
-| `subscriptions` | Billing subscriptions | -> companies |
-| `exchange_rates` | Currency rates | — |
-| `exchange_rate_settings` | Markup configuration | — |
-| `analytics_snapshots` | Historical analytics | -> companies |
-| `business_insights` | AI-generated insights | -> companies |
-| `processed_webhooks` | Webhook idempotency | Unique by eventId |
-| `funding_sources` | Saved payment methods | — |
-| `reports` | Generated report records | -> companies |
-| `role_permissions` | Role-permission mappings | — |
-| `system_settings` | Key-value config | — |
-| `admin_settings` | Admin key-value config | — |
-| `organization_settings` | Platform org settings | — |
-| `company_settings` | Legacy single-row settings | — |
-| `users` | Legacy user table (deprecated) | — |
+| Domain | Tables |
+|---|---|
+| Tenancy & users | `companies`, `companyMembers`, `companyInvitations`, `userProfiles`, `users` (legacy/deprecated) |
+| Financial ledgers | `transactions`, `walletTransactions`, `wallets`, `companyBalances` |
+| Money movement | `expenses`, `bills`, `invoices`, `payouts`, `payoutDestinations`, `fundingSources`, `payrollEntries`, `scheduledPayments`, `vendors` |
+| Cards & accounts | `virtualCards`, `cardTransactions`, `virtualAccounts` |
+| Compliance & audit | `kycSubmissions`, `auditLogs`, `processedWebhooks`, `dataRetentionPolicies` |
+| Notifications | `notifications`, `notificationSettings`, `pushTokens` |
+| Configuration | `organizationSettings`, `systemSettings`, `adminSettings`, `rolePermissions`, `companySettings`, `sessionSettings` (legacy) |
+| Reporting & teams | `analyticsSnapshots`, `businessInsights`, `reports`, `budgets`, `departments`, `teamMembers` |
+| Billing | `subscriptions` |
+| FX | `exchangeRates`, `exchangeRateSettings` |
+
+### Multi-tenant scoping
+
+Every financial table now has a `companyId` column with FK to `companies.id`:
+
+- `cascade` on `companyMembers`, `companyInvitations`, `budgets`, `departments`, `teamMembers`
+- `set null` on `expenses`, `bills`, `transactions`, `virtualCards`, `payrollEntries`, `invoices`, `vendors`, `walletTransactions` (preserves history if a company is deleted)
+
+Indexes on `companyId` are present everywhere — verified by grep.
+
+### Migrations
+
+8 hand-written SQL files in [`migrations/`](migrations/), run idempotently by [`scripts/run-migration.cjs`](scripts/run-migration.cjs) on container startup.
+
+| File | Purpose |
+|---|---|
+| `0000_natural_outlaw_kid.sql` | Initial schema + indices |
+| `0001_schema_refactor.sql` | Consolidate tables + FKs |
+| `0002_add_indexes_and_fk.sql` | FK constraints + indices (incl. `transactions.walletTransactionId` FK at SQL level) |
+| `0003_add_missing_columns.sql` | Add columns to existing tables |
+| `0004_subscriptions_and_billing.sql` | Subscription + scheduled payment tables |
+| `0005_ensure_all_columns.sql` | Fill schema gaps |
+| `0006_add_indexes_and_unique_reference.sql` | Index transaction reference |
+| `0007_add_security_constraints.sql` | Unique on `wallets(user_id, currency)`; unique on `wallet_transactions(reference)`; partial unique on `transactions(reference)` |
+
+Planned (per `LOGIC_UPGRADE_PROPOSALS.md`):
+
+| File | From | Purpose |
+|---|---|---|
+| `0008_backfill_transactions_from_wallet.sql` | [LU-001](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-001-wallet--transaction-bridge) | Bridge wallet ledger → transactions |
+| `0009_scheduler_advisory_lock.sql` | [LU-002](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-002-scheduler-leader-election) | SQL helper for advisory lock |
+| `0010_soft_delete_on_financial_tables.sql` | [LU-004](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-004-soft-delete-on-financial-tables) | `deleted_at` + filtered indices |
+| `0011_card_transactions_currency.sql` | [LU-005](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-005-cardtransactions-currency-column) | Add currency to card_transactions |
+| `0012_pending_destructive_actions.sql` | [LU-008](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-008-database-purge-hardening) | Two-admin purge approval table |
+| `0013_reconciliation_reports.sql` | [LU-014](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-014-payment-reconciliation-job) | Daily ledger reconciliation report |
 
 ---
 
 ## 9. API Surface
 
-### Summary
+**~517 endpoints** across `server/routes/*.ts` and the legacy `server/routes.legacy.ts`. Mounted at `/api`. OpenAPI spec at [`docs/openapi.yaml`](docs/openapi.yaml) (~5,000 lines, autogenerated).
 
-| Category | Endpoint Count | Auth Required |
-|----------|---------------|---------------|
-| Health | 1 | No |
-| Auth & SMS | 9 | Mixed |
-| User Profile & Settings | 7 | Yes |
-| Onboarding & KYC | 12 | Mixed |
-| Transaction PIN | 3 | Yes |
-| Balances | 5 | Yes |
-| Expenses | 10 | Yes |
-| Transactions | 5 | Yes |
-| Bills | 10 | Yes |
-| Budgets | 5 | Yes |
-| Cards (Stripe Issuing) | 13 | Yes |
-| Virtual Accounts | 6 | Yes |
-| Departments | 5 | Yes |
-| Companies & Invitations | 10 | Mixed |
-| Team | 5 | Yes |
-| AI Insights & Reports | 5 | Yes |
-| Payroll | 9 | Yes (Admin) |
-| Invoices | 9 | Mixed |
-| Vendors | 6 | Yes |
-| Payment Routes | 14 | Mixed |
-| Wallet Operations | 3 | Yes |
-| Utility Payments | 2 | Yes |
-| Paystack-Specific | 20 | Mixed |
-| Subscriptions | 3 | Yes |
-| Analytics | 8 | Yes |
-| Notifications | 10 | Yes |
-| Admin | 19 | Admin |
-| Wallets (Multi-currency) | 6 | Yes |
-| Exchange Rates | 8 | Mixed |
-| Payout Destinations | 4 | Yes |
-| Payouts | 7 | Yes |
-| Scheduled Payments | 6 | Admin |
-| Funding Sources | 3 | Yes |
-| Audit Logs | 2 | Yes |
-| **Total** | **~250** | |
+### Domain modules
 
-### Webhooks (3)
+| Module | Domain |
+|---|---|
+| `accounts.routes.ts` | Virtual bank accounts |
+| `admin.routes.ts` | Admin panel (users, audit logs, organization, security, purge) |
+| `analytics.routes.ts` | Dashboard analytics, KPIs, business insights |
+| `balances.routes.ts` | Company balances, escrow |
+| `bills.routes.ts` | Bills CRUD + payment + recurring |
+| `budgets.routes.ts` | Budgets CRUD + utilisation |
+| `cards.routes.ts` | Virtual cards (Stripe Issuing) |
+| `companies.routes.ts` | Company CRUD + switching |
+| `expenses.routes.ts` | Expenses CRUD + approval workflow + batch approve-and-pay |
+| `health.routes.ts` | `/api/health` for ALB health check |
+| `invoices.routes.ts` | Invoices CRUD + public payment page support |
+| `kyc.routes.ts` | KYC submissions, Stripe Identity, Paystack BVN |
+| `notifications.routes.ts` | In-app notifications + push token registration |
+| `payment-methods.routes.ts` | Saved payment methods (cards, bank accounts) |
+| `payments.routes.ts` | Stripe + Paystack payment initiation |
+| `payouts.routes.ts` | Payouts to vendors, employees |
+| `payroll.routes.ts` | Payroll entries + processing + tax estimation |
+| `reports.routes.ts` | PDF/CSV export of expense, revenue, budget, tax reports |
+| `scheduled.routes.ts` | Scheduled payments CRUD |
+| `settings.routes.ts` | User profile, password change, account closure |
+| `team.routes.ts` | Team members, departments, invitations |
+| `transactions.routes.ts` | Transaction history (currently `transactions` only — see [AUD-BE-002](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)) |
+| `vendors.routes.ts` | Vendor CRUD + payments |
+| `wallets.routes.ts` | Wallet CRUD + funding + transfers + reversals |
+| `webhooks.routes.ts` | Stripe + Paystack webhook receivers (signature-verified) |
 
-| Endpoint | Provider | Events Handled |
-|----------|----------|---------------|
-| `POST /api/paystack/webhook` | Paystack | charge.success, transfer.success/failed, subscription.create, invoice.payment_failed, DVA events |
-| `POST /api/stripe/webhook` | Stripe | payment_intent.succeeded, checkout.session.completed, issuing_authorization.*, issuing_transaction.created, treasury.*, payout.* |
-| `POST /api/kyc/stripe/webhook` | Stripe Identity | identity.verification_session.verified/requires_input |
+Plus utilities: `index.ts` (route registration), `shared.ts` (`verifyCompanyAccess`, `resolveUserCompany`, `logAudit`).
+
+### Cross-cutting middleware
+
+| Middleware | File | Purpose |
+|---|---|---|
+| `helmet` | `index.ts:65-80` | Security headers, strict CSP in production |
+| `cors` | `index.ts:110-124` | Origin allowlist, credentials, custom headers |
+| `csrfProtection` | `middleware/csrf.ts` | `X-Requested-With` enforcement on `/api` |
+| `apiLimiter` | `middleware/rateLimiter.ts` | 5-tier rate limiting |
+| `requestLogger` | `lib/logger.ts:64-96` | Correlation IDs, status-aware level routing |
+| `requireAuth` | `middleware/auth.ts` | Cognito JWT verification |
+| `requireAdmin` | `middleware/auth.ts` | Role check + company scope |
+| `requirePin` | `middleware/auth.ts` | Transaction PIN verification + financial limiter |
 
 ---
 
 ## 10. Payment Infrastructure
 
-### Dual Payment Processor Model
+### Per-country routing
 
-```
-User's Country
-├── Africa (NG, GH, KE, ZA, RW, CI, EG) -> Paystack
-└── International (US, UK, EU, AU, CA, ...) -> Stripe
-```
+Source of truth: [`shared/constants.ts`](shared/constants.ts).
 
-### Stripe Capabilities
+| Country code | Provider | Currency |
+|---|---|---|
+| NG, GH, KE, ZA, TZ, RW, SN, UG, ZM, ZW | Paystack | NGN, GHS, KES, ZAR, TZS, RWF, USD |
+| US, CA, GB, EU (DE/FR/etc.), AU, etc. | Stripe | USD, CAD, GBP, EUR, AUD, etc. |
 
-| Feature | Stripe Product | Usage |
-|---------|---------------|-------|
-| Card payments | Payment Intents | Wallet funding (international) |
-| Checkout | Stripe Checkout | Subscription payments, invoice payments |
-| Card issuing | Stripe Issuing | Virtual/physical cards, spending controls |
-| Bank accounts | Stripe Treasury | Virtual accounts (USD/EUR/GBP) |
-| Payouts | Stripe Payouts | Bank transfers (ACH, SEPA, BACS, BECS) |
-| Identity | Stripe Identity | KYC document + selfie verification |
-| Subscriptions | Stripe Billing | Platform subscription management |
-| Webhooks | Stripe Webhooks | Real-time event processing |
+### Stripe integration
 
-### Paystack Capabilities
+[`server/stripeClient.ts`](server/stripeClient.ts) and [`server/webhookHandlers.ts`](server/webhookHandlers.ts) (1,205 lines). Events handled:
 
-| Feature | Paystack API | Usage |
-|---------|-------------|-------|
-| Card payments | Transaction Initialize | Wallet funding (Africa) |
-| Bank transfers | Transfer API | Payouts, payroll, vendor payments |
-| Bulk transfers | Bulk Transfer API | Batch payroll processing |
-| Virtual accounts | DVA API | Dedicated Virtual Accounts (NGN) |
-| BVN verification | Validate Customer | KYC for Nigerian users |
-| Bank resolution | Resolve Account | Account name verification |
-| Recurring billing | Subscription API | Platform subscriptions |
-| Saved cards | Charge Authorization | Recurring payments |
-| Utility payments | Transaction Initialize | Airtime, data, electricity, cable |
+- `payment_intent.succeeded` / `payment_intent.payment_failed`
+- `checkout.session.completed`
+- `charge.refunded`
+- `issuing_transaction.created` (for virtual card spend)
+- `transfer.paid` / `transfer.failed` / `transfer.reversed`
+- `payout.paid` / `payout.failed`
+- `treasury.received_credit.created` / `treasury.outbound_payment.posted`
 
-### Supported Transfer Methods by Country
+Signature verification via `stripe.webhooks.constructEvent` with raw body captured by the JSON parser's `verify` callback.
 
-| Country | Paystack Method | Stripe Method |
-|---------|----------------|---------------|
-| Nigeria | NUBAN (10-digit) | — |
-| Ghana | GHIPSS (10-16 digit) | — |
-| South Africa | BASA (8-12 digit + 6-digit branch) | — |
-| Kenya | Mobile Money (format) | — |
-| Rwanda | Mobile Money (format) | — |
-| Côte d'Ivoire | Mobile Money (format) | — |
-| Egypt | Bank account (10-29 digit) | — |
-| US | — | ACH (9-digit routing + account) |
-| Canada | — | EFT (transit + institution + account) |
-| UK | — | BACS (6-digit sort code + 8-digit account) |
-| Australia | — | BECS (6-digit BSB + account) |
-| EU/EEA | — | SEPA (IBAN) |
+### Paystack integration
+
+[`server/paystackClient.ts`](server/paystackClient.ts) and [`server/paystackWebhook.ts`](server/paystackWebhook.ts) (~22 KB). Events handled:
+
+- `charge.success`
+- `transfer.success` / `transfer.failed` / `transfer.reversed`
+- `refund.processed` / `refund.failed`
+
+Signature verification via HMAC-SHA512 with `crypto.timingSafeEqual` to prevent timing attacks.
+
+### Idempotency
+
+- Webhook events: `processed_webhooks` table tracks (eventId, provider, eventType)
+- Wallet transactions: DB-level UNIQUE on `wallet_transactions(reference)` (since [migration 0007](migrations/0007_add_security_constraints.sql))
+- Reversals: code-level guard at `storage.ts:1722-1725` plus `walletTransactions.reversedAt` timestamp
+
+### Refunds & reversals
+
+| Path | Trigger |
+|---|---|
+| Stripe | `charge.refunded` webhook → update transaction, credit wallet |
+| Paystack | `refund.processed` webhook → similar |
+| Manual | `atomicReversal` via admin endpoint |
+
+Reconciliation against provider ledgers is **not yet automated** — proposed in [LU-014](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-014-payment-reconciliation-job).
 
 ---
 
 ## 11. Billing & Subscription Model
 
-### Subscription States
-`trialing` -> `active` -> `past_due` -> `canceled` -> `expired`
+`subscriptions` table tracks per-company subscription state. Today the platform supports a flat-rate model (set up via Stripe and/or Paystack); tiered pricing is proposed in [`BRD_2026_04_26.md`](docs/audit-2026-04-26/BRD_2026_04_26.md) Part B.
 
-### Subscription Table Fields
-- Provider (stripe / paystack)
-- Provider subscription ID, customer ID, plan ID
-- Trial start/end dates
-- Current period start/end
-- Quantity (seats) and unit price
-- Currency
+Planned tiers (subject to Godwin's pricing call):
 
-### Pricing
-- Default unit price: **$5.00/seat/month** (500 cents)
-- Trial period: Configurable (stored in `trialStartDate` / `trialEndDate`)
+| Tier | Audience | Headline price | Features |
+|---|---|---|---|
+| Free | Solo / trial | $0 | Single user, single company, 50 transactions/mo, basic reports |
+| Starter | Solo entrepreneurs | $9–19/mo | Single user, single company, unlimited transactions, virtual cards, basic invoicing |
+| Pro | SMB | $49–99/mo | Up to 10 users, multi-currency, payroll, KYC, advanced reports, priority support |
+| Enterprise | Larger SMBs | $199+/mo or custom | Unlimited users, multi-company, custom roles, SSO (planned), dedicated support, SLA |
 
-### Subscription Enforcement
-- `SubscriptionBanner` component shows trial countdown, expired notice, or past-due warning
-- Trial expiry scheduler runs **hourly** — checks and updates expired trials
-- Dual provider: Stripe Billing for international, Paystack Subscriptions for Africa
+Transaction fees layer on top: a markup over Stripe/Paystack base fees (e.g. +0.4% + ₦20 / +0.4% + $0.20). See BRD Part B for the modelling framework.
 
 ---
 
 ## 12. Third-Party Services & API Costs
 
-### AWS Services
+| Service | Purpose | Pricing model | Approximate cost (current scale) |
+|---|---|---|---|
+| AWS Cognito | Auth | $0.0055 per MAU above 50,000 free | $0 |
+| AWS RDS PostgreSQL | Database | t3.micro $14/mo + storage $0.115/GB-mo | $15-25/mo |
+| AWS ECS Fargate | API + web | $0.04/vCPU-hr + $0.004/GB-hr; current task: 0.5 vCPU + 1 GB | $20-40/mo |
+| AWS ALB | Load balancer | $16/mo + $0.008/LCU-hr | $18-25/mo |
+| AWS NAT Gateway | Egress | $0.045/hr + $0.045/GB processed | $32/mo (single NAT — see [AUD-IN-002](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)) |
+| AWS SES | Email | $0.10 per 1k | $1-5/mo |
+| AWS SNS | SMS | varies by region; ~$0.04 per SMS to Nigeria | $5-30/mo |
+| AWS Secrets Manager | Secrets | $0.40/secret/mo | $2/mo |
+| AWS CloudWatch Logs | Logging | $0.50/GB ingested | $5-15/mo |
+| Stripe | Payments | 2.9% + $0.30 (US); per-country variants | pass-through to customer |
+| Paystack | Payments | 1.5% + ₦100 (capped at ₦2,000) NG | pass-through |
+| Microsoft 365 | SMTP fallback | included with M365 sub | included |
+| Expo Push Notifications | Push | Free | $0 |
+| Sentry / Honeycomb / Datadog | Observability | Free tier sufficient at current scale | $0 (planned) |
 
-| Service | Usage | Estimated Cost |
-|---------|-------|---------------|
-| **ECS Fargate** | 1-4 tasks (0.5 vCPU, 1GB RAM each) | ~$15-60/month |
-| **RDS PostgreSQL** | t3.micro, 20-100GB, multi-AZ backup | ~$15-30/month |
-| **ALB** | Application Load Balancer | ~$16-25/month |
-| **ECR** | Docker image storage (10 images retained) | ~$1-3/month |
-| **Cognito** | User pool (first 50K MAU free) | Free tier likely |
-| **SES** | Transactional email (first 62K/month free from EC2) | ~$0-10/month |
-| **SNS** | SMS notifications | ~$0.00645/SMS (US), varies by country |
-| **Secrets Manager** | 1 secret | ~$0.40/month |
-| **VPC + NAT Gateway** | 1 NAT gateway | ~$32/month |
-| **ACM** | SSL certificate | Free |
-| **Total AWS estimate** | | **~$80-175/month base** |
-
-### Stripe Fees
-
-| Product | Pricing |
-|---------|---------|
-| **Payments** | 2.9% + $0.30 per charge (US cards) |
-| **International cards** | +1.5% |
-| **Issuing** | $0.10/virtual card created + $0.20/transaction |
-| **Treasury** | Contact sales (varies) |
-| **Identity** | $1.50/verification |
-| **Payouts** | $0.25/ACH payout |
-| **Billing** | 0.5% of recurring revenue |
-
-### Paystack Fees
-
-| Product | Pricing |
-|---------|---------|
-| **Local transactions** (NG) | 1.5% + NGN 100 (capped at NGN 2,000) |
-| **International cards** | 3.9% + NGN 100 |
-| **Transfers** | NGN 10 (< NGN 5K), NGN 25 (5K-50K), NGN 50 (> 50K) |
-| **DVA (Virtual Accounts)** | Free creation, standard transaction fees |
-| **BVN Verification** | NGN 100/lookup |
-| **Subscriptions** | Standard transaction fees |
-
-### Other Service Costs
-
-| Service | Usage | Cost |
-|---------|-------|------|
-| **Expo Push** | Push notifications | Free (included with Expo) |
-| **EAS Build** | Mobile app builds | Free tier: 30 builds/month; $99/mo for more |
-| **Exchange Rate API** | Live FX rates | Varies ($0-50/month depending on provider) |
-| **Google Play Store** | App distribution | $25 one-time |
-| **Apple App Store** | App distribution | $99/year |
+**Estimated baseline AWS cost: $100–175/month.** Multi-AZ RDS adds ~$15–30/mo; multi-NAT adds $32/mo; multi-environment dev/staging adds $60–120/mo.
 
 ---
 
 ## 13. Supported Countries & Currencies
 
-### Paystack-Supported Countries (Full Integration)
+### Active payment integrations
 
-| Country | Code | Currency | Transfer Method | DVA Support |
-|---------|------|----------|----------------|-------------|
-| Nigeria | NG | NGN | NUBAN | Yes |
-| Ghana | GH | GHS | GHIPSS | No |
-| South Africa | ZA | ZAR | BASA | No |
-| Kenya | KE | KES | Mobile Money | No |
-| Rwanda | RW | RWF | Mobile Money | No |
-| Côte d'Ivoire | CI | XOF | Mobile Money | No |
-| Egypt | EG | EGP | Bank Account | No |
+| Country | Currency | Provider | KYC method |
+|---|---|---|---|
+| Nigeria | NGN | Paystack | Paystack BVN, NIN, Voter's Card |
+| Ghana | GHS | Paystack | Manual (Ghana Card) |
+| Kenya | KES | Paystack | Manual (National ID) |
+| South Africa | ZAR | Paystack | Manual (SA ID) |
+| Tanzania | TZS | Paystack | Manual |
+| Rwanda | RWF | Paystack | Manual |
+| Senegal | XOF | Paystack | Manual |
+| Uganda | UGX | Paystack | Manual |
+| Zambia | ZMW | Paystack | Manual |
+| Zimbabwe | USD | Paystack | Manual |
+| United States | USD | Stripe | Stripe Identity |
+| Canada | CAD | Stripe | Stripe Identity |
+| United Kingdom | GBP | Stripe | Stripe Identity |
+| EU (DE/FR/IE/etc.) | EUR | Stripe | Stripe Identity |
+| Australia | AUD | Stripe | Stripe Identity |
 
-### Stripe-Supported Countries (Full Integration)
-
-| Country | Code | Currency | Transfer Method |
-|---------|------|----------|----------------|
-| United States | US | USD | ACH |
-| United Kingdom | GB | GBP | BACS |
-| Canada | CA | CAD | EFT |
-| Australia | AU | AUD | BECS |
-| EU/EEA | EU | EUR | SEPA |
-
-### Global Availability
-- **177 countries** targeted on Google Play Store for app distribution
-- Payment processing available wherever Stripe or Paystack operates
-- Exchange rates supported between all currency pairs (manual or auto-fetched)
+Google Play distribution: 177 countries (Play Store availability list). Active payments: as above. Other countries can sign up but cannot process payments.
 
 ---
 
 ## 14. Mobile App
 
-### App Identity
-- **Name:** Financiar
 - **Bundle ID:** `com.financiar.app`
-- **Version:** 1.0.3 (versionCode 6)
-- **Target SDK:** 35 | **Min SDK:** 24
-- **EAS Project:** `5bfb69f9-1bc9-4f13-8e2a-c479a648ecfd`
-- **Owner:** `agbanzy`
+- **Version:** 1.0.3, versionCode 6
+- **Distribution:** Google Play **internal track only** as of 2026-04-26 (production track not yet promoted; iOS App Store not submitted)
+- **Min SDK:** Android 24 (Android 7.0 / Nougat)
+- **Target SDK:** Android 35
+- **Permissions declared:** `USE_BIOMETRIC`, `USE_FINGERPRINT`, plus standard internet/network state
 
-### Screen Architecture
+### Screens (22 total)
 
-**Auth Stack (unauthenticated):**
-- Login (email/password + biometric)
-- Signup
-- Forgot Password
+**Auth (3):** LoginScreen, SignupScreen, ForgotPasswordScreen
+**Onboarding (1):** OnboardingScreen (3-step wizard: country → company → KYC)
+**Main tabs (5):** DashboardScreen, WalletScreen, ExpensesScreen, BillsScreen, SettingsScreen
+**More stack (13):** TransactionsScreen, BudgetScreen, CardsScreen, InvoicesScreen, VendorsScreen, TeamScreen, PayrollScreen, AnalyticsScreen, ReportsScreen, VirtualAccountsScreen, NotificationsScreen, KYCScreen, InviteAcceptScreen
 
-**Onboarding (post-first-login):**
-- 3-step wizard: Country -> Company -> KYC
+### Mobile auth flow
 
-**Main Tabs (authenticated):**
-| Tab | Screen | Key Features |
-|-----|--------|-------------|
-| Home | Dashboard | Balance card, KPIs, insights, recent transactions, virtual account info |
-| Wallet | Wallet | Multi-currency balances, fund/withdraw/send, virtual accounts, history |
-| Expenses | Expenses | Create/edit, receipt upload, status filters |
-| Bills | Bills | Bill management, utility payments (airtime/data/electricity/cable) |
-| More | Settings Hub | Profile, security, preferences, navigation to all other screens |
+```
+1. User enters email/password OR taps Google OAuth
+2. Cognito SDK handles auth (hosted UI for OAuth, direct SDK for email)
+3. JWT tokens stored in AsyncStorage (planned: encrypted secure store — LU-006c)
+4. On subsequent launches, biometric (Face ID / Fingerprint) via expo-local-authentication
+5. Network detection via @react-native-community/netinfo
+6. On reconnect, queued mutations auto-sync from AsyncStorage
+```
 
-**More Stack (14 screens):**
-Transactions, Budget, Cards, Invoices, Vendors, Team, Payroll, Analytics, Reports, Virtual Accounts, Notifications, KYC, Invite Accept, Settings
+### Mobile-specific risks (from audit)
 
-### Mobile-Specific Features
-1. **Biometric Authentication** — Face ID / Fingerprint with secure credential storage
-2. **Push Notifications** — Expo push tokens with retry logic and Android channels
-3. **Offline Support** — Network monitoring, mutation queue, auto-sync on reconnect
-4. **Query Persistence** — 24-hour cache in AsyncStorage for instant data on reopen
-5. **Dark/Light Theme** — 90+ color tokens, persisted preference
-6. **Deep Linking** — `financiar://payment-callback` for payment return flows
+| Risk | Status | Tracked in |
+|---|---|---|
+| No jailbreak/root detection | OPEN — HIGH | [AUD-MO-001](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register) |
+| No certificate pinning | OPEN — HIGH | [AUD-MO-002](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register) |
+| AsyncStorage unencrypted | OPEN — HIGH | [AUD-MO-003](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register) |
+| Biometric not re-prompted on each financial action | OPEN — MEDIUM | [AUD-MO-004](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register) |
+| Push notifications: no device segmentation | OPEN — LOW | [AUD-MO-007](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register) |
+| Offline-first reads not implemented (only mutation queue) | OPEN — MEDIUM | [AUD-MO-006](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register) |
+| No crash reporting (Sentry/Bugsnag) | OPEN — MEDIUM | [AUD-MO-005](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register) |
+| Expo OTA updates not explicitly disabled in production | OPEN — LOW | [AUD-IN-008](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register) |
+
+Remediation specified in [LU-006](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-006-mobile-hardening) (3-5 days bundle).
 
 ---
 
 ## 15. Infrastructure & Deployment
 
-### Architecture Diagram
+### CDK stack
 
-```
-Internet
-  │
-  ▼
-[ACM Certificate] -> [ALB (public subnet)]
-                        │
-                        ▼
-              [ECS Fargate (private subnet)]
-              ┌─────────────────────────────┐
-              │  Docker Container            │
-              │  ┌────────────────────────┐  │
-              │  │ Node.js 20 Alpine      │  │
-              │  │ ┌──────────────────┐   │  │
-              │  │ │ Express 5 Server │   │  │
-              │  │ │ + Static Client  │   │  │
-              │  │ └──────────────────┘   │  │
-              │  └────────────────────────┘  │
-              └─────────────────────────────┘
-                        │
-                        ▼
-              [RDS PostgreSQL 16.4 (private subnet)]
-              [20-100GB, encrypted, 7-day backups]
-```
+[`infrastructure/lib/financiar-stack.ts`](infrastructure/lib/financiar-stack.ts) defines:
 
-### AWS Resources (CDK Stack)
+- **VPC:** 2 AZs, **1 NAT gateway** (single point of failure — see [AUD-IN-002](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register))
+- **RDS:** PostgreSQL 16.4 on `t3.micro`, **single-AZ** ([AUD-IN-003](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)), 7-day backups, deletion protection enabled, removal policy `RETAIN`, encrypted at rest
+- **ECR:** lifecycle keeps last 10 images
+- **ECS Cluster:** Container Insights enabled
+- **ECS Task:** 512 CPU / 1024 MB; non-root user `appuser` UID 1001; healthcheck on `/api/health`
+- **ECS Service:** desiredCount 0 baseline (manual scale-up after ECR push), auto-scaling min 1 / max 4 at 70% CPU target, circuit-breaker rollback on health-check failure
+- **ALB:** internet-facing; HTTPS listener if `certificateArn` provided, HTTP→HTTPS redirect; HTTP-only fallback for initial deploy
+- **Secrets:** AWS Secrets Manager; granted to ECS task role; no plaintext secrets in `.env.example`
+- **IAM:** task role granted `ses:SendEmail`, `sns:Publish`, secrets read
 
-| Resource | Spec |
-|----------|------|
-| VPC | 2 AZs, 1 NAT Gateway, public + private subnets |
-| RDS | t3.micro, PostgreSQL 16.4, encrypted, deletion protection |
-| ECS Cluster | Fargate, container insights |
-| Task Definition | 512 CPU (0.5 vCPU), 1024MB RAM |
-| ECS Service | Private subnet, circuit breaker + rollback |
-| Auto-scaling | 1-4 tasks, CPU target 70% |
-| ALB | Internet-facing, HTTP->HTTPS redirect |
-| ECR | `financiar`, 10 image retention |
-| Secrets Manager | `financiar/app-secrets` |
+### CI/CD
 
-### Deployment Pipeline
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) — triggered on push to `main` or manual dispatch:
 
-```
-1. npm run build              (Vite client + esbuild server)
-2. docker build               (Multi-stage: builder -> production)
-3. docker push to ECR         (financiar repository)
-4. ECS deploys new task       (rolling update with circuit breaker)
-5. Container startup:
-   a. run-migration.cjs       (idempotent SQL migrations + schema fixes)
-   b. node dist/index.cjs     (Express server on port 5000)
-6. ALB health check           (GET /api/health)
-```
+1. Checkout
+2. Configure AWS credentials via OIDC (`AWS_DEPLOY_ROLE_ARN`)
+3. ECR login
+4. `docker build` with `VITE_*` build args + push (tags `<sha>` and `latest`)
+5. `aws ecs update-service --force-new-deployment`
+6. `aws ecs wait services-stable` (10-min timeout)
 
-### Environment Variables
+**No test gate** — see [AUD-IN-001](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register) and [LU-007](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-007-ci-test-gate).
 
-| Category | Variables |
-|----------|----------|
-| Core | DATABASE_URL, PORT, NODE_ENV, SESSION_SECRET, APP_URL |
-| Cognito | COGNITO_USER_POOL_ID, COGNITO_CLIENT_ID |
-| Cognito (Client) | VITE_COGNITO_USER_POOL_ID, VITE_COGNITO_CLIENT_ID, VITE_COGNITO_DOMAIN |
-| Stripe | STRIPE_SECRET_KEY, VITE_STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_IDENTITY_WEBHOOK_SECRET |
-| Paystack | PAYSTACK_SECRET_KEY, VITE_PAYSTACK_PUBLIC_KEY |
-| AWS | AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_SES_FROM_EMAIL, AWS_SES_FROM_NAME, AWS_SNS_SENDER_ID |
+### Dockerfile
+
+Multi-stage:
+
+- **Builder:** Node 22 Alpine, npm 11 (via tarball fallback), `npm ci`, `VITE_*` build args, `npm run build`
+- **Production:** Node 22 Alpine, copy `dist`/`migrations`/`scripts`, non-root user, healthcheck on `/api/health`, `CMD: node scripts/run-migration.cjs migrate && node dist/index.cjs`
+
+(Production image still ships dev dependencies — minor cleanup tracked in [AUD-IN-005](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register).)
+
+### Environment variables
+
+Total ~40+. Core:
+
+- **Server:** `DATABASE_URL`, `NODE_ENV`, `SESSION_SECRET`, `APP_URL`, `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_IDENTITY_WEBHOOK_SECRET`, `PAYSTACK_SECRET_KEY`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_SES_FROM_EMAIL`, `AWS_SNS_SENDER_ID`, optional `SMTP_*` for M365
+- **Client:** `VITE_COGNITO_*`, `VITE_STRIPE_PUBLISHABLE_KEY`, `VITE_PAYSTACK_PUBLIC_KEY`
+- **Mobile:** `EXPO_PUBLIC_*`
+
+`.env.example` contains placeholder values only; no real secrets are committed.
 
 ---
 
-## 16. Non-Functional Requirements
+## 16. Operational Runbooks
 
-### Performance
-- API rate limits enforced at 5 tiers
-- PostgreSQL indexes on 70+ columns for query performance
-- TanStack Query with 30s stale time (web) / 5min (mobile)
-- Client-side query caching with AsyncStorage persistence (mobile)
-- Auto-scaling: 1-4 Fargate tasks at 70% CPU
+Runbooks live in [`docs/runbooks/`](docs/runbooks/) (planned). Initial set:
 
-### Reliability
-- ECS circuit breaker with automatic rollback
-- Database: Encrypted storage, 7-day automated backups, deletion protection
-- Webhook idempotency prevents duplicate processing
-- Atomic database transactions with row-level locking for financial operations
-- Mobile offline queue with auto-sync on reconnect
+| Runbook | Purpose |
+|---|---|
+| `incident-payment-down.md` | Triage when Stripe or Paystack outage detected |
+| `incident-database-down.md` | RDS failover / restore from snapshot |
+| `incident-ecs-deploy-failed.md` | Rollback procedure (ECS circuit-breaker auto-rolls; manual fallback documented) |
+| `routine-rotate-secrets.md` | Cognito client secret, Stripe webhook secret, Paystack secret rotation cadence |
+| `routine-database-purge.md` | Two-admin purge procedure post-[LU-008](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-008-database-purge-hardening) |
+| `routine-mobile-release.md` | EAS build → internal track → production promotion |
+| `routine-cdk-deploy.md` | Provisioning a new env (post-multi-env [LU-012](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-012-multi-nat-multi-env-cdk)) |
 
-### Security
-- JWT-based auth with server-side verification
-- Transaction PIN on all financial operations
-- Rate limiting on auth, financial, and sensitive endpoints
-- Audit trail on all significant actions
-- CORS locked to production domains
-- Non-root Docker container
-- Secrets in AWS Secrets Manager (never in code)
-- Input validation via Zod on all endpoints
-- Error sanitization (no SQL/stack traces leaked)
-
-### Observability
-- Request logging on all `/api` routes with response body truncation
-- Container health checks (ALB + Docker)
-- ECS Container Insights enabled
-- Audit log table for business-level observability
+Each runbook should answer: trigger, severity, on-call engineer, first 5 minutes, escalation path, all-clear criteria.
 
 ---
 
-## 17. Known Limitations & Tech Debt
+## 17. Mobile–Web Parity Matrix
 
-| Issue | Severity | Description |
-|-------|----------|-------------|
-| Monolithic routes file | Medium | `server/routes.ts` is 11,023 lines — needs splitting into feature modules |
-| Legacy tables | Low | `users` and `company_settings` tables are deprecated but still present |
-| Firebase remnant | Low | `client/src/lib/firebase.ts` exists but is unused (auth moved to Cognito) |
-| Duplicate route registrations | Low | `/api/stripe/webhook` and `/api/cards/:id/transactions` registered twice |
-| `strict: false` in root tsconfig | Medium | TypeScript strict mode disabled (only `strictNullChecks` enabled) |
-| Transaction reference bug | Medium | `updateTransactionByReference` matches on `description` field instead of `reference` |
-| No CI/CD pipeline | Medium | Deployment is manual — no GitHub Actions or similar automation |
-| 16KB page size warning | Low | Android build doesn't support 16KB memory pages (Android 15 requirement) |
-| Mobile Firebase env | Low | Mobile `.env.example` still references Firebase config vars |
-| Single NAT Gateway | Low | Single AZ NAT Gateway — SPOF for outbound traffic |
+| Feature | Web | Mobile | Notes |
+|---|---|---|---|
+| Login (email/password) | ✅ | ✅ | |
+| Login (Google OAuth) | ✅ | ✅ | |
+| Login (SMS OTP) | ✅ | ✅ | |
+| Biometric login | — | ✅ | Mobile only |
+| Signup + onboarding | ✅ | ✅ | |
+| Dashboard | ✅ | ✅ | |
+| Transactions | ✅ | ✅ | Web filters more granular |
+| Expenses (CRUD + approval) | ✅ | ✅ | |
+| Bills (CRUD + payment + utility) | ✅ | ✅ | |
+| Budgets | ✅ | ✅ | |
+| Virtual cards | ✅ | ✅ | Reveal PAN/CVV: web only at this version |
+| Virtual accounts | ✅ | ✅ | |
+| Invoices (CRUD + send) | ✅ | ✅ | |
+| Public invoice payment | ✅ | — | Web link, viewable on mobile browser |
+| Payroll | ✅ | ✅ | |
+| Vendors | ✅ | ✅ | |
+| Team management | ✅ | ✅ | Mobile invitation flow simpler |
+| Analytics & charts | ✅ Recharts | ✅ Victory Native (simplified) | |
+| Reports (PDF/CSV export) | ✅ | partial | Mobile shows summaries; CSV export web-only |
+| Notifications (in-app feed) | ✅ | ✅ | |
+| Push notifications | — | ✅ | Mobile only |
+| Settings (profile + password) | ✅ | ✅ | |
+| Account closure | ✅ | partial | |
+| **Admin: users, audit logs, etc.** | ✅ | — | Web only |
+| **Admin: exchange rates** | ✅ | — | Web only |
+| **Admin: database management** | ✅ | — | Web only (purge — see [LU-008](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-008-database-purge-hardening)) |
+| Offline mutation queue | — | ✅ | Mobile only |
+| Offline reads | — | partial (cache only) | Both [AUD-MO-006](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register) |
 
----
-
-## 18. Roadmap Considerations
-
-### Near-Term
-- [ ] Split `routes.ts` into feature-based route modules
-- [ ] Set up CI/CD pipeline (GitHub Actions -> ECR -> ECS)
-- [ ] Add Apple App Store distribution
-- [ ] Fix TypeScript strict mode
-- [ ] Remove deprecated Firebase files and legacy tables
-- [ ] Add 16KB page size support to Android builds
-
-### Mid-Term
-- [ ] Multi-currency exchange between wallets (UI + backend ready)
-- [ ] Advanced reporting with scheduled email delivery
-- [ ] Recurring invoice generation
-- [ ] Mobile receipt OCR (auto-fill expense from receipt photo)
-- [ ] WebSocket for real-time notifications (ws dependency already present)
-- [ ] Stripe Treasury full integration (currently placeholder for non-Paystack markets)
-
-### Long-Term
-- [ ] Open Banking integrations (Plaid, Mono)
-- [ ] AI-powered expense categorization
-- [ ] Multi-language support (i18n infrastructure partially present)
-- [ ] White-label/API-first offering
-- [ ] SOC 2 / PCI DSS compliance certification
+Admin features are intentionally web-only — mobile is the customer-facing surface.
 
 ---
 
-*Document generated from full codebase analysis on 2026-03-14.*
+## 18. Feature Flags
+
+**Current state:** no feature-flag infrastructure. Flags are env-var booleans.
+
+**Proposal:** introduce GrowthBook (self-hosted, MIT-licensed) once the customer base supports per-customer rollouts. Until then, a small in-database flag table (`system_settings` already supports key-value flags) is sufficient for the rollout patterns described in the upgrade proposals.
+
+Flags planned during the LU rollout:
+
+| Flag | Owner | Default (prod) |
+|---|---|---|
+| `BRIDGE_WALLET_TO_TRANSACTIONS` | LU-001 | `false` initially → `true` after backfill |
+| `AUTH_COOKIE_MODE` | LU-010 | `false` → `true` after rollout |
+| `allow_purge_endpoint` | LU-008 | `false` (set by ops only when intentionally purging) |
+| `RECONCILIATION_PAGE_ON_DIFF` | LU-014 | `false` until tuned |
+
+---
+
+## 19. Non-Functional Requirements
+
+| Category | Target | Current state |
+|---|---|---|
+| **Availability** | 99.5% in 2026, 99.9% in 2027 | Single-AZ RDS + single-NAT means SLA cannot exceed AWS regional AZ uptime (~99.95%). After [LU-012](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-012-multi-nat-multi-env-cdk), 99.9% is realistic. |
+| **API p95 latency** | < 300ms for read endpoints | Unmeasured. APM ([LU-013](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-013-observability)) needed to verify. |
+| **API p99 latency** | < 1s | Unmeasured. |
+| **Webhook acknowledgement** | < 200ms p95 | Unmeasured. |
+| **Atomic op throughput** | 50 TPS sustained | Single-instance ECS at default sizing handles this; needs validation under load. |
+| **Recovery Time Objective (RTO)** | 1 hour | Manual ECS rollback + DB restore from snapshot. After multi-AZ, automated failover < 5 min. |
+| **Recovery Point Objective (RPO)** | 24 hours | RDS automated daily backups; 7-day retention. |
+| **Mobile cold start** | < 3s | Untested. |
+| **Tests passing in CI** | 100% required | **No test gate** today — see [LU-007](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-007-ci-test-gate). |
+| **Security incident response** | < 1 hour for CRITICAL | No formal IR process documented. |
+
+---
+
+## 20. Known Limitations & Tech Debt
+
+This list is a curated subset of [`AUDIT_2026_04_26.md`](docs/audit-2026-04-26/AUDIT_2026_04_26.md), with emphasis on items that affect product behaviour or roadmap decisions.
+
+### Critical (do not ignore)
+
+- **[AUD-BE-001](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)**: Recurring scheduler runs on every ECS instance. Multi-instance scaling is not safe today.
+- **[AUD-BE-002](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)**: Wallet ↔ Transactions ledger split. Transactions page does not show wallet operations.
+- **[AUD-BE-003](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)**: One-click full database purge endpoint with a single admin's auth.
+- **[AUD-IN-001](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)**: No CI test gate. Any commit on `main` ships.
+
+### High
+
+- **[AUD-IN-002](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register) + [AUD-IN-003](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register) + [AUD-IN-004](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)**: Single-NAT, single-AZ RDS, single-stack CDK.
+- **[AUD-FE-001](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)**: Cognito tokens in localStorage.
+- **[AUD-FE-005](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)**: Client-side validation duplicated; not reusing shared Zod schemas.
+- **[AUD-MO-001](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register) / [-002](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register) / [-003](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)**: Mobile lacks jailbreak detection, certificate pinning, encrypted local storage.
+- **[AUD-BE-004](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)**: Scheduler uses `console.log` instead of pino.
+- **[AUD-BE-005](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)**: Mock-heavy tests — no testcontainers Postgres.
+- **[AUD-BE-007](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)**: `cardTransactions.currency` missing.
+- **[AUD-BE-009](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register)**: Legacy `routes.legacy.ts` still in tree.
+
+### Medium / Low
+
+See full list in [`AUDIT_2026_04_26.md` § 7](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register). Most are 0.5- to 1-day fixes.
+
+---
+
+## 21. Roadmap
+
+### Q2 2026 (May–June) — operational maturity
+
+Theme: **make the platform safe to scale.** All items map to [`LOGIC_UPGRADE_PROPOSALS.md`](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md).
+
+- ✅ CI test gate ([LU-007](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-007-ci-test-gate))
+- ✅ Scheduler leader election ([LU-002](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-002-scheduler-leader-election)) + pino-ify ([LU-003](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-003-pino-ify-the-scheduler))
+- ✅ Database purge hardening ([LU-008](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-008-database-purge-hardening))
+- ✅ Multi-NAT + multi-environment CDK ([LU-012](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-012-multi-nat-multi-env-cdk))
+- ✅ Wallet ↔ transactions bridge ([LU-001](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-001-wallet--transaction-bridge))
+- ✅ Auth cookie modernization ([LU-010](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-010-auth-cookie-modernization))
+- ✅ Shared Zod schemas on client ([LU-009](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-009-shared-zod-schemas-on-client))
+- ✅ Mobile hardening bundle ([LU-006](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-006-mobile-hardening))
+- ✅ Observability (OTel + auto PII redaction) ([LU-013](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-013-observability))
+
+### Q3 2026 (July–September) — feature consolidation
+
+- Storage god-object → domain services ([LU-011](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-011-storage-layer-domain-split))
+- Soft-delete on financial tables ([LU-004](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-004-soft-delete-on-financial-tables))
+- Daily payment reconciliation ([LU-014](docs/audit-2026-04-26/LOGIC_UPGRADE_PROPOSALS.md#lu-014-payment-reconciliation-job))
+- iOS App Store submission (mobile)
+- Real testcontainers integration tests ([AUD-BE-005](docs/audit-2026-04-26/AUDIT_2026_04_26.md#7-risk-register))
+- SSO (Okta / Google Workspace) for Enterprise tier — discovery + spec
+- Apple Pay / Google Pay on the public invoice page
+- Spend categorisation ML — discovery
+
+### Q4 2026 — growth features
+
+- Subscription billing for paying tiers (driven by BRD pricing model)
+- Affiliate / referral programme
+- Compliance roadmap milestones (SOC 2 Type 1 audit kick-off — see BRD Part D)
+- Expanded country support (Egypt, Côte d'Ivoire, Morocco)
+- Fraud / sanctions screening (ComplyAdvantage or Sumsub)
+
+### 2027
+
+- 99.9% uptime SLA (multi-region RDS, blue/green ECS)
+- Transaction monitoring dashboard for in-app fraud detection
+- Open banking integrations (Plaid for US, Mono for Africa)
+- Deep ledger reporting / customer-statement export
+- Treasury / yield product (Stripe Treasury yield + local equivalents)
+
+---
+
+**Document state:** This PRD describes Spendly v4 as it exists in source today (HEAD `e831622`) plus the planned remediation work captured in `LOGIC_UPGRADE_PROPOSALS.md`. It supersedes v1.0 dated 2026-03-14. The previous v1.0 PRD is preserved in git history.

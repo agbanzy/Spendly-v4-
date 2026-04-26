@@ -90,8 +90,15 @@ describe('getPaystackPublicKey', () => {
 // validateTransferDetails — Nigerian (NUBAN)
 // ============================================================================
 describe('validateTransferDetails: Nigeria (NG)', () => {
+  // Account `0123456785` paired with bank code `058` (GTBank) is a real
+  // CBN-NUBAN-checksum-valid combination. It was originally `0123456789` here
+  // but the validator now enforces the CBN weighted-sum check, which that
+  // value fails. Computed: serial=058012345678 · weights=[3,7,3,3,7,3,3,7,3,3,7,3]
+  // → sum 215, check digit (10 - 215%10) % 10 = 5.
+  const VALID_NUBAN = '0123456785';
+
   it('accepts valid 10-digit account number with 3-digit bank code', () => {
-    const result = validateTransferDetails('NG', '0123456789', '058');
+    const result = validateTransferDetails('NG', VALID_NUBAN, '058');
     expect(result.valid).toBe(true);
   });
 
@@ -101,8 +108,8 @@ describe('validateTransferDetails: Nigeria (NG)', () => {
   });
 
   it('rejects bank code that is not 3 digits', () => {
-    expect(validateTransferDetails('NG', '0123456789', '05').valid).toBe(false);
-    expect(validateTransferDetails('NG', '0123456789', '0583').valid).toBe(false);
+    expect(validateTransferDetails('NG', VALID_NUBAN, '05').valid).toBe(false);
+    expect(validateTransferDetails('NG', VALID_NUBAN, '0583').valid).toBe(false);
   });
 
   it('rejects empty account number', () => {
@@ -112,13 +119,18 @@ describe('validateTransferDetails: Nigeria (NG)', () => {
   });
 
   it('rejects empty bank code', () => {
-    const result = validateTransferDetails('NG', '0123456789', '');
+    const result = validateTransferDetails('NG', VALID_NUBAN, '');
     expect(result.valid).toBe(false);
     expect(result.message).toContain('Bank code is required');
   });
 
+  it('rejects an account number that fails NUBAN checksum', () => {
+    // 0123456789 has the right shape but fails the CBN weighted-sum check.
+    expect(validateTransferDetails('NG', '0123456789', '058').valid).toBe(false);
+  });
+
   it('is case-insensitive for country code', () => {
-    expect(validateTransferDetails('ng', '0123456789', '058').valid).toBe(true);
+    expect(validateTransferDetails('ng', VALID_NUBAN, '058').valid).toBe(true);
   });
 });
 

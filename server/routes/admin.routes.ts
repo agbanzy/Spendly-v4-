@@ -1,10 +1,13 @@
 import express from "express";
 import { param, resolveUserCompany, logAudit, getAuditUserName, header } from "./shared";
-import { requireAuth, requireAdmin } from "../middleware/auth";
+import { requireAuth, requireAdmin, requirePin } from "../middleware/auth";
 import { authLimiter, sensitiveLimiter } from "../middleware/rateLimiter";
 import { storage } from "../storage";
 import { notificationService } from "../services/notification-service";
 import { mapPaymentError } from "../utils/paymentUtils";
+import { logger as baseLogger } from "../lib/logger";
+
+const adminLogger = baseLogger.child({ module: "admin-routes" });
 
 const router = express.Router();
 
@@ -219,34 +222,181 @@ router.delete("/admin/users/:id", requireAdmin, async (req, res) => {
   }
 });
 
-// Purge database (admin)
-router.post("/admin/purge-database", requireAdmin, async (req, res) => {
-  try {
-    const { tablesToPreserve, confirmPurge } = req.body;
+// ====================================================================
+// LU-008 / AUD-BE-003 — Database purge: two-admin out-of-band approval
+// ====================================================================
+//
+// The previous endpoint allowed any single admin to wipe all customer data
+// behind a single 'CONFIRM_PURGE' string and recorded `userId: 'system'` in
+// audit_logs. It is replaced by a two-step flow:
+//
+//   POST /admin/purge-database/initiate
+//     → admin A (with PIN) creates a 30-minute pending intent
+//     → out-of-band notification sent to all admins
+//
+//   POST /admin/purge-database/approve/:intentId
+//     → admin B (with PIN) — must differ from initiator
+//     → executes the purge and records BOTH identities in audit_logs
+//
+// A master feature flag in system_settings ('allow_purge_endpoint') gates the
+// flow entirely; it defaults to 'false' in production and must be flipped
+// directly in the database to enable the endpoint at all.
+//
+// The legacy endpoint returns 410 Gone.
 
-    if (confirmPurge !== 'CONFIRM_PURGE') {
-      return res.status(400).json({ error: "Must confirm purge with 'CONFIRM_PURGE'" });
+const PURGE_INTENT_ACTION = 'purge_database';
+const PURGE_INTENT_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+async function isPurgeAllowed(): Promise<boolean> {
+  try {
+    const all = await storage.getSystemSettings();
+    const row = all.find((s: any) => s.key === 'allow_purge_endpoint');
+    return (row as any)?.value === 'true';
+  } catch (err) {
+    adminLogger.error({ err }, 'Failed to read allow_purge_endpoint flag');
+    return false;
+  }
+}
+
+async function notifyAllAdminsOutOfBand(subject: string, body: string): Promise<void> {
+  // Best-effort notification — don't block the request if email/SMS is down.
+  try {
+    const users = await storage.getUsers();
+    const admins = users.filter((u: any) => u.role === 'OWNER' || u.role === 'ADMIN');
+    for (const admin of admins as any[]) {
+      const userId = admin.id;
+      if (!userId) continue;
+      try {
+        await notificationService.send({
+          userId,
+          type: 'system_alert',
+          title: subject,
+          message: body,
+          channels: ['email', 'in_app'],
+        } as any);
+      } catch (err) {
+        adminLogger.warn({ err, adminId: userId }, 'Failed to notify admin of destructive action');
+      }
+    }
+  } catch (err) {
+    adminLogger.error({ err }, 'Failed to enumerate admins for out-of-band notification');
+  }
+}
+
+// Step 1: initiate — admin A asks to purge.
+router.post("/admin/purge-database/initiate", requireAuth, requireAdmin, requirePin, async (req, res) => {
+  try {
+    if (!(await isPurgeAllowed())) {
+      return res.status(403).json({
+        error: 'Database purge endpoint is disabled. Set system_settings.allow_purge_endpoint = true to enable (requires direct DB intervention).',
+      });
     }
 
-    const result = await storage.purgeDatabase(tablesToPreserve);
+    const { tablesToPreserve } = req.body ?? {};
+    const initiator = req.user!;
 
-    // Log the action
+    const intent = await storage.createPendingDestructiveAction({
+      action: PURGE_INTENT_ACTION,
+      initiatedBy: initiator.cognitoSub,
+      expiresAt: new Date(Date.now() + PURGE_INTENT_TTL_MS).toISOString(),
+      payload: { tablesToPreserve: tablesToPreserve ?? null },
+    } as any);
+
     await storage.createAuditLog({
-      action: 'database_purge',
-      userId: 'system',
-      userName: 'System',
+      action: 'database_purge_initiated',
+      userId: initiator.cognitoSub,
+      userName: initiator.email || initiator.displayName || initiator.cognitoSub,
       entityType: 'database',
-      entityId: 'all',
-      details: { purgedTables: result.purgedTables },
+      entityId: intent.id,
+      details: { intentId: intent.id, tablesToPreserve: tablesToPreserve ?? null, expiresAt: intent.expiresAt },
       ipAddress: req.ip || '',
       userAgent: req.headers['user-agent'] || '',
       createdAt: new Date().toISOString(),
+      companyId: null,
     } as any);
 
-    res.json(result);
+    await notifyAllAdminsOutOfBand(
+      'CRITICAL: database purge initiated',
+      `Admin ${initiator.email || initiator.cognitoSub} has initiated a full database purge. Approval from a SECOND admin is required within 30 minutes. Intent ID: ${intent.id}.`,
+    );
+
+    adminLogger.warn({ intentId: intent.id, initiatedBy: initiator.cognitoSub }, 'Database purge intent created');
+
+    return res.json({ intentId: intent.id, expiresAt: intent.expiresAt });
   } catch (error: any) {
-    res.status(500).json({ error: error.message || "Failed to purge database" });
+    adminLogger.error({ err: error }, 'Failed to initiate database purge');
+    return res.status(500).json({ error: error?.message ?? 'Failed to initiate purge' });
   }
+});
+
+// Step 2: approve — admin B (different from initiator) executes.
+router.post("/admin/purge-database/approve/:intentId", requireAuth, requireAdmin, requirePin, async (req, res) => {
+  try {
+    if (!(await isPurgeAllowed())) {
+      return res.status(403).json({ error: 'Database purge endpoint is disabled.' });
+    }
+
+    const intent = await storage.getPendingDestructiveAction(param(req.params.intentId));
+    if (!intent) {
+      return res.status(404).json({ error: 'Intent not found' });
+    }
+    if (intent.action !== PURGE_INTENT_ACTION) {
+      return res.status(400).json({ error: 'Intent does not target the purge action' });
+    }
+    if (intent.executedAt) {
+      return res.status(409).json({ error: 'Intent already executed' });
+    }
+    if (intent.expiresAt < new Date().toISOString()) {
+      return res.status(410).json({ error: 'Intent expired' });
+    }
+
+    const approver = req.user!;
+    if (intent.initiatedBy === approver.cognitoSub) {
+      return res.status(403).json({ error: 'Two distinct admins are required (initiator and approver must differ)' });
+    }
+
+    const tablesToPreserve = (intent.payload as any)?.tablesToPreserve ?? undefined;
+    const result = await storage.purgeDatabase(tablesToPreserve);
+
+    const now = new Date().toISOString();
+    await storage.markPendingDestructiveActionApproved(intent.id, {
+      approvedBy: approver.cognitoSub,
+      approvedAt: now,
+      executedAt: now,
+    });
+
+    await storage.createAuditLog({
+      action: 'database_purge_executed',
+      userId: approver.cognitoSub,
+      userName: approver.email || approver.displayName || approver.cognitoSub,
+      entityType: 'database',
+      entityId: intent.id,
+      details: {
+        intentId: intent.id,
+        initiatedBy: intent.initiatedBy,
+        approvedBy: approver.cognitoSub,
+        purgedTables: result.purgedTables,
+      },
+      ipAddress: req.ip || '',
+      userAgent: req.headers['user-agent'] || '',
+      createdAt: now,
+      companyId: null,
+    } as any);
+
+    adminLogger.warn({ intentId: intent.id, initiatedBy: intent.initiatedBy, approvedBy: approver.cognitoSub, purgedTables: result.purgedTables.length }, 'Database purge executed');
+
+    return res.json(result);
+  } catch (error: any) {
+    adminLogger.error({ err: error }, 'Failed to approve/execute database purge');
+    return res.status(500).json({ error: error?.message ?? 'Failed to approve purge' });
+  }
+});
+
+// Legacy endpoint returns 410 with migration guidance.
+router.post("/admin/purge-database", requireAuth, requireAdmin, async (_req, res) => {
+  return res.status(410).json({
+    error: 'This endpoint has been replaced. Use POST /api/admin/purge-database/initiate followed by POST /api/admin/purge-database/approve/:intentId. See LU-008 in the audit docs.',
+  });
 });
 
 // Admin settings

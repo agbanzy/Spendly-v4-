@@ -234,6 +234,8 @@ export const expenses = pgTable("expenses", {
   vendorId: text("vendor_id").references(() => vendors.id, { onDelete: 'set null' }),
   payoutStatus: text("payout_status").default('not_started'),
   payoutId: text("payout_id"),
+  // LU-004 / AUD-BE-014: soft-delete for audit-trail preservation
+  deletedAt: text("deleted_at").default(sql`null`),
 }, (t) => [
   index("expenses_user_id_idx").on(t.userId),
   index("expenses_company_id_idx").on(t.companyId),
@@ -260,6 +262,8 @@ export const transactions = pgTable("transactions", {
   // (walletTransactions table is defined after transactions, Drizzle doesn't support forward references)
   walletTransactionId: text("wallet_transaction_id").default(sql`null`),
   companyId: text("company_id").default(sql`null`).references(() => companies.id, { onDelete: 'set null' }),
+  // LU-004 / AUD-BE-014: soft-delete for audit-trail preservation
+  deletedAt: text("deleted_at").default(sql`null`),
 }, (t) => [
   index("transactions_date_idx").on(t.date),
   index("transactions_status_idx").on(t.status),
@@ -267,6 +271,7 @@ export const transactions = pgTable("transactions", {
   index("transactions_company_id_idx").on(t.companyId),
   index("transactions_reference_idx").on(t.reference),
   index("transactions_user_id_idx").on(t.userId),
+  index("transactions_wallet_transaction_id_idx").on(t.walletTransactionId),
 ]);
 
 // Bills table
@@ -418,6 +423,8 @@ export const invoices = pgTable("invoices", {
   issuedDate: text("issued_date").notNull(),
   status: text("status").notNull().default('pending'),
   items: jsonb("items").$type<{ description: string; quantity: number; rate: number }[]>().default([]),
+  // LU-004 / AUD-BE-014: soft-delete for audit-trail preservation
+  deletedAt: text("deleted_at").default(sql`null`),
 }, (t) => [
   index("invoices_company_id_idx").on(t.companyId),
   index("invoices_status_idx").on(t.status),
@@ -692,6 +699,22 @@ export const auditLogs = pgTable("audit_logs", {
   index("audit_logs_created_at_idx").on(t.createdAt),
 ]);
 
+// Pending destructive actions — two-admin approval queue for irreversible operations.
+// LU-008 / AUD-BE-003 — replaces the single-admin /api/admin/purge-database endpoint.
+export const pendingDestructiveActions = pgTable("pending_destructive_actions", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  action: text("action").notNull(),                 // e.g. 'purge_database'
+  initiatedBy: text("initiated_by").notNull(),      // cognitoSub of admin 1
+  initiatedAt: text("initiated_at").notNull().default(sql`now()`),
+  expiresAt: text("expires_at").notNull(),
+  approvedBy: text("approved_by"),                  // cognitoSub of admin 2 (must differ from initiatedBy)
+  approvedAt: text("approved_at"),
+  executedAt: text("executed_at"),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+}, (t) => [
+  index("pending_destructive_actions_action_status_idx").on(t.action, t.executedAt, t.expiresAt),
+]);
+
 // Organization Settings table
 export const organizationSettings = pgTable("organization_settings", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
@@ -778,6 +801,8 @@ export const walletTransactions = pgTable("wallet_transactions", {
   status: text("status").notNull().default('completed'),
   reversedAt: text("reversed_at"),
   reversedByTxId: text("reversed_by_tx_id"),
+  // LU-004 / AUD-BE-014: soft-delete for audit-trail preservation
+  deletedAt: text("deleted_at").default(sql`null`),
   createdAt: text("created_at").notNull().default(sql`now()`),
 }, (t) => [
   index("wallet_transactions_wallet_id_idx").on(t.walletId),
@@ -1004,6 +1029,7 @@ export const insertCompanySchema = createInsertSchema(companies).omit({ id: true
 export const insertCompanyMemberSchema = createInsertSchema(companyMembers).omit({ id: true });
 export const insertCompanyInvitationSchema = createInsertSchema(companyInvitations).omit({ id: true });
 export const insertSubscriptionSchema = createInsertSchema(subscriptions).omit({ id: true });
+export const insertPendingDestructiveActionSchema = createInsertSchema(pendingDestructiveActions).omit({ id: true, initiatedAt: true });
 
 // ==================== TYPES ====================
 
@@ -1024,8 +1050,8 @@ type OptionalFields<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 
 // Create-input types: select types with newly-added nullable columns made optional
 // so existing call sites that omit these fields still type-check.
-export type CreateTransaction = OptionalFields<Omit<Transaction, 'id'>, 'walletTransactionId' | 'userId' | 'reference' | 'companyId'>;
-export type CreateExpense     = OptionalFields<Omit<Expense, 'id'>,     'departmentId' | 'approvedBy' | 'approvedAt' | 'rejectedBy' | 'rejectedAt' | 'approvalComments' | 'reviewerComments'>;
+export type CreateTransaction = OptionalFields<Omit<Transaction, 'id'>, 'walletTransactionId' | 'userId' | 'reference' | 'companyId' | 'deletedAt'>;
+export type CreateExpense     = OptionalFields<Omit<Expense, 'id'>,     'departmentId' | 'approvedBy' | 'approvedAt' | 'rejectedBy' | 'rejectedAt' | 'approvalComments' | 'reviewerComments' | 'deletedAt'>;
 export type CreateBill        = OptionalFields<Omit<Bill, 'id'>,        'walletTransactionId' | 'paidAmount' | 'paidDate' | 'paidBy' | 'paymentMethod' | 'paymentReference' | 'approvedBy' | 'approvedAt' | 'reviewerComments'>;
 export type CreatePayroll     = OptionalFields<Omit<PayrollEntry, 'id'>,'departmentId' | 'payoutDestinationId'>;
 export type CreateTeamMember  = OptionalFields<Omit<TeamMember, 'id'>,  'departmentId'>;
@@ -1119,6 +1145,9 @@ export type CompanySettings = typeof companySettings.$inferSelect;
 
 export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
 export type Subscription = typeof subscriptions.$inferSelect;
+
+export type InsertPendingDestructiveAction = z.infer<typeof insertPendingDestructiveActionSchema>;
+export type PendingDestructiveAction = typeof pendingDestructiveActions.$inferSelect;
 
 // Legacy interface for AI Insights (computed, not stored)
 export interface AIInsight {

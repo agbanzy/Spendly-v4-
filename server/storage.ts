@@ -31,9 +31,11 @@ import {
   type AnalyticsSnapshot, type InsertAnalyticsSnapshot,
   type BusinessInsight, type InsertBusinessInsight,
   processedWebhooks,
+  pendingDestructiveActions,
   type CreateTransaction, type CreateExpense, type CreateBill,
   type CreatePayroll, type CreateTeamMember,
   type Subscription, type InsertSubscription,
+  type PendingDestructiveAction, type InsertPendingDestructiveAction,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -48,7 +50,7 @@ export interface IStorage {
   updateExpense(id: string, expense: Partial<Omit<Expense, 'id'>>): Promise<Expense | undefined>;
   deleteExpense(id: string): Promise<boolean>;
   
-  getTransactions(companyId?: string): Promise<Transaction[]>;
+  getTransactions(companyId?: string, opts?: { limit?: number; offset?: number }): Promise<Transaction[]>;
   getTransaction(id: string): Promise<Transaction | undefined>;
   getTransactionByReference(reference: string): Promise<Transaction | undefined>;
   createTransaction(transaction: CreateTransaction): Promise<Transaction>;
@@ -248,6 +250,10 @@ export interface IStorage {
   
   // Admin Utilities
   purgeDatabase(tablesToPreserve?: string[]): Promise<{ purgedTables: string[] }>;
+  // LU-008 — Two-admin destructive-action approval flow
+  createPendingDestructiveAction(input: InsertPendingDestructiveAction): Promise<PendingDestructiveAction>;
+  getPendingDestructiveAction(id: string): Promise<PendingDestructiveAction | undefined>;
+  markPendingDestructiveActionApproved(id: string, data: { approvedBy: string; approvedAt: string; executedAt?: string }): Promise<PendingDestructiveAction | undefined>;
   getUsers(): Promise<User[]>;
   updateUser(id: string, data: Partial<User>): Promise<User | undefined>;
   deleteUser(id: string): Promise<boolean>;
@@ -362,15 +368,30 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== TRANSACTIONS ====================
-  async getTransactions(companyId?: string): Promise<Transaction[]> {
-    if (companyId) {
-      const result = await db.select().from(transactions)
-        .where(eq(transactions.companyId, companyId))
-        .orderBy(desc(transactions.date));
-      return result;
-    }
-    const result = await db.select().from(transactions).orderBy(desc(transactions.date));
-    return result;
+  // AUD-BE-010: pagination is now mandatory in code (caps unbounded reads).
+  // Default page size 100; hard cap 500 to keep result sets bounded even
+  // when callers pass huge values. AUD-BE-014 soft-delete: filter rows where
+  // deleted_at IS NOT NULL by default.
+  async getTransactions(
+    companyId?: string,
+    opts: { limit?: number; offset?: number; includeDeleted?: boolean } = {},
+  ): Promise<Transaction[]> {
+    const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
+    const offset = Math.max(opts.offset ?? 0, 0);
+
+    const conditions: any[] = [];
+    if (companyId) conditions.push(eq(transactions.companyId, companyId));
+    if (!opts.includeDeleted) conditions.push(sql`${transactions.deletedAt} IS NULL`);
+
+    const query = db.select().from(transactions);
+    const filtered = conditions.length > 0
+      ? query.where(and(...conditions))
+      : query;
+
+    return await filtered
+      .orderBy(desc(transactions.date))
+      .limit(limit)
+      .offset(offset);
   }
 
   async getTransaction(id: string): Promise<Transaction | undefined> {
@@ -1481,6 +1502,47 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ==================== ATOMIC WALLET OPERATIONS ====================
+  // LU-001 / AUD-BE-002: every atomic wallet op also writes a `transactions`
+  // row inside the same DB transaction, so the user-facing transaction history
+  // sees bill payments, card fundings, transfers, and reversals.
+  // Helper takes a Drizzle transaction handle so writes stay atomic with the
+  // wallet ledger insert.
+  private async bridgeWalletToTransaction(
+    tx: any,
+    input: {
+      walletTransactionId: string;
+      companyId: string | null;
+      walletTxType: 'bill_payment' | 'card_funding' | 'wallet_transfer' | 'wallet_transfer_in' | 'reversal';
+      amount: string;
+      currency: string;
+      status: string;
+      description: string;
+      reference: string | null;
+      date: string;
+    },
+  ): Promise<void> {
+    const txnTypeMap: Record<string, string> = {
+      bill_payment: 'Bill',
+      card_funding: 'Funding',
+      wallet_transfer: 'Transfer',
+      wallet_transfer_in: 'Transfer',
+      reversal: 'Refund',
+    };
+    await tx.insert(transactions).values({
+      type: txnTypeMap[input.walletTxType] ?? 'Other',
+      amount: input.amount,
+      fee: '0',
+      status: input.status,
+      date: input.date,
+      description: input.description,
+      currency: input.currency,
+      userId: null,
+      reference: input.reference,
+      walletTransactionId: input.walletTransactionId,
+      companyId: input.companyId,
+    } as any);
+  }
+
   async atomicBillPayment(params: {
     walletId: string;
     billId: string;
@@ -1539,6 +1601,19 @@ export class DatabaseStorage implements IStorage {
         } as any)
         .where(eq(bills.id, params.billId))
         .returning();
+
+      // LU-001: also record in user-facing transactions ledger
+      await this.bridgeWalletToTransaction(tx, {
+        walletTransactionId: walletTxResult[0].id,
+        companyId: wallet.company_id ?? null,
+        walletTxType: 'bill_payment',
+        amount: params.amount.toFixed(2),
+        currency: wallet.currency,
+        status: 'completed',
+        description: `Bill payment for bill ${params.billId}`,
+        reference: params.reference,
+        date: now.split('T')[0],
+      });
 
       return {
         walletTx: walletTxResult[0],
@@ -1605,6 +1680,19 @@ export class DatabaseStorage implements IStorage {
         } as any)
         .where(eq(virtualCards.id, params.cardId))
         .returning();
+
+      // LU-001: also record in user-facing transactions ledger
+      await this.bridgeWalletToTransaction(tx, {
+        walletTransactionId: walletTxResult[0].id,
+        companyId: wallet.company_id ?? null,
+        walletTxType: 'card_funding',
+        amount: params.amount.toFixed(2),
+        currency: wallet.currency,
+        status: 'completed',
+        description: `Card funding for card ${params.cardId}`,
+        reference: params.reference,
+        date: now.split('T')[0],
+      });
 
       return {
         walletTx: walletTxResult[0],
@@ -1693,6 +1781,32 @@ export class DatabaseStorage implements IStorage {
         createdAt: now,
       } as any).returning();
 
+      // LU-001: bridge BOTH legs into the user-facing transactions ledger.
+      // Debit leg uses the source wallet's company; credit leg uses the dest wallet's company
+      // (these may differ on cross-company / cross-tenant transfers).
+      await this.bridgeWalletToTransaction(tx, {
+        walletTransactionId: debitTxResult[0].id,
+        companyId: sourceWallet.company_id ?? null,
+        walletTxType: 'wallet_transfer',
+        amount: params.amount.toFixed(2),
+        currency: sourceWallet.currency,
+        status: 'completed',
+        description: params.description,
+        reference: params.reference,
+        date: now.split('T')[0],
+      });
+      await this.bridgeWalletToTransaction(tx, {
+        walletTransactionId: creditTxResult[0].id,
+        companyId: destWallet.company_id ?? null,
+        walletTxType: 'wallet_transfer_in',
+        amount: destAmount.toFixed(2),
+        currency: destWallet.currency,
+        status: 'completed',
+        description: params.description,
+        reference: params.reference,
+        date: now.split('T')[0],
+      });
+
       return {
         debitTx: debitTxResult[0],
         creditTx: creditTxResult[0],
@@ -1768,6 +1882,19 @@ export class DatabaseStorage implements IStorage {
         .set({ reversedAt: now, reversedByTxId: reversalTxResult[0].id } as any)
         .where(eq(walletTransactions.id, params.originalTxId));
 
+      // LU-001: bridge to user-facing transactions ledger
+      await this.bridgeWalletToTransaction(tx, {
+        walletTransactionId: reversalTxResult[0].id,
+        companyId: wallet.company_id ?? null,
+        walletTxType: 'reversal',
+        amount: params.amount.toFixed(2),
+        currency: wallet.currency,
+        status: 'completed',
+        description: `Reversal of transaction ${params.originalTxId}`,
+        reference: `REVERSAL-${params.originalTxId}`,
+        date: now.split('T')[0],
+      });
+
       return reversalTxResult[0];
     });
   }
@@ -1792,10 +1919,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getExchangeRate(baseCurrency: string, targetCurrency: string): Promise<ExchangeRate | undefined> {
+    // AUD-BE-011: filter by the rate's validity window. A rate must satisfy
+    //   validFrom <= now AND (validTo IS NULL OR validTo >= now)
+    // Otherwise the latest historical rate would be returned even after it
+    // expired, which silently corrupts FX-conversion results.
+    const now = new Date().toISOString();
     const result = await db.select().from(exchangeRates)
       .where(and(
         eq(exchangeRates.baseCurrency, baseCurrency),
-        eq(exchangeRates.targetCurrency, targetCurrency)
+        eq(exchangeRates.targetCurrency, targetCurrency),
+        sql`${exchangeRates.validFrom} <= ${now}`,
+        sql`(${exchangeRates.validTo} IS NULL OR ${exchangeRates.validTo} >= ${now})`,
       ))
       .orderBy(desc(exchangeRates.createdAt))
       .limit(1);
@@ -2094,11 +2228,42 @@ export class DatabaseStorage implements IStorage {
         await db.execute(sql.raw(`TRUNCATE TABLE "${table}" CASCADE`));
         purgedTables.push(table);
       } catch (error) {
+        // Use logger via dynamic import to avoid a circular import at top of file
+        // (logger imports from middleware/auth which imports storage)
+        // eslint-disable-next-line no-console
         console.log(`Skipping table ${table}: ${error}`);
       }
     }
-    
+
     return { purgedTables };
+  }
+
+  // LU-008 / AUD-BE-003 — Two-admin destructive-action approval flow
+  async createPendingDestructiveAction(input: InsertPendingDestructiveAction): Promise<PendingDestructiveAction> {
+    const result = await db.insert(pendingDestructiveActions).values({
+      ...input,
+      initiatedAt: new Date().toISOString(),
+    } as any).returning();
+    return result[0];
+  }
+
+  async getPendingDestructiveAction(id: string): Promise<PendingDestructiveAction | undefined> {
+    const result = await db.select().from(pendingDestructiveActions)
+      .where(eq(pendingDestructiveActions.id, id))
+      .limit(1);
+    return result[0];
+  }
+
+  async markPendingDestructiveActionApproved(id: string, data: { approvedBy: string; approvedAt: string; executedAt?: string }): Promise<PendingDestructiveAction | undefined> {
+    const result = await db.update(pendingDestructiveActions)
+      .set({
+        approvedBy: data.approvedBy,
+        approvedAt: data.approvedAt,
+        executedAt: data.executedAt ?? null,
+      } as any)
+      .where(eq(pendingDestructiveActions.id, id))
+      .returning();
+    return result[0];
   }
 
   async getUsers(): Promise<User[]> {

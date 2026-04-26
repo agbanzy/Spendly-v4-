@@ -1,7 +1,18 @@
+import { sql } from "drizzle-orm";
+import { db } from "./db";
 import { storage } from "./storage";
 import { paystackClient } from "./paystackClient";
 import { getStripeClient } from "./stripeClient";
 import { getPaymentProvider, getCurrencyForCountry } from "./paymentService";
+import { logger as baseLogger } from "./lib/logger";
+
+// LU-002 / LU-003 / AUD-BE-001 / AUD-BE-004
+// Scheduler hardened to (a) acquire a Postgres advisory lock per tick so only
+// one ECS instance runs at a time, and (b) use pino instead of console for
+// structured operational logging.
+
+const logger = baseLogger.child({ module: "recurring-scheduler" });
+const SCHEDULER_LOCK_NAME = "financiar.recurring-scheduler";
 
 function computeNextDate(currentDate: string, frequency: string): string {
   const date = new Date(currentDate);
@@ -24,51 +35,84 @@ function computeNextDate(currentDate: string, frequency: string): string {
   return date.toISOString().split('T')[0];
 }
 
+/**
+ * Run `fn` only if this instance can acquire the named Postgres advisory lock.
+ * Returns null when another instance holds the lock; otherwise returns the
+ * function result. The lock is automatically released when the surrounding
+ * transaction commits or rolls back.
+ */
+async function withSchedulerLock<T>(name: string, fn: () => Promise<T>): Promise<T | null> {
+  return await db.transaction(async (tx) => {
+    const result = await tx.execute(
+      sql`SELECT pg_try_advisory_xact_lock(hashtext(${name})::int) AS acquired`
+    );
+    const acquired = (result.rows[0] as any)?.acquired === true;
+    if (!acquired) {
+      logger.debug({ schedulerName: name }, "Lock not acquired — another instance is running");
+      return null;
+    }
+    return await fn();
+  });
+}
+
 async function processRecurringBills() {
   let bills;
   try {
     bills = await storage.getBills();
   } catch (error: any) {
-    console.error('[Scheduler] Failed to fetch bills:', error.message);
+    logger.error({ err: error }, "Failed to fetch bills");
     return;
   }
 
   const now = new Date().toISOString().split('T')[0];
-  // Pre-load all bills once for dedup checks (avoids N+1 queries inside loop)
   const allBills = bills;
 
   for (const bill of bills) {
     try {
       if (!bill.recurring) continue;
-      if (bill.status !== 'Paid') continue;
+      if (bill.status?.toLowerCase() !== 'paid') continue;
 
       const frequency = (bill as any).frequency || 'monthly';
       const nextDueDate = computeNextDate(bill.dueDate, frequency);
 
       if (nextDueDate > now) continue;
 
+      // In-memory pre-check (fast path); the DB unique index `bills_recurring_dedup_unique`
+      // (migration 0008) is the authoritative dedup if two instances slip past the lock.
       const alreadyCreated = allBills.some(
-        (b: any) => b.name === bill.name && b.dueDate === nextDueDate && b.status !== 'Paid'
+        (b: any) =>
+          b.name === bill.name &&
+          b.dueDate === nextDueDate &&
+          (b.companyId ?? null) === ((bill as any).companyId ?? null) &&
+          b.status?.toLowerCase() !== 'paid'
       );
       if (alreadyCreated) continue;
 
-      await storage.createBill({
-        name: bill.name,
-        provider: bill.provider,
-        amount: bill.amount,
-        dueDate: nextDueDate,
-        category: bill.category,
-        status: 'Unpaid',
-        currency: bill.currency,
-        recurring: true,
-        frequency,
-        userId: bill.userId,
-        companyId: bill.companyId,
-      } as any);
-
-      console.log(`[Scheduler] Created recurring bill: ${bill.name} due ${nextDueDate}`);
+      try {
+        await storage.createBill({
+          name: bill.name,
+          provider: bill.provider,
+          amount: bill.amount,
+          dueDate: nextDueDate,
+          category: bill.category,
+          status: 'unpaid',
+          currency: bill.currency,
+          recurring: true,
+          frequency,
+          userId: bill.userId,
+          companyId: bill.companyId,
+        } as any);
+        logger.info({ billName: bill.name, dueDate: nextDueDate, companyId: (bill as any).companyId }, "Created recurring bill");
+      } catch (createErr: any) {
+        // Race winner already inserted — DB unique constraint rejects duplicate.
+        if (typeof createErr?.message === 'string' && /bills_recurring_dedup_unique/.test(createErr.message)) {
+          logger.info({ billName: bill.name, dueDate: nextDueDate }, "Dedup constraint rejected duplicate recurring bill (expected under contention)");
+          continue;
+        }
+        throw createErr;
+      }
     } catch (error: any) {
-      console.error(`[Scheduler] Error processing recurring bill ${bill.id} (${bill.name}):`, error.message);
+      logger.error({ err: error, billId: bill.id, billName: bill.name }, "Error processing recurring bill");
     }
   }
 }
@@ -78,7 +122,7 @@ async function processRecurringPayroll() {
   try {
     recurringEntries = await storage.getRecurringPayrollEntries();
   } catch (error: any) {
-    console.error('[Scheduler] Failed to fetch recurring payroll entries:', error.message);
+    logger.error({ err: error }, "Failed to fetch recurring payroll entries");
     return;
   }
 
@@ -123,9 +167,9 @@ async function processRecurringPayroll() {
         nextPayDate: computeNextDate(nextPayDate, frequency),
       } as any);
 
-      console.log(`[Scheduler] Created recurring payroll entry for ${entry.employeeName} on ${nextPayDate}`);
+      logger.info({ employeeName: entry.employeeName, nextPayDate }, "Created recurring payroll entry");
     } catch (error: any) {
-      console.error(`[Scheduler] Error processing recurring payroll entry ${entry.id} (${entry.employeeName}):`, error.message);
+      logger.error({ err: error, entryId: entry.id, employeeName: entry.employeeName }, "Error processing recurring payroll entry");
     }
   }
 }
@@ -137,7 +181,7 @@ async function processScheduledPayments() {
   try {
     duePayments = await storage.getDueScheduledPayments(now);
   } catch (error: any) {
-    console.error('[Scheduler] Failed to fetch due scheduled payments:', error.message);
+    logger.error({ err: error }, "Failed to fetch due scheduled payments");
     return;
   }
 
@@ -154,7 +198,7 @@ async function processScheduledPayments() {
         const accountName = recipientDetails.accountName || payment.recipientName || 'Recipient';
 
         if (!accountNumber) {
-          console.log(`[Scheduler] No account number for scheduled payment ${payment.id}, skipping`);
+          logger.warn({ paymentId: payment.id }, "No account number for scheduled payment, skipping");
           continue;
         }
 
@@ -163,9 +207,24 @@ async function processScheduledPayments() {
         const { currency } = getCurrencyForCountry(countryCode);
         let reference = '';
 
+        // FIX P4: Debit balance BEFORE initiating external transfer to prevent fund leaks
+        const balances = await storage.getBalances();
+        let balanceField: string;
+        if (currency === 'USD') {
+          balanceField = 'usd';
+        } else {
+          balanceField = 'local';
+        }
+        const currentBalance = parseFloat(String((balances as any)[balanceField] || 0));
+        if (currentBalance < amount) {
+          throw new Error(`Insufficient balance for scheduled payment: need ${amount} ${currency}, have ${currentBalance}`);
+        }
+        await storage.updateBalances({ [balanceField]: String(currentBalance - amount) });
+
         if (provider === 'paystack') {
           if (!bankCode) {
-            console.log(`[Scheduler] No bank code for Paystack payout ${payment.id}, skipping`);
+            await storage.updateBalances({ [balanceField]: String(currentBalance) });
+            logger.warn({ paymentId: payment.id }, "No bank code for Paystack payout, refunded balance and skipped");
             continue;
           }
           const recipientResponse = await paystackClient.createTransferRecipient(
@@ -175,24 +234,37 @@ async function processScheduledPayments() {
             currency
           );
           const recipientCode = recipientResponse.data?.recipient_code;
-          if (!recipientCode) throw new Error('Failed to create transfer recipient');
+          if (!recipientCode) {
+            await storage.updateBalances({ [balanceField]: String(currentBalance) });
+            throw new Error('Failed to create transfer recipient');
+          }
 
-          const transferResponse = await paystackClient.initiateTransfer(
-            amount,
-            recipientCode,
-            `Scheduled payment - ${payment.type}`
-          );
-          reference = transferResponse.data?.transfer_code || '';
+          try {
+            const transferResponse = await paystackClient.initiateTransfer(
+              amount,
+              recipientCode,
+              `Scheduled payment - ${payment.type}`
+            );
+            reference = transferResponse.data?.transfer_code || '';
+          } catch (transferErr: any) {
+            await storage.updateBalances({ [balanceField]: String(currentBalance) });
+            throw transferErr;
+          }
         } else {
-          const stripe = getStripeClient();
-          const payout = await stripe.payouts.create({
-            amount: Math.round(amount * 100),
-            currency: currency.toLowerCase(),
-            method: 'standard',
-            description: `Scheduled payment - ${payment.type}`,
-            metadata: { scheduledPaymentId: payment.id, type: payment.type },
-          });
-          reference = payout.id;
+          try {
+            const stripe = getStripeClient();
+            const payout = await stripe.payouts.create({
+              amount: Math.round(amount * 100),
+              currency: currency.toLowerCase(),
+              method: 'standard',
+              description: `Scheduled payment - ${payment.type}`,
+              metadata: { scheduledPaymentId: payment.id, type: payment.type },
+            });
+            reference = payout.id;
+          } catch (stripeErr: any) {
+            await storage.updateBalances({ [balanceField]: String(currentBalance) });
+            throw stripeErr;
+          }
         }
 
         await storage.createTransaction({
@@ -207,7 +279,7 @@ async function processScheduledPayments() {
           reference: reference || null,
         });
 
-        console.log(`[Scheduler] Processed scheduled payment ${payment.id}, ref: ${reference}`);
+        logger.info({ paymentId: payment.id, reference }, "Processed scheduled payment");
       }
 
       const nextRunDate = computeNextDate(payment.nextRunDate, payment.frequency);
@@ -217,25 +289,28 @@ async function processScheduledPayments() {
       });
 
     } catch (payErr: any) {
-      console.error(`[Scheduler] Failed to process scheduled payment ${payment.id}:`, payErr.message);
+      logger.error({ err: payErr, paymentId: payment.id }, "Failed to process scheduled payment");
       try {
         await storage.updateScheduledPayment(payment.id, {
           status: 'failed',
           metadata: { ...((payment.metadata as any) || {}), lastError: payErr.message, failedAt: new Date().toISOString() },
         } as any);
       } catch (updateErr: any) {
-        console.error(`[Scheduler] Failed to mark payment ${payment.id} as failed:`, updateErr.message);
+        logger.error({ err: updateErr, paymentId: payment.id }, "Failed to mark payment as failed");
       }
     }
   }
 }
 
 export async function runRecurringScheduler() {
-  console.log(`[Scheduler] Running recurring payment check at ${new Date().toISOString()}`);
-  await processRecurringBills();
-  await processRecurringPayroll();
-  await processScheduledPayments();
-  console.log(`[Scheduler] Recurring payment check complete`);
+  const startedAt = Date.now();
+  await withSchedulerLock(SCHEDULER_LOCK_NAME, async () => {
+    logger.info({ at: new Date().toISOString() }, "Starting recurring scheduler tick");
+    await processRecurringBills();
+    await processRecurringPayroll();
+    await processScheduledPayments();
+    logger.info({ durationMs: Date.now() - startedAt }, "Scheduler tick complete");
+  });
 }
 
 let schedulerInterval: NodeJS.Timeout | null = null;
@@ -244,10 +319,10 @@ export function startRecurringScheduler(intervalMs: number = 3600000) {
   if (schedulerInterval) {
     clearInterval(schedulerInterval);
   }
-  console.log(`[Scheduler] Starting recurring payment scheduler (interval: ${intervalMs / 1000}s)`);
-  runRecurringScheduler().catch(console.error);
+  logger.info({ intervalMs }, "Starting recurring payment scheduler");
+  runRecurringScheduler().catch((err) => logger.error({ err }, "Initial scheduler tick failed"));
   schedulerInterval = setInterval(() => {
-    runRecurringScheduler().catch(console.error);
+    runRecurringScheduler().catch((err) => logger.error({ err }, "Scheduler tick failed"));
   }, intervalMs);
 }
 
@@ -255,7 +330,7 @@ export function stopRecurringScheduler() {
   if (schedulerInterval) {
     clearInterval(schedulerInterval);
     schedulerInterval = null;
-    console.log('[Scheduler] Recurring payment scheduler stopped');
+    logger.info("Recurring payment scheduler stopped");
   }
 }
 
