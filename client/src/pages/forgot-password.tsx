@@ -1,24 +1,36 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Mail, ArrowLeft, Loader2, CheckCircle2, ShieldCheck, KeyRound, RefreshCw, ArrowRight, Sparkles } from "lucide-react";
-import { forgotPassword } from "@/lib/cognito";
+import { Mail, ArrowLeft, Loader2, CheckCircle2, ShieldCheck, KeyRound, RefreshCw, ArrowRight, Sparkles, Lock } from "lucide-react";
+import { forgotPassword, confirmForgotPassword } from "@/lib/cognito";
 import { apiRequest } from "@/lib/queryClient";
+import { forgotPasswordResetSchema, fieldErrorsFromZod } from "@shared/auth-schemas";
 
-type ResetStep = "email" | "sending" | "sent";
+// LU-009 Phase 2 — added "verify" + "complete" steps so users can finish
+// the password reset entirely in-app instead of bouncing to Cognito's
+// hosted UI. Cognito owns code validation server-side; the schema
+// validates shape (6-digit code, password rules, match) before we call.
+type ResetStep = "email" | "sending" | "sent" | "verify" | "verifying" | "complete";
 
 export default function ForgotPasswordPage() {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [email, setEmail] = useState("");
   const [step, setStep] = useState<ResetStep>("email");
   const [isLoading, setIsLoading] = useState(false);
   const [userName, setUserName] = useState("");
   const [cooldown, setCooldown] = useState(0);
   const [errorMessage, setErrorMessage] = useState("");
+
+  // Verify-step form state — code + new password + confirm.
+  const [code, setCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [verifyErrors, setVerifyErrors] = useState<Partial<Record<string, string>>>({});
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -53,7 +65,7 @@ export default function ForgotPasswordPage() {
 
       await forgotPassword(email);
 
-      setStep("sent");
+      setStep("verify");
       setCooldown(60);
       toast({
         title: "Reset code sent",
@@ -100,6 +112,47 @@ export default function ForgotPasswordPage() {
       setIsLoading(false);
     }
   }, [email, cooldown, toast]);
+
+  const handleConfirmReset = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage("");
+
+    const errors = fieldErrorsFromZod(forgotPasswordResetSchema, {
+      code,
+      newPassword,
+      confirmPassword,
+    });
+    setVerifyErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+
+    setIsLoading(true);
+    setStep("verifying");
+    try {
+      await confirmForgotPassword(email, code, newPassword);
+      setStep("complete");
+      toast({
+        title: "Password reset",
+        description: "You can now log in with your new password.",
+      });
+    } catch (error: any) {
+      setStep("verify");
+      const name = error?.name || "";
+      if (name === "CodeMismatchException") {
+        setVerifyErrors({ code: "That code is incorrect. Please double-check the email." });
+      } else if (name === "ExpiredCodeException") {
+        setVerifyErrors({ code: "This code has expired. Please request a new one." });
+      } else if (name === "InvalidPasswordException") {
+        setVerifyErrors({ newPassword: error?.message || "Password does not meet the requirements." });
+      } else if (name === "LimitExceededException" || name === "TooManyRequestsException") {
+        setErrorMessage("Too many attempts. Please try again later.");
+        setCooldown(120);
+      } else {
+        setErrorMessage(error?.message || "Could not reset password. Please try again.");
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [email, code, newPassword, confirmPassword, toast]);
 
   return (
     <div className="min-h-screen flex">
@@ -179,17 +232,175 @@ export default function ForgotPasswordPage() {
           <Card className="shadow-2xl shadow-primary/8 border-border/50">
             <CardHeader className="text-center pb-2">
               <CardTitle className="text-2xl font-bold tracking-tight" data-testid="text-forgot-password-title">
-                {step === "sent" ? "Check your email" : "Forgot password?"}
+                {step === "complete"
+                  ? "Password reset"
+                  : step === "verify" || step === "verifying"
+                  ? "Enter verification code"
+                  : "Forgot password?"}
               </CardTitle>
               <CardDescription className="text-muted-foreground">
-                {step === "sent"
-                  ? `We've sent a reset link to ${email}`
+                {step === "complete"
+                  ? "Your password has been updated."
+                  : step === "verify" || step === "verifying"
+                  ? `We sent a 6-digit code to ${email}. Enter it below along with your new password.`
                   : "Enter the email connected to your Financiar account and we'll verify it before sending reset instructions."
                 }
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-4">
-              {step === "sent" ? (
+              {step === "complete" ? (
+                <div className="space-y-5">
+                  <div className="flex justify-center">
+                    <div className="h-16 w-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                      <CheckCircle2 className="h-8 w-8 text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                  </div>
+                  <p className="text-center text-sm text-muted-foreground" data-testid="text-reset-complete">
+                    Your password has been reset successfully. You can now sign in with your new password.
+                  </p>
+                  <Button
+                    className="w-full h-12 text-sm font-medium shadow-md shadow-primary/20 gap-2"
+                    onClick={() => setLocation("/login")}
+                    data-testid="button-go-to-login"
+                  >
+                    Continue to login
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : step === "verify" || step === "verifying" ? (
+                <form onSubmit={handleConfirmReset} className="space-y-5">
+                  <div className="space-y-2">
+                    <Label htmlFor="code" className="text-sm font-medium">Verification code</Label>
+                    <div className="relative">
+                      <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="code"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        placeholder="6-digit code"
+                        value={code}
+                        onChange={(e) => {
+                          setCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+                          setVerifyErrors((prev) => ({ ...prev, code: undefined }));
+                        }}
+                        className="pl-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors tracking-widest font-mono"
+                        disabled={isLoading}
+                        data-testid="input-reset-code"
+                      />
+                    </div>
+                    {verifyErrors.code && (
+                      <p className="text-sm text-destructive" data-testid="text-reset-code-error">{verifyErrors.code}</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="newPassword" className="text-sm font-medium">New password</Label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="newPassword"
+                        type="password"
+                        autoComplete="new-password"
+                        placeholder="At least 8 characters"
+                        value={newPassword}
+                        onChange={(e) => {
+                          setNewPassword(e.target.value);
+                          setVerifyErrors((prev) => ({ ...prev, newPassword: undefined, confirmPassword: undefined }));
+                        }}
+                        className="pl-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors"
+                        disabled={isLoading}
+                        data-testid="input-new-password"
+                      />
+                    </div>
+                    {verifyErrors.newPassword && (
+                      <p className="text-sm text-destructive" data-testid="text-new-password-error">{verifyErrors.newPassword}</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="confirmPassword" className="text-sm font-medium">Confirm new password</Label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="confirmPassword"
+                        type="password"
+                        autoComplete="new-password"
+                        placeholder="Re-enter the new password"
+                        value={confirmPassword}
+                        onChange={(e) => {
+                          setConfirmPassword(e.target.value);
+                          setVerifyErrors((prev) => ({ ...prev, confirmPassword: undefined }));
+                        }}
+                        className="pl-10 h-11 bg-muted/30 border-border/50 focus:bg-background transition-colors"
+                        disabled={isLoading}
+                        data-testid="input-confirm-new-password"
+                      />
+                    </div>
+                    {verifyErrors.confirmPassword && (
+                      <p className="text-sm text-destructive" data-testid="text-confirm-new-password-error">{verifyErrors.confirmPassword}</p>
+                    )}
+                  </div>
+
+                  {errorMessage && (
+                    <p className="text-sm text-destructive text-center" data-testid="text-reset-verify-error">{errorMessage}</p>
+                  )}
+
+                  <Button
+                    type="submit"
+                    className="w-full h-12 text-sm font-medium shadow-md shadow-primary/20 gap-2"
+                    disabled={isLoading}
+                    data-testid="button-confirm-reset"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Resetting password...
+                      </>
+                    ) : (
+                      <>
+                        Reset password
+                        <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full gap-2"
+                    disabled={cooldown > 0 || isLoading}
+                    onClick={handleResend}
+                    data-testid="button-resend-code-from-verify"
+                  >
+                    {isLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                    {cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="w-full gap-2"
+                    onClick={() => {
+                      setStep("email");
+                      setCode("");
+                      setNewPassword("");
+                      setConfirmPassword("");
+                      setVerifyErrors({});
+                      setErrorMessage("");
+                    }}
+                    data-testid="button-change-email"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    Use a different email
+                  </Button>
+                </form>
+              ) : step === "sent" ? (
                 <div className="space-y-5">
                   <div className="flex justify-center">
                     <div className="h-16 w-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">

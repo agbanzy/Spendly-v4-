@@ -22,6 +22,12 @@ import {
   SUPPORTED_COUNTRIES, getCurrencyForCountry, getPrimaryIdForCountry,
   isPaystackRegion,
 } from "@/lib/constants";
+import {
+  onboardingStep1Schema,
+  onboardingStep2Schema,
+  onboardingStep3Schema,
+  fieldErrorsFromZod,
+} from "@shared/auth-schemas";
 
 const COUNTRIES = SUPPORTED_COUNTRIES.map(c => ({ code: c.code, name: c.name }));
 
@@ -92,6 +98,8 @@ export default function Onboarding() {
   const [bvnVerified, setBvnVerified] = useState(false);
   const [bvnVerifying, setBvnVerifying] = useState(false);
   const [onboardingResult, setOnboardingResult] = useState<any>(null);
+  // LU-009 Phase 2 — per-step Zod errors (cleared as the user types).
+  const [stepErrors, setStepErrors] = useState<Partial<Record<string, string>>>({});
 
   const [formData, setFormData] = useState<FormData>({
     firstName: "",
@@ -221,23 +229,53 @@ export default function Onboarding() {
 
   const updateField = (field: keyof FormData, value: string | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+    // Clear the per-field error as the user types — Zod re-validates on next.
+    setStepErrors((prev) => {
+      if (!prev[field as string]) return prev;
+      const next = { ...prev };
+      delete next[field as string];
+      return next;
+    });
   };
 
-  const validateStep = (step: number): boolean => {
+  // LU-009 Phase 2 — Zod-backed step validation. `validateStep` returns
+  // { ok, errors } so callers can decide whether to advance and which
+  // fields to highlight. The boolean-only call sites (`disabled` props
+  // on Continue buttons) keep their old shape via `validateStepBool`.
+  const validateStep = (step: number): { ok: boolean; errors: Partial<Record<string, string>> } => {
     switch (step) {
-      case 1:
-        if (formData.isBusinessAccount) {
-          return !!(formData.businessName && formData.businessType);
-        }
-        return true;
-      case 2:
-        return !!(formData.firstName && formData.lastName && formData.country && formData.phoneNumber && formData.dateOfBirth);
-      case 3:
-        return !!(formData.idNumber && formData.addressLine1 && formData.city);
+      case 1: {
+        const errors = fieldErrorsFromZod(onboardingStep1Schema, {
+          isBusinessAccount: formData.isBusinessAccount,
+          businessName: formData.businessName,
+          businessType: formData.businessType,
+        });
+        return { ok: Object.keys(errors).length === 0, errors };
+      }
+      case 2: {
+        const errors = fieldErrorsFromZod(onboardingStep2Schema, {
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          country: formData.country,
+          phoneNumber: formData.phoneNumber,
+          dateOfBirth: formData.dateOfBirth,
+        });
+        return { ok: Object.keys(errors).length === 0, errors };
+      }
+      case 3: {
+        const errors = fieldErrorsFromZod(onboardingStep3Schema, {
+          idNumber: formData.idNumber,
+          addressLine1: formData.addressLine1,
+          city: formData.city,
+        });
+        return { ok: Object.keys(errors).length === 0, errors };
+      }
       default:
-        return true;
+        return { ok: true, errors: {} };
     }
   };
+
+  const validateStepBool = (step: number): boolean => validateStep(step).ok;
 
   const verifyBvn = async () => {
     if (!formData.idNumber || formData.idNumber.length !== 11) {
@@ -266,11 +304,14 @@ export default function Onboarding() {
   };
 
   const nextStep = () => {
-    if (validateStep(currentStep)) {
+    const { ok, errors } = validateStep(currentStep);
+    setStepErrors(errors);
+    if (ok) {
       if (currentStep === 3) {
         completeOnboardingMutation.mutate(formData);
       } else {
         setCurrentStep(prev => Math.min(prev + 1, 4));
+        setStepErrors({});
       }
     } else {
       toast({
@@ -427,7 +468,11 @@ export default function Onboarding() {
                           value={formData.businessName}
                           onChange={(e) => updateField("businessName", e.target.value)}
                           placeholder="Your company name"
+                          aria-invalid={!!stepErrors.businessName}
                         />
+                        {stepErrors.businessName && (
+                          <p className="text-sm text-destructive" data-testid="text-business-name-error">{stepErrors.businessName}</p>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="businessType">Business Type *</Label>
@@ -435,7 +480,7 @@ export default function Onboarding() {
                           value={formData.businessType}
                           onValueChange={(v) => updateField("businessType", v)}
                         >
-                          <SelectTrigger>
+                          <SelectTrigger aria-invalid={!!stepErrors.businessType}>
                             <SelectValue placeholder="Select type" />
                           </SelectTrigger>
                           <SelectContent>
@@ -446,6 +491,9 @@ export default function Onboarding() {
                             ))}
                           </SelectContent>
                         </Select>
+                        {stepErrors.businessType && (
+                          <p className="text-sm text-destructive" data-testid="text-business-type-error">{stepErrors.businessType}</p>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="businessIndustry">Industry</Label>
@@ -488,7 +536,7 @@ export default function Onboarding() {
                 )}
 
                 <div className="flex justify-end pt-6 border-t">
-                  <Button onClick={nextStep} disabled={!validateStep(1)}>
+                  <Button onClick={nextStep} disabled={!validateStepBool(1)}>
                     Continue
                     <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
@@ -520,7 +568,11 @@ export default function Onboarding() {
                       value={formData.firstName}
                       onChange={(e) => updateField("firstName", e.target.value)}
                       placeholder="John"
+                      aria-invalid={!!stepErrors.firstName}
                     />
+                    {stepErrors.firstName && (
+                      <p className="text-sm text-destructive" data-testid="text-first-name-error">{stepErrors.firstName}</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="lastName">Last Name *</Label>
@@ -529,7 +581,11 @@ export default function Onboarding() {
                       value={formData.lastName}
                       onChange={(e) => updateField("lastName", e.target.value)}
                       placeholder="Doe"
+                      aria-invalid={!!stepErrors.lastName}
                     />
+                    {stepErrors.lastName && (
+                      <p className="text-sm text-destructive" data-testid="text-last-name-error">{stepErrors.lastName}</p>
+                    )}
                   </div>
                 </div>
 
@@ -540,7 +596,7 @@ export default function Onboarding() {
                       value={formData.country}
                       onValueChange={(v) => updateField("country", v)}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger aria-invalid={!!stepErrors.country}>
                         <SelectValue placeholder="Select your country" />
                       </SelectTrigger>
                       <SelectContent>
@@ -551,6 +607,9 @@ export default function Onboarding() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {stepErrors.country && (
+                      <p className="text-sm text-destructive" data-testid="text-country-error">{stepErrors.country}</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="currency">Currency</Label>
@@ -580,7 +639,11 @@ export default function Onboarding() {
                       value={formData.phoneNumber}
                       onChange={(e) => updateField("phoneNumber", e.target.value)}
                       placeholder="+1 (555) 123-4567"
+                      aria-invalid={!!stepErrors.phoneNumber}
                     />
+                    {stepErrors.phoneNumber && (
+                      <p className="text-sm text-destructive" data-testid="text-phone-error">{stepErrors.phoneNumber}</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="dateOfBirth">
@@ -593,8 +656,12 @@ export default function Onboarding() {
                       value={formData.dateOfBirth}
                       onChange={(e) => updateField("dateOfBirth", e.target.value)}
                       max={new Date(Date.now() - 18 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
+                      aria-invalid={!!stepErrors.dateOfBirth}
                     />
                     <p className="text-xs text-muted-foreground">Must be 18 or older</p>
+                    {stepErrors.dateOfBirth && (
+                      <p className="text-sm text-destructive" data-testid="text-dob-error">{stepErrors.dateOfBirth}</p>
+                    )}
                   </div>
                 </div>
 
@@ -603,7 +670,7 @@ export default function Onboarding() {
                     <ArrowLeft className="h-4 w-4 mr-2" />
                     Back
                   </Button>
-                  <Button onClick={nextStep} disabled={!validateStep(2)}>
+                  <Button onClick={nextStep} disabled={!validateStepBool(2)}>
                     Continue
                     <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
@@ -644,6 +711,7 @@ export default function Onboarding() {
                       placeholder={idConfig?.placeholder || 'Enter ID number'}
                       maxLength={idConfig?.maxLength || 20}
                       className={bvnVerified ? "border-green-500" : ""}
+                      aria-invalid={!!stepErrors.idNumber}
                     />
                     {isNigeria && (
                       <Button
@@ -662,12 +730,15 @@ export default function Onboarding() {
                       </Button>
                     )}
                   </div>
+                  {stepErrors.idNumber && (
+                    <p className="text-sm text-destructive" data-testid="text-id-number-error">{stepErrors.idNumber}</p>
+                  )}
                   {bvnVerified && (
                     <p className="text-xs text-green-600 flex items-center gap-1">
                       <CheckCircle2 className="h-3 w-3" /> Identity verified
                     </p>
                   )}
-                  {!bvnVerified && idConfig && (
+                  {!bvnVerified && idConfig && !stepErrors.idNumber && (
                     <p className="text-xs text-muted-foreground">
                       Your {idConfig.label.toLowerCase()} is used for identity verification only.
                     </p>
@@ -688,7 +759,11 @@ export default function Onboarding() {
                         value={formData.addressLine1}
                         onChange={(e) => updateField("addressLine1", e.target.value)}
                         placeholder="123 Main Street"
+                        aria-invalid={!!stepErrors.addressLine1}
                       />
+                      {stepErrors.addressLine1 && (
+                        <p className="text-sm text-destructive" data-testid="text-address-error">{stepErrors.addressLine1}</p>
+                      )}
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="space-y-2">
@@ -698,7 +773,11 @@ export default function Onboarding() {
                           value={formData.city}
                           onChange={(e) => updateField("city", e.target.value)}
                           placeholder="City"
+                          aria-invalid={!!stepErrors.city}
                         />
+                        {stepErrors.city && (
+                          <p className="text-sm text-destructive" data-testid="text-city-error">{stepErrors.city}</p>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="state">State / Province</Label>
@@ -729,7 +808,7 @@ export default function Onboarding() {
                   </Button>
                   <Button
                     onClick={nextStep}
-                    disabled={!validateStep(3) || completeOnboardingMutation.isPending}
+                    disabled={!validateStepBool(3) || completeOnboardingMutation.isPending}
                   >
                     {completeOnboardingMutation.isPending ? (
                       <>
