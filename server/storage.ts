@@ -108,6 +108,10 @@ export interface IStorage {
   // /batch routes. Sums today's live (non-cancelled / rejected / failed)
   // payouts for a company in a given currency.
   getDailyPayoutTotalForCompany(companyId: string, currency: string): Promise<number>;
+  // AUD-DB-007 follow-up — per-company override read / write.
+  // Returns the override if set; undefined falls back to hardcoded floor.
+  getCompanyDailyPayoutLimit(companyId: string, currency: string): Promise<number | undefined>;
+  setCompanyDailyPayoutLimits(companyId: string, limits: Record<string, number>): Promise<Record<string, number>>;
   
   // Webhook idempotency
   isWebhookProcessed(eventId: string): Promise<boolean>;
@@ -2531,6 +2535,38 @@ export class DatabaseStorage implements IStorage {
         sql`${payouts.status} NOT IN ('cancelled', 'rejected', 'failed')`,
       ));
     return rows.reduce((sum, r) => sum + parseFloat(String(r.amount || 0)), 0);
+  }
+
+  // AUD-DB-007 follow-up — per-company override of the daily limit.
+  // Returns the override if one is set for (companyId, currency),
+  // otherwise undefined so the caller falls back to the hardcoded
+  // floor in payouts.routes.ts. Sparse map: missing currency = use
+  // global default.
+  async getCompanyDailyPayoutLimit(companyId: string, currency: string): Promise<number | undefined> {
+    const rows = await db.select({ dailyPayoutLimits: companies.dailyPayoutLimits })
+      .from(companies)
+      .where(eq(companies.id, companyId))
+      .limit(1);
+    const map = rows[0]?.dailyPayoutLimits as Record<string, number> | null | undefined;
+    if (!map) return undefined;
+    const v = map[currency.toUpperCase()];
+    return typeof v === 'number' && v > 0 ? v : undefined;
+  }
+
+  // AUD-DB-007 follow-up — admin endpoint backing. Replaces the entire
+  // daily-limit map for a company in one shot. Returns the new map.
+  async setCompanyDailyPayoutLimits(companyId: string, limits: Record<string, number>): Promise<Record<string, number>> {
+    // Validate shape: keys must be 3-letter ISO codes, values positive numbers.
+    const cleaned: Record<string, number> = {};
+    for (const [k, v] of Object.entries(limits)) {
+      if (!/^[A-Z]{3}$/.test(k)) continue;
+      if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) continue;
+      cleaned[k] = v;
+    }
+    await db.update(companies)
+      .set({ dailyPayoutLimits: cleaned, updatedAt: new Date().toISOString() } as any)
+      .where(eq(companies.id, companyId));
+    return cleaned;
   }
 
   async createPayout(payout: InsertPayout): Promise<Payout> {

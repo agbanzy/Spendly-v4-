@@ -651,6 +651,91 @@ router.get("/audit-logs", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// AUD-DB-007 follow-up — read the per-company daily payout limit map.
+// Returns the override map (sparse). Currencies absent from the map
+// fall back to the global DAILY_PAYOUT_LIMITS floor in
+// payouts.routes.ts; the response includes a hint about that floor.
+router.get("/admin/payout-limits", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const company = await resolveUserCompany(req);
+    if (!company?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
+    const companyRecord = await storage.getCompany(company.companyId);
+    const overrides = (companyRecord as any)?.dailyPayoutLimits || {};
+    res.json({
+      companyId: company.companyId,
+      overrides,
+      note: "Currencies absent from `overrides` fall back to the global hardcoded floor in payouts.routes.ts:DAILY_PAYOUT_LIMITS.",
+    });
+  } catch (error: any) {
+    const mapped = mapPaymentError(error, 'admin');
+    res.status(mapped.statusCode).json({ error: mapped.userMessage });
+  }
+});
+
+// AUD-DB-007 follow-up — write the per-company daily payout limit map.
+// PIN-gated because it directly affects how much money the company can
+// move per day. Validation: keys must be 3-letter ISO codes; values
+// must be positive numbers.
+router.patch("/admin/payout-limits", requireAuth, requireAdmin, requirePin, async (req, res) => {
+  try {
+    const company = await resolveUserCompany(req);
+    if (!company?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
+    const userId = (req as any).user?.uid || 'unknown';
+    const userName = await getAuditUserName(req);
+    const { limits } = req.body as { limits?: Record<string, unknown> };
+    if (!limits || typeof limits !== 'object' || Array.isArray(limits)) {
+      return res.status(400).json({ error: "Body must include `limits` as a Record<currency, number>" });
+    }
+
+    // Build a shape-validated map. Caller-supplied junk gets dropped
+    // silently (storage layer also re-validates as defence in depth).
+    const validated: Record<string, number> = {};
+    const rejected: Array<{ currency: string; reason: string }> = [];
+    for (const [k, v] of Object.entries(limits)) {
+      if (!/^[A-Z]{3}$/.test(k)) {
+        rejected.push({ currency: k, reason: 'currency-not-iso-3-letter' });
+        continue;
+      }
+      if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) {
+        rejected.push({ currency: k, reason: 'value-not-positive-number' });
+        continue;
+      }
+      validated[k] = v;
+    }
+
+    // Snapshot the previous map for audit trail.
+    const before = await storage.getCompany(company.companyId);
+    const previousLimits = (before as any)?.dailyPayoutLimits || {};
+
+    const applied = await storage.setCompanyDailyPayoutLimits(company.companyId, validated);
+
+    await logAudit(
+      'company',
+      company.companyId,
+      'daily-payout-limits-updated',
+      userId,
+      userName,
+      { dailyPayoutLimits: previousLimits },
+      { dailyPayoutLimits: applied },
+      { rejected, requestedBy: userId },
+      (req as any).ip,
+    );
+
+    res.json({
+      companyId: company.companyId,
+      overrides: applied,
+      rejected,
+    });
+  } catch (error: any) {
+    const mapped = mapPaymentError(error, 'admin');
+    res.status(mapped.statusCode).json({ error: mapped.userMessage });
+  }
+});
+
 // Get audit trail for a specific entity
 router.get("/audit-logs/:entityType/:entityId", requireAuth, requireAdmin, async (req, res) => {
   try {
