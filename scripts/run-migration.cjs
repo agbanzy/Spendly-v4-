@@ -532,12 +532,16 @@ async function main() {
   // CA) works identically here. AWS RDS doesn't need the ca field; the
   // standard CA bundle in Node already trusts it.
   const ca = process.env.DATABASE_CA_CERT;
+  const trustSelfSigned = process.env.DATABASE_TRUST_SELF_SIGNED === 'true';
   const ssl =
     process.env.NODE_ENV === 'production'
       ? ca && ca.trim().length > 0
         ? { rejectUnauthorized: true, ca }
-        : { rejectUnauthorized: true }
+        : trustSelfSigned
+          ? { rejectUnauthorized: false }
+          : { rejectUnauthorized: true }
       : undefined;
+  console.log(`SSL: ${ssl ? (ca ? 'ca-pinned' : trustSelfSigned ? 'trust-self-signed' : 'strict') : 'off'}`);
   // Strip `sslmode=...` from the URL so pg-connection-string doesn't
   // construct an ssl config that overrides ours. See server/db.ts for
   // the same scrub.

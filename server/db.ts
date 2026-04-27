@@ -21,6 +21,15 @@ function buildSslConfig(): { rejectUnauthorized: boolean; ca?: string } | undefi
   if (ca && ca.trim().length > 0) {
     return { rejectUnauthorized: true, ca };
   }
+  // DO App Platform dev databases don't reliably expose the CA cert
+  // through ${db.CA_CERT}. As an explicit opt-in for that path, accept
+  // a self-signed cert. The flag is set via the spec at .do/app.yaml
+  // for the dev-database tier ONLY; when upgrading to a managed cluster
+  // the operator should remove DATABASE_TRUST_SELF_SIGNED so the
+  // proper rejectUnauthorized:true + ca: ${db.CA_CERT} path takes effect.
+  if (process.env.DATABASE_TRUST_SELF_SIGNED === 'true') {
+    return { rejectUnauthorized: false };
+  }
   return { rejectUnauthorized: true };
 }
 

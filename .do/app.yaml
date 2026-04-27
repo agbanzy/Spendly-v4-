@@ -130,9 +130,19 @@ services:
       # that's not in Node's default trust store. server/db.ts and
       # scripts/run-migration.cjs both read this env and pass it as
       # the pg client's ssl.ca so the cert chain still validates
-      # (rather than disabling cert verification).
+      # (rather than disabling cert verification). Dev databases
+      # don't always expose this; see DATABASE_TRUST_SELF_SIGNED below.
       - key: DATABASE_CA_CERT
         value: ${db.CA_CERT}
+        scope: RUN_TIME
+      # DATABASE_TRUST_SELF_SIGNED — fallback for the dev-database path
+      # where ${db.CA_CERT} is empty. Accepts the self-signed cert
+      # without verification (TLS encryption still on; chain not
+      # checked). REMOVE this when upgrading to a managed cluster
+      # (production: true + cluster_name: financiar-db) so the
+      # ca-pinned path takes effect.
+      - key: DATABASE_TRUST_SELF_SIGNED
+        value: "true"
         scope: RUN_TIME
 
 # Postgres attached to the app. DO autowires DATABASE_URL into the
