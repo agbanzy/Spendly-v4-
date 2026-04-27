@@ -1,0 +1,137 @@
+# DigitalOcean App Platform spec for Financiar / Spendly v4.
+#
+# This file is the source of truth for the DO deployment. It runs in
+# parallel with the existing AWS ECS Fargate stack
+# (infrastructure/lib/financiar-stack.ts) — flipping primary traffic to
+# DO is a separate decision that operates on the DNS layer, not on
+# this file.
+#
+# Apply this spec via:
+#   doctl apps create --spec .do/app.yaml             # first-time create
+#   doctl apps update <APP_ID> --spec .do/app.yaml    # subsequent updates
+# or the CI workflow at .github/workflows/deploy-do.yml.
+#
+# Secrets (DATABASE_URL, COGNITO_*, STRIPE_*, PAYSTACK_*, AWS_*, SESSION_SECRET)
+# are NEVER committed to this file. They are set in the DO console under
+# Settings → App-Level Environment Variables, OR via:
+#   doctl apps update <APP_ID> --spec .do/app.yaml \
+#     --env "STRIPE_SECRET_KEY=..." --env "..."
+# See docs/DEPLOY_DIGITALOCEAN.md §3 for the full env-var checklist.
+
+name: financiar
+region: fra
+
+services:
+  - name: web
+    # Single web service — the Express + Vite-built-client app served
+    # from one process per the Dockerfile CMD. Vite-built static
+    # assets are baked into the image at build time and served by
+    # Express via its existing static-asset middleware.
+    dockerfile_path: Dockerfile
+
+    # Build context is the repo root. The Dockerfile multi-stage
+    # build produces dist/index.cjs (server) + dist/public/ (client
+    # static), then runs scripts/run-migration.cjs migrate before
+    # node dist/index.cjs.
+    source_dir: /
+
+    # GitHub source — DO App Platform watches the branch and rebuilds
+    # on every push. For prod, point this at a release branch (eg.
+    # `do-prod`) and gate releases via a separate CI workflow rather
+    # than auto-deploying on every main push. Default below targets
+    # `main`; change to a release branch when promoting from staging.
+    github:
+      repo: agbanzy/Spendly-v4-
+      branch: main
+      deploy_on_push: false
+
+    # Container shape. Start with basic-xxs ($5/mo, 512MB / 1 vCPU);
+    # bump to basic-xs ($12/mo, 1GB / 1 vCPU) once we have prod
+    # traffic data. The Express server is single-threaded; horizontal
+    # scaling via instance_count > 1 is fine since session state is
+    # in Postgres (connect-pg-simple) not in-process.
+    instance_size_slug: basic-xxs
+    instance_count: 1
+
+    http_port: 5000
+
+    # /api/health is implemented in server/routes/health.routes.ts.
+    # It returns 200 when DB is reachable, 503 otherwise. DO uses
+    # this to decide rolling-deploy success and to route traffic.
+    health_check:
+      http_path: /api/health
+      port: 5000
+      initial_delay_seconds: 30
+      period_seconds: 30
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+
+    # Route everything to this service. SPA fallback for client
+    # routes is handled by Express in production mode (it serves
+    # dist/public/index.html for any non-/api path that doesn't
+    # match a file).
+    routes:
+      - path: /
+
+    # Build-time args — these MUST also exist as DO secrets so the
+    # App Platform build step can pass them to docker build --build-arg.
+    # Vite bakes VITE_* into the client bundle; once built they
+    # cannot be changed without a rebuild.
+    envs:
+      # Runtime env (server-side only — never embedded in client bundle)
+      - key: NODE_ENV
+        value: production
+        scope: RUN_TIME
+      - key: PORT
+        value: "5000"
+        scope: RUN_TIME
+      # SESSION_SECRET, DATABASE_URL set in DO console (SECRET scope).
+      # AWS_REGION is the region for cross-cloud SES/SNS calls; usually
+      # us-east-1 since Cognito User Pool lives there.
+      - key: AWS_REGION
+        value: us-east-1
+        scope: RUN_TIME
+      # Build-time client env — names match what client/src/lib/cognito.ts
+      # and client/src/lib/stripe.ts read at build time.
+      - key: VITE_COGNITO_USER_POOL_ID
+        scope: BUILD_TIME
+        type: SECRET
+      - key: VITE_COGNITO_CLIENT_ID
+        scope: BUILD_TIME
+        type: SECRET
+      - key: VITE_COGNITO_DOMAIN
+        scope: BUILD_TIME
+        type: SECRET
+      - key: VITE_STRIPE_PUBLISHABLE_KEY
+        scope: BUILD_TIME
+        type: SECRET
+      - key: VITE_PAYSTACK_PUBLIC_KEY
+        scope: BUILD_TIME
+        type: SECRET
+      # APP_URL is read by server-side flows (eg. payment redirect
+      # URLs, Stripe Connect onboarding return_url default in
+      # server/routes/payouts.routes.ts:onboard-stripe). Set this to
+      # the App's `${APP_URL}` placeholder once the app is created so
+      # DO substitutes the actual URL at runtime.
+      - key: APP_URL
+        value: ${APP_URL}
+        scope: RUN_TIME
+
+# Managed Postgres instance attached to the app. DO autowires
+# DATABASE_URL into the web service's RUN_TIME env (no manual env
+# entry needed — the binding is inferred).
+#
+# `engine: PG` + `version: "16"` matches what the integration tests
+# spin up (postgres:16-alpine in server/__tests__/integration/setup.ts)
+# so dev / test / prod use the same major version.
+databases:
+  - name: db
+    engine: PG
+    production: true
+    version: "16"
+    # Smallest paid tier; resize via the DO console once we have prod
+    # query-volume data. Dev tier costs ~$15/mo.
+    cluster_name: financiar-db
+    db_name: financiar
+    db_user: financiar
