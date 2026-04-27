@@ -736,6 +736,97 @@ router.patch("/admin/payout-limits", requireAuth, requireAdmin, requirePin, asyn
   }
 });
 
+// AUD-PR-010 / AUD-DB-010 Phase 1 — payout-flags read endpoint.
+// Returns the per-company flag map. Currently the only flag in the
+// schema is `useStripeConnect`, but the storage layer takes any
+// boolean key so future flags ship without an endpoint change.
+router.get("/admin/payout-flags", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const company = await resolveUserCompany(req);
+    if (!company?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
+    const flags = await storage.getCompanyPayoutFlags(company.companyId);
+    res.json({
+      companyId: company.companyId,
+      flags,
+      knownFlags: ['useStripeConnect'],
+      note:
+        'Flag values default to false when absent. useStripeConnect activates the ' +
+        'Stripe Connect Express path; recipients must complete onboarding before payouts ' +
+        'will route through Connect even with the flag on.',
+    });
+  } catch (error: any) {
+    const mapped = mapPaymentError(error, 'admin');
+    res.status(mapped.statusCode).json({ error: mapped.userMessage });
+  }
+});
+
+// AUD-PR-010 / AUD-DB-010 Phase 1 — payout-flags write endpoint.
+// PIN-gated because flipping the Stripe Connect flag changes the
+// money-movement path. Validation: keys must be in the allowlist
+// (knownFlags above) AND values must be booleans. Anything else
+// gets dropped into rejected[] for the caller to fix.
+const KNOWN_FLAGS = new Set<string>(['useStripeConnect']);
+
+router.patch("/admin/payout-flags", requireAuth, requireAdmin, requirePin, async (req, res) => {
+  try {
+    const company = await resolveUserCompany(req);
+    if (!company?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
+    const userId = (req as any).user?.uid || 'unknown';
+    const userName = await getAuditUserName(req);
+    const { flags } = req.body as { flags?: Record<string, unknown> };
+    if (!flags || typeof flags !== 'object' || Array.isArray(flags)) {
+      return res.status(400).json({
+        error: "Body must include `flags` as a Record<string, boolean>",
+      });
+    }
+
+    // Filter to known flag names + boolean values. Unknown keys are
+    // dropped (not silently — surfaced in rejected[]).
+    const validated: Record<string, boolean> = {};
+    const rejected: Array<{ flag: string; reason: string }> = [];
+    for (const [k, v] of Object.entries(flags)) {
+      if (!KNOWN_FLAGS.has(k)) {
+        rejected.push({ flag: k, reason: 'unknown-flag' });
+        continue;
+      }
+      if (typeof v !== 'boolean') {
+        rejected.push({ flag: k, reason: 'value-not-boolean' });
+        continue;
+      }
+      validated[k] = v;
+    }
+
+    // Snapshot for audit before/after.
+    const beforeFlags = await storage.getCompanyPayoutFlags(company.companyId);
+    const applied = await storage.setCompanyPayoutFlags(company.companyId, validated);
+
+    await logAudit(
+      'company',
+      company.companyId,
+      'payout-flags-updated',
+      userId,
+      userName,
+      { flags: beforeFlags },
+      { flags: applied },
+      { rejected, requestedBy: userId },
+      (req as any).ip,
+    );
+
+    res.json({
+      companyId: company.companyId,
+      flags: applied,
+      rejected,
+    });
+  } catch (error: any) {
+    const mapped = mapPaymentError(error, 'admin');
+    res.status(mapped.statusCode).json({ error: mapped.userMessage });
+  }
+});
+
 // Get audit trail for a specific entity
 router.get("/audit-logs/:entityType/:entityId", requireAuth, requireAdmin, async (req, res) => {
   try {

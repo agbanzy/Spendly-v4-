@@ -103,6 +103,14 @@ export default function Admin() {
       bgColor: "bg-emerald-100 dark:bg-emerald-900/30",
     },
     {
+      title: "Payment-flow Flags",
+      description: "Enable Stripe Connect Express + future flags",
+      icon: AlertTriangle,
+      href: "/admin/payment-flags",
+      color: "text-amber-600",
+      bgColor: "bg-amber-100 dark:bg-amber-900/30",
+    },
+    {
       title: "Exchange Rates",
       description: "Manage currency exchange rates",
       icon: ArrowUpDown,
