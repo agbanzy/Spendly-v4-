@@ -89,6 +89,15 @@ export class StripeWebhookHandler {
           await this.handlePayoutFailed(event, timestamp);
           break;
 
+        // AUD-PR-010 / AUD-DB-010 Phase 1 — Stripe Connect Express
+        // account lifecycle events. account.updated fires when the
+        // recipient finishes (or fails) onboarding. We map the
+        // account.id back to the local payout_destination row and
+        // update its stripe_connect_onboarding_status.
+        case 'account.updated':
+          await this.handleAccountUpdated(event, timestamp);
+          break;
+
         // ---- Treasury Events ----
         case 'treasury.received_credit.created':
           await this.handleTreasuryReceivedCredit(event, timestamp);
@@ -974,6 +983,63 @@ export class StripeWebhookHandler {
       });
       throw error;
     }
+  }
+
+  // ==================== STRIPE CONNECT (AUD-PR-010 / AUD-DB-010 Phase 1) ====================
+
+  /**
+   * Handle account.updated.
+   *
+   * Maps Stripe's lifecycle (charges_enabled, payouts_enabled,
+   * requirements.disabled_reason) to our four-state
+   * stripe_connect_onboarding_status:
+   *   - verified:   payouts_enabled === true (onboarding complete)
+   *   - restricted: requirements.disabled_reason set (Stripe wants
+   *                 more info; recipient must revisit Express)
+   *   - disabled:   account.deleted === true OR detail explicitly
+   *                 says permanently disabled
+   *   - pending:    everything else (still in onboarding)
+   *
+   * If the acct_* id doesn't map to a payout_destinations row we
+   * silently no-op — Stripe sends account.updated for any account
+   * on the platform, including ones we no longer track.
+   */
+  private static async handleAccountUpdated(
+    event: Stripe.Event,
+    timestamp: string,
+  ): Promise<void> {
+    const account = event.data.object as Stripe.Account;
+    const accountId = account.id;
+
+    const destination = await storage.getPayoutDestinationByStripeAccount(accountId);
+    if (!destination) {
+      // Not one of ours — Stripe sends webhooks for the entire
+      // platform; ignore accounts we don't track.
+      paymentLogger.info('stripe_connect_account_unknown', { accountId, eventId: event.id });
+      return;
+    }
+
+    let status: 'pending' | 'verified' | 'restricted' | 'disabled';
+    if ((account as any).deleted === true) {
+      status = 'disabled';
+    } else if (account.payouts_enabled === true) {
+      status = 'verified';
+    } else if (account.requirements?.disabled_reason) {
+      status = 'restricted';
+    } else {
+      status = 'pending';
+    }
+
+    await storage.updateStripeConnectStatus(accountId, status);
+
+    paymentLogger.info('stripe_connect_account_status_changed', {
+      accountId,
+      destinationId: destination.id,
+      status,
+      chargesEnabled: account.charges_enabled,
+      payoutsEnabled: account.payouts_enabled,
+      disabledReason: account.requirements?.disabled_reason ?? null,
+    });
   }
 
   // ==================== TREASURY HANDLERS ====================

@@ -659,6 +659,24 @@ router.post("/payouts/:id/process", requireAuth, requireAdmin, requirePin, async
       { provider: destination.provider, amount: payout.amount, currency: payout.currency }
     );
 
+    // AUD-PR-010 / AUD-DB-010 Phase 1 — Stripe Connect path resolution.
+    // Resolves the Connect acct_* id for the destination if both:
+    //   - the destination has a stripe_connect_account_id set (recipient
+    //     has completed Express onboarding)
+    //   - the company has opted in via payout_flags.useStripeConnect
+    // Otherwise falls back to the legacy providerRecipientId field.
+    // The active path inside paymentService still keys on
+    // `recipientDetails.stripeAccountId` regardless; this resolution
+    // is just where the gate decides which value goes in.
+    const payoutFlags = await storage.getCompanyPayoutFlags(companyIdForDebit);
+    const useStripeConnect =
+      payoutFlags.useStripeConnect === true &&
+      typeof (destination as any).stripeConnectAccountId === 'string' &&
+      (destination as any).stripeConnectAccountId.length > 0;
+    const resolvedStripeAccountId = useStripeConnect
+      ? (destination as any).stripeConnectAccountId
+      : destination.providerRecipientId;
+
     // Step 3 — external transfer.
     let transferResult;
     try {
@@ -668,7 +686,7 @@ router.post("/payouts/:id/process", requireAuth, requireAdmin, requirePin, async
           accountNumber: destination.accountNumber,
           bankCode: destination.bankCode,
           accountName: destination.accountName,
-          stripeAccountId: destination.providerRecipientId,
+          stripeAccountId: resolvedStripeAccountId,
           currency: destination.currency,
         },
         countryCode,
@@ -681,6 +699,10 @@ router.post("/payouts/:id/process", requireAuth, requireAdmin, requirePin, async
           payoutId: payout.id,
           companyId: companyIdForDebit,
           userId: userId ?? undefined,
+          // AUD-PR-010 / AUD-DB-010 Phase 1 — observability hint so
+          // Stripe-side metadata can identify which transfers came
+          // from the Connect path during the soak window.
+          useStripeConnect,
         },
       );
     } catch (transferError: any) {
@@ -923,6 +945,17 @@ router.post("/payouts/batch", requireAuth, requireAdmin, requirePin, async (req,
           continue;
         }
 
+        // AUD-PR-010 / AUD-DB-010 Phase 1 — Stripe Connect path
+        // resolution (same gate as /payouts/:id/process above).
+        const batchPayoutFlags = await storage.getCompanyPayoutFlags(companyIdForDebit);
+        const batchUseStripeConnect =
+          batchPayoutFlags.useStripeConnect === true &&
+          typeof (destination as any).stripeConnectAccountId === 'string' &&
+          (destination as any).stripeConnectAccountId.length > 0;
+        const batchResolvedStripeAccountId = batchUseStripeConnect
+          ? (destination as any).stripeConnectAccountId
+          : destination.providerRecipientId;
+
         // External transfer.
         let transferResult;
         try {
@@ -932,7 +965,7 @@ router.post("/payouts/batch", requireAuth, requireAdmin, requirePin, async (req,
               accountNumber: destination.accountNumber,
               bankCode: destination.bankCode,
               accountName: destination.accountName,
-              stripeAccountId: destination.providerRecipientId,
+              stripeAccountId: batchResolvedStripeAccountId,
               currency: destination.currency,
             },
             countryCode,
@@ -943,6 +976,7 @@ router.post("/payouts/batch", requireAuth, requireAdmin, requirePin, async (req,
               payoutId: payout.id,
               companyId: companyIdForDebit,
               userId: userId ?? undefined,
+              useStripeConnect: batchUseStripeConnect,
             },
           );
         } catch (transferErr: any) {
@@ -1173,5 +1207,99 @@ router.post("/payouts/:id/reject", requireAuth, requireAdmin, requirePin, async 
     res.status(500).json({ error: "Failed to reject payout" });
   }
 });
+
+// AUD-PR-010 / AUD-DB-010 Phase 1 — Stripe Connect onboarding link.
+//
+// Creates (or reuses) a Stripe Express account for the recipient on
+// this destination, then returns an account-link URL the recipient
+// uses to complete onboarding. Also creates the Stripe account when
+// the destination doesn't yet have a stripeConnectAccountId.
+//
+// Activation: this endpoint is wired but the *use* of the resulting
+// acct_* id is gated by companies.payoutFlags.useStripeConnect.
+// Without that flag, completing onboarding has no effect on actual
+// payouts (which still use the legacy bank-token path). That gate is
+// the safety mechanism for Phase 1 parallel-write — operators can
+// have employees onboard now and flip the company flag later.
+router.post(
+  "/payout-destinations/:id/onboard-stripe",
+  requireAuth,
+  requireAdmin,
+  requirePin,
+  async (req, res) => {
+    try {
+      const company = await resolveUserCompany(req);
+      if (!company?.companyId) {
+        return res.status(403).json({ error: "Company context required" });
+      }
+
+      const destinationId = param(req.params.id);
+      const destination = await storage.getPayoutDestination(destinationId);
+      if (!destination) {
+        return res.status(404).json({ error: "Payout destination not found" });
+      }
+
+      // Body: { returnUrl?: string, refreshUrl?: string }. The frontend
+      // sends URLs the recipient lands on after / during onboarding.
+      // Defaults route to the admin payouts page; production setups
+      // override with branded landing URLs.
+      const { returnUrl, refreshUrl } = (req.body ?? {}) as {
+        returnUrl?: string;
+        refreshUrl?: string;
+      };
+      const baseUrl = process.env.APP_URL || 'https://app.financiar.io';
+      const returnTo = typeof returnUrl === 'string' && returnUrl.startsWith('http')
+        ? returnUrl
+        : `${baseUrl}/admin/payouts?onboarded=${destinationId}`;
+      const refreshTo = typeof refreshUrl === 'string' && refreshUrl.startsWith('http')
+        ? refreshUrl
+        : `${baseUrl}/admin/payouts?refresh=${destinationId}`;
+
+      // Lazy-import the Stripe client so this scaffolding doesn't
+      // pull a Stripe dependency on load for tenants that never call it.
+      const { getUncachableStripeClient } = await import("../stripeClient");
+      const stripe = await getUncachableStripeClient();
+
+      // Reuse the existing acct_* id if onboarding is in progress;
+      // otherwise create a new Express account.
+      let stripeAccountId = (destination as any).stripeConnectAccountId as string | undefined;
+      if (!stripeAccountId) {
+        const account = await stripe.accounts.create({
+          type: 'express',
+          country: destination.country || 'US',
+          email: destination.accountName ? undefined : undefined, // Stripe collects via onboarding
+          capabilities: {
+            transfers: { requested: true },
+          },
+          metadata: {
+            destinationId,
+            companyId: company.companyId,
+          },
+        });
+        stripeAccountId = account.id;
+        await storage.setPayoutDestinationStripeAccount(destinationId, stripeAccountId, 'pending');
+      }
+
+      const link = await stripe.accountLinks.create({
+        account: stripeAccountId,
+        return_url: returnTo,
+        refresh_url: refreshTo,
+        type: 'account_onboarding',
+      });
+
+      res.json({
+        stripeAccountId,
+        onboardingUrl: link.url,
+        expiresAt: link.expires_at,
+      });
+    } catch (error: any) {
+      const mapped = mapPaymentError(error, 'stripe-connect-onboarding');
+      res.status(mapped.statusCode).json({
+        error: mapped.userMessage,
+        correlationId: mapped.correlationId,
+      });
+    }
+  },
+);
 
 export default router;

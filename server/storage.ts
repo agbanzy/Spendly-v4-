@@ -264,6 +264,21 @@ export interface IStorage {
   createPayoutDestination(destination: InsertPayoutDestination): Promise<PayoutDestination>;
   updatePayoutDestination(id: string, data: Partial<PayoutDestination>): Promise<PayoutDestination | undefined>;
   deletePayoutDestination(id: string): Promise<boolean>;
+  // AUD-PR-010 / AUD-DB-010 Phase 1 — Stripe Connect helpers.
+  getPayoutDestinationByStripeAccount(stripeAccountId: string): Promise<PayoutDestination | undefined>;
+  setPayoutDestinationStripeAccount(
+    destinationId: string,
+    stripeAccountId: string,
+    status?: 'pending' | 'verified' | 'restricted' | 'disabled',
+  ): Promise<PayoutDestination | undefined>;
+  updateStripeConnectStatus(
+    stripeAccountId: string,
+    status: 'pending' | 'verified' | 'restricted' | 'disabled',
+  ): Promise<void>;
+  // Per-company opt-in flag map; used by paymentService.initiateTransfer
+  // to decide between the Connect path and the legacy bank-token path.
+  getCompanyPayoutFlags(companyId: string): Promise<Record<string, boolean>>;
+  setCompanyPayoutFlags(companyId: string, flags: Record<string, boolean>): Promise<Record<string, boolean>>;
   
   // Payouts
   getPayouts(filters?: { recipientType?: string; recipientId?: string; status?: string; providerReference?: string; companyId?: string }): Promise<Payout[]>;
@@ -2475,6 +2490,89 @@ export class DatabaseStorage implements IStorage {
       .where(eq(payoutDestinations.id, id))
       .returning();
     return result[0];
+  }
+
+  // AUD-PR-010 / AUD-DB-010 Phase 1 — Stripe Connect helpers.
+
+  /**
+   * Reverse-lookup a destination by its Stripe Connect acct_* id.
+   * Used by the account.updated webhook to map a Stripe event back to
+   * the local row whose status needs updating.
+   */
+  async getPayoutDestinationByStripeAccount(stripeAccountId: string): Promise<PayoutDestination | undefined> {
+    const result = await db.select().from(payoutDestinations)
+      .where(eq(payoutDestinations.stripeConnectAccountId, stripeAccountId))
+      .limit(1);
+    return result[0];
+  }
+
+  /**
+   * Persist the Stripe Express acct_* id on a destination row.
+   * Called once at onboarding-link creation time (account.create →
+   * accountLinks.create flow). Status is set to 'pending' so the
+   * webhook handler can flip it to 'verified' / 'restricted' once
+   * the recipient completes onboarding.
+   */
+  async setPayoutDestinationStripeAccount(
+    destinationId: string,
+    stripeAccountId: string,
+    status: 'pending' | 'verified' | 'restricted' | 'disabled' = 'pending',
+  ): Promise<PayoutDestination | undefined> {
+    return this.updatePayoutDestination(destinationId, {
+      stripeConnectAccountId: stripeAccountId,
+      stripeConnectOnboardingStatus: status,
+    } as Partial<PayoutDestination>);
+  }
+
+  /**
+   * Update the onboarding lifecycle from a webhook event. Caller
+   * already mapped account.id → destination via the by-stripe-account
+   * lookup above.
+   */
+  async updateStripeConnectStatus(
+    stripeAccountId: string,
+    status: 'pending' | 'verified' | 'restricted' | 'disabled',
+  ): Promise<void> {
+    await db.update(payoutDestinations)
+      .set({
+        stripeConnectOnboardingStatus: status,
+        updatedAt: new Date().toISOString(),
+      } as any)
+      .where(eq(payoutDestinations.stripeConnectAccountId, stripeAccountId));
+  }
+
+  // AUD-PR-010 / AUD-DB-010 Phase 1 — per-company opt-in flags.
+
+  /**
+   * Read the company's payout-flags map. Returns {} for tenants that
+   * haven't been opted in to anything (most). Specifically:
+   *   payoutFlags.useStripeConnect === true → use Connect path
+   * any other key/value is reserved for future flag additions.
+   */
+  async getCompanyPayoutFlags(companyId: string): Promise<Record<string, boolean>> {
+    const rows = await db.select({ payoutFlags: companies.payoutFlags })
+      .from(companies)
+      .where(eq(companies.id, companyId))
+      .limit(1);
+    const v = rows[0]?.payoutFlags as Record<string, boolean> | null | undefined;
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  }
+
+  /**
+   * Replace the company's payout-flags map. Caller is responsible for
+   * shape validation; this method does NOT clean up unknown keys
+   * because adding new flags should be a code change in tandem with
+   * a coordinated rollout, not a free-form admin action.
+   */
+  async setCompanyPayoutFlags(companyId: string, flags: Record<string, boolean>): Promise<Record<string, boolean>> {
+    const cleaned: Record<string, boolean> = {};
+    for (const [k, v] of Object.entries(flags)) {
+      if (typeof v === 'boolean') cleaned[k] = v;
+    }
+    await db.update(companies)
+      .set({ payoutFlags: cleaned, updatedAt: new Date().toISOString() } as any)
+      .where(eq(companies.id, companyId));
+    return cleaned;
   }
 
   async deletePayoutDestination(id: string): Promise<boolean> {

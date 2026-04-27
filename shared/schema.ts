@@ -162,6 +162,14 @@ export const companies = pgTable("companies", {
   // tenant that's been seeing fraud as well as to lift caps for a
   // higher-risk-tolerance enterprise customer.
   dailyPayoutLimits: jsonb("daily_payout_limits").$type<Record<string, number>>().default({}),
+  // AUD-PR-010 / AUD-DB-010 Phase 1 — per-company opt-in flags for
+  // payment-flow features that need a parallel-write soak period.
+  // Currently used for { useStripeConnect: true } to enable the
+  // Stripe Connect Express path on a per-tenant basis. Default empty
+  // = legacy stripe.tokens.create + stripe.payouts.create flow stays
+  // active. See STRIPE_CONNECT_MIGRATION_PLAN.md for the migration
+  // procedure.
+  payoutFlags: jsonb("payout_flags").$type<Record<string, boolean>>().default({}),
   createdAt: text("created_at").notNull().default(sql`now()`),
   updatedAt: text("updated_at").notNull().default(sql`now()`),
 });
@@ -917,11 +925,22 @@ export const payoutDestinations = pgTable("payout_destinations", {
   isVerified: boolean("is_verified").default(false),
   providerRecipientId: text("provider_recipient_id"),
   metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+  // AUD-PR-010 / AUD-DB-010 Phase 1 — Stripe Connect scaffolding.
+  // Empty until the company opts in (companies.payoutFlags.useStripeConnect).
+  // Once the recipient finishes Express onboarding, stripeConnectAccountId
+  // holds the acct_* identifier and we use stripe.transfers.create
+  // (Connect model) instead of stripe.tokens.create + stripe.payouts.create
+  // (legacy bank-token model). See STRIPE_CONNECT_MIGRATION_PLAN.md.
+  stripeConnectAccountId: text("stripe_connect_account_id"),
+  // Lifecycle status driven by Stripe's `account.updated` webhook.
+  // Values: 'not_started' | 'pending' | 'verified' | 'restricted' | 'disabled'.
+  stripeConnectOnboardingStatus: text("stripe_connect_onboarding_status").default('not_started'),
   createdAt: text("created_at").notNull().default(sql`now()`),
   updatedAt: text("updated_at").notNull().default(sql`now()`),
 }, (t) => [
   index("payout_destinations_user_id_idx").on(t.userId),
   index("payout_destinations_vendor_id_idx").on(t.vendorId),
+  index("payout_destinations_stripe_connect_idx").on(t.stripeConnectAccountId),
 ]);
 
 // Payouts table - track all payouts (expense reimbursements, payroll, vendor payments)
