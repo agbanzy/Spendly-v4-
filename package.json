@@ -14,7 +14,8 @@
     "db:push": "drizzle-kit push",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1004.0",
@@ -103,6 +104,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
+    "@testcontainers/postgresql": "^10.0.0",
     "@tailwindcss/typography": "^0.5.15",
     "@types/connect-pg-simple": "^7.0.3",
     "@types/cors": "^2.8.19",
@@ -121,6 +123,7 @@
     "esbuild": "^0.25.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.17",
+    "testcontainers": "^10.0.0",
     "tsx": "^4.20.5",
     "typescript": "^5.6.3",
     "vite": "^7.0.0",

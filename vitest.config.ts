@@ -16,7 +16,16 @@ export default defineConfig({
       'shared/__tests__/**/*.test.ts',
       'client/src/__tests__/**/*.test.ts',
     ],
-    exclude: ['node_modules', 'dist', 'mobile'],
+    // AUD-PR-009 — integration tests under server/__tests__/integration/
+    // are gated to `npm run test:integration` (vitest.integration.config.ts)
+    // so the default `npm test` stays Docker-free and fast.
+    exclude: [
+      'node_modules',
+      'dist',
+      'mobile',
+      'server/__tests__/integration/**',
+      '**/*.int.test.ts',
+    ],
     testTimeout: 10000,
     coverage: {
       provider: 'v8',
