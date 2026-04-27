@@ -590,11 +590,12 @@ router.post("/payouts/:id/process", requireAuth, requireAdmin, requirePin, async
     const companyIdForDebit: string = payout.companyId;
 
     // AUD-DB-007 — daily payout limit gate (per company, per currency).
-    // Mirrors the per-currency limits in /api/payment/transfer
-    // (payments.routes.ts:357). Checked BEFORE the claim so a
-    // limit-exceeded request doesn't dirty the row.
+    // AUD-DB-007 follow-up — consult the per-company override map first;
+    // fall back to the hardcoded floor in DAILY_PAYOUT_LIMITS only when
+    // no override is set for this currency.
     const requestedAmount = parseFloat(payout.amount);
-    const dailyLimit = DAILY_PAYOUT_LIMITS[payout.currency] ?? DAILY_PAYOUT_LIMITS.DEFAULT;
+    const override = await storage.getCompanyDailyPayoutLimit(payout.companyId, payout.currency);
+    const dailyLimit = override ?? DAILY_PAYOUT_LIMITS[payout.currency] ?? DAILY_PAYOUT_LIMITS.DEFAULT;
     const dailyTotal = await storage.getDailyPayoutTotalForCompany(payout.companyId, payout.currency);
     if (dailyTotal + requestedAmount > dailyLimit) {
       return res.status(429).json({
@@ -874,11 +875,13 @@ router.post("/payouts/batch", requireAuth, requireAdmin, requirePin, async (req,
         const companyIdForDebit: string = payout.companyId;
 
         // AUD-DB-007 — daily payout limit gate. Same per-currency limits
-        // as /payouts/:id/process. Counted separately per row so a
-        // batch that crosses the threshold mid-iteration cuts off
-        // cleanly (the running total is the live DB sum on each loop).
+        // as /payouts/:id/process, including per-company overrides.
+        // Counted separately per row so a batch that crosses the
+        // threshold mid-iteration cuts off cleanly (the running total
+        // is the live DB sum on each loop).
         const requestedAmount = parseFloat(payout.amount);
-        const dailyLimit = DAILY_PAYOUT_LIMITS[payout.currency] ?? DAILY_PAYOUT_LIMITS.DEFAULT;
+        const overrideLimit = await storage.getCompanyDailyPayoutLimit(payout.companyId, payout.currency);
+        const dailyLimit = overrideLimit ?? DAILY_PAYOUT_LIMITS[payout.currency] ?? DAILY_PAYOUT_LIMITS.DEFAULT;
         const dailyTotal = await storage.getDailyPayoutTotalForCompany(payout.companyId, payout.currency);
         if (dailyTotal + requestedAmount > dailyLimit) {
           results.push({

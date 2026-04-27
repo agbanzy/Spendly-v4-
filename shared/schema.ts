@@ -153,6 +153,15 @@ export const companies = pgTable("companies", {
   // Feature toggles (from companySettings)
   notificationsEnabled: boolean("notifications_enabled").default(true),
   twoFactorEnabled: boolean("two_factor_enabled").default(false),
+  // AUD-DB-007 follow-up — per-company override for the daily payout
+  // limits. Sparse map: only currencies the operator has explicitly
+  // tuned appear here. Currencies not in this map fall back to the
+  // hardcoded DAILY_PAYOUT_LIMITS floor in payouts.routes.ts. Setting
+  // a currency here can RAISE or LOWER the cap; the route compares
+  // (used + requested) <= limit so admins can use this to harden a
+  // tenant that's been seeing fraud as well as to lift caps for a
+  // higher-risk-tolerance enterprise customer.
+  dailyPayoutLimits: jsonb("daily_payout_limits").$type<Record<string, number>>().default({}),
   createdAt: text("created_at").notNull().default(sql`now()`),
   updatedAt: text("updated_at").notNull().default(sql`now()`),
 });
