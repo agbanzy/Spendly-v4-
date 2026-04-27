@@ -117,6 +117,15 @@ services:
       - key: APP_URL
         value: ${APP_URL}
         scope: RUN_TIME
+      # DATABASE_URL — bound from the `db` database below. Without this
+      # explicit binding the migration script
+      # (scripts/run-migration.cjs) crashes at boot with
+      # "ERROR: DATABASE_URL environment variable is required" because
+      # DO doesn't auto-inject database connection strings into a
+      # service's env unless we reference them here.
+      - key: DATABASE_URL
+        value: ${db.DATABASE_URL}
+        scope: RUN_TIME
 
 # Postgres attached to the app. DO autowires DATABASE_URL into the
 # web service's RUN_TIME env (no manual env entry needed — the
