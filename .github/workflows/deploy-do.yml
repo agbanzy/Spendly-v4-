@@ -77,9 +77,11 @@ jobs:
           docker push registry.digitalocean.com/docufy/financiar:latest
 
       # First-time path: create the app from the spec. Subsequent runs
-      # use `apps update` keyed by app name. Both modes are wrapped so
-      # the workflow is idempotent — first deploy creates, every other
-      # deploy updates the existing app.
+      # use `apps update` keyed by app name, then force-deploy with
+      # create-deployment because update-with-unchanged-spec doesn't
+      # always re-pull the :latest image (DO caches by digest, so the
+      # update no-ops if spec is identical and the image tag hasn't
+      # changed reference even though the underlying digest has).
       - name: Create or update DO App
         env:
           APP_NAME: ${{ github.event.inputs.app_name || 'financiar' }}
@@ -92,8 +94,10 @@ jobs:
             echo "App '$APP_NAME' not found — creating fresh."
             doctl apps create --spec .do/app.yaml --wait
           else
-            echo "App '$APP_NAME' exists ($APP_ID) — updating."
+            echo "App '$APP_NAME' exists ($APP_ID) — updating spec."
             doctl apps update "$APP_ID" --spec .do/app.yaml --wait
+            echo "Forcing a fresh deploy to pull the new :latest image."
+            doctl apps create-deployment "$APP_ID" --force-rebuild --wait
           fi
 
       - name: Print app status
@@ -102,4 +106,6 @@ jobs:
         run: |
           APP_ID=$(doctl apps list --format ID,Spec.Name --no-header \
             | awk -v n="$APP_NAME" '$2 == n { print $1; exit }')
-          doctl apps get "$APP_ID" --format ID,Spec.Name,DefaultIngress,ActiveDeployment.ID,UpdatedAt
+          # `UpdatedAt` is no longer a valid column on `doctl apps get`
+          # in recent doctl releases — stick to columns that work.
+          doctl apps get "$APP_ID" --format ID,Spec.Name,DefaultIngress,ActiveDeployment.ID

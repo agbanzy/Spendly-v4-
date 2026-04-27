@@ -27,7 +27,17 @@ process.on('unhandledRejection', (reason) => {
 
 // Validate required environment variables
 const requiredEnvVars = ['DATABASE_URL'];
-const productionRequiredVars = ['COGNITO_USER_POOL_ID', 'COGNITO_CLIENT_ID', 'APP_URL'];
+// Cognito IDs are NOT in productionRequiredVars by default — the
+// runtime is multi-cloud (AWS Cognito on the AWS deploy path; future
+// non-AWS auth provider on the DO deploy path). The Cognito middleware
+// at server/middleware/auth.ts logs a clear "not configured" line and
+// the app boots; protected routes 401 at request time. To re-enable
+// the strict boot guard (recommended once Cognito is wired in any
+// environment), set REQUIRE_COGNITO_AT_BOOT=true.
+const productionRequiredVars = ['APP_URL'];
+if (process.env.REQUIRE_COGNITO_AT_BOOT === 'true') {
+  productionRequiredVars.push('COGNITO_USER_POOL_ID', 'COGNITO_CLIENT_ID');
+}
 
 for (const v of requiredEnvVars) {
   if (!process.env[v]) {
@@ -41,6 +51,17 @@ if (process.env.NODE_ENV === 'production') {
       console.error(`FATAL: Missing production environment variable: ${v}`);
       process.exit(1);
     }
+  }
+  // Loud banner when Cognito is missing in production. The middleware
+  // handles the missing-config case gracefully, but operators need to
+  // know the deploy isn't fully auth-protected.
+  if (!process.env.COGNITO_USER_POOL_ID || !process.env.COGNITO_CLIENT_ID) {
+    console.warn(
+      '⚠️  COGNITO NOT CONFIGURED IN PRODUCTION — auth endpoints will 401. ' +
+      'Wire up COGNITO_USER_POOL_ID + COGNITO_CLIENT_ID (or your replacement ' +
+      'auth provider) before exposing this deploy to real users. ' +
+      'Set REQUIRE_COGNITO_AT_BOOT=true to make this fatal at boot once wired.',
+    );
   }
 
   // Block startup if test API keys are used in production

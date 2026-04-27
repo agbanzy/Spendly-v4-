@@ -27,23 +27,17 @@ services:
     # from one process per the Dockerfile CMD. Vite-built static
     # assets are baked into the image at build time and served by
     # Express via its existing static-asset middleware.
-    dockerfile_path: Dockerfile
-
-    # Build context is the repo root. The Dockerfile multi-stage
-    # build produces dist/index.cjs (server) + dist/public/ (client
-    # static), then runs scripts/run-migration.cjs migrate before
-    # node dist/index.cjs.
-    source_dir: /
-
-    # GitHub source — DO App Platform watches the branch and rebuilds
-    # on every push. For prod, point this at a release branch (eg.
-    # `do-prod`) and gate releases via a separate CI workflow rather
-    # than auto-deploying on every main push. Default below targets
-    # `main`; change to a release branch when promoting from staging.
-    github:
-      repo: agbanzy/Spendly-v4-
-      branch: main
-      deploy_on_push: false
+    #
+    # The image is built + pushed by the deploy-do.yml workflow to
+    # `registry.digitalocean.com/docufy/financiar`. Using the registry
+    # tag (rather than a github: block + Dockerfile build) means
+    # 1) DO uses the exact image the workflow validated, and
+    # 2) deploys from feature branches work without changing this
+    # spec's branch reference.
+    image:
+      registry_type: DOCR
+      repository: financiar
+      tag: latest
 
     # Container shape. Start with basic-xxs ($5/mo, 512MB / 1 vCPU);
     # bump to basic-xs ($12/mo, 1GB / 1 vCPU) once we have prod
@@ -117,21 +111,53 @@ services:
       - key: APP_URL
         value: ${APP_URL}
         scope: RUN_TIME
+      # DATABASE_URL — bound from the `db` database below. Without this
+      # explicit binding the migration script
+      # (scripts/run-migration.cjs) crashes at boot with
+      # "ERROR: DATABASE_URL environment variable is required" because
+      # DO doesn't auto-inject database connection strings into a
+      # service's env unless we reference them here.
+      - key: DATABASE_URL
+        value: ${db.DATABASE_URL}
+        scope: RUN_TIME
+      # DATABASE_CA_CERT — DO managed Postgres uses a self-signed CA
+      # that's not in Node's default trust store. server/db.ts and
+      # scripts/run-migration.cjs both read this env and pass it as
+      # the pg client's ssl.ca so the cert chain still validates
+      # (rather than disabling cert verification). Dev databases
+      # don't always expose this; see DATABASE_TRUST_SELF_SIGNED below.
+      - key: DATABASE_CA_CERT
+        value: ${db.CA_CERT}
+        scope: RUN_TIME
+      # DATABASE_TRUST_SELF_SIGNED — fallback for the dev-database path
+      # where ${db.CA_CERT} is empty. Accepts the self-signed cert
+      # without verification (TLS encryption still on; chain not
+      # checked). REMOVE this when upgrading to a managed cluster
+      # (production: true + cluster_name: financiar-db) so the
+      # ca-pinned path takes effect.
+      - key: DATABASE_TRUST_SELF_SIGNED
+        value: "true"
+        scope: RUN_TIME
 
-# Managed Postgres instance attached to the app. DO autowires
-# DATABASE_URL into the web service's RUN_TIME env (no manual env
-# entry needed — the binding is inferred).
+# Postgres attached to the app. DO autowires DATABASE_URL into the
+# web service's RUN_TIME env (no manual env entry needed — the
+# binding is inferred from `name: db`).
 #
 # `engine: PG` + `version: "16"` matches what the integration tests
 # spin up (postgres:16-alpine in server/__tests__/integration/setup.ts)
 # so dev / test / prod use the same major version.
+#
+# DEV DATABASE for first-deploy verification — `production: false`
+# provisions a free ephemeral Postgres bundled with the app. Data is
+# lost on app destroy/rebuild, so this is staging-quality only. Before
+# real customer data hits this app, upgrade by:
+#   1) doctl databases create financiar-db --engine pg --version 16 \
+#        --region fra1 --size db-s-1vcpu-1gb --num-nodes 1 --wait
+#   2) Edit this file: `production: false` → `true`, add
+#      `cluster_name: financiar-db`, `db_name: financiar`, `db_user: financiar`.
+#   3) Re-run `gh workflow run deploy-do.yml`.
 databases:
   - name: db
     engine: PG
-    production: true
     version: "16"
-    # Smallest paid tier; resize via the DO console once we have prod
-    # query-volume data. Dev tier costs ~$15/mo.
-    cluster_name: financiar-db
-    db_name: financiar
-    db_user: financiar
+    production: false

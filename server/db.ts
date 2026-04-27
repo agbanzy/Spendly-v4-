@@ -6,10 +6,52 @@ if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL must be set. Did you forget to provision a database?");
 }
 
+// Build the SSL config for the prod connection.
+//
+// AWS RDS: standard certs in Node's default CA bundle, plain
+//   { rejectUnauthorized: true } works.
+// DO Managed Postgres: self-signed CA. DO exposes the CA via the
+//   `${db.CA_CERT}` template in the App Platform spec, which we bind to
+//   DATABASE_CA_CERT. When that env var is present, pass the cert
+//   contents as `ca` so chain verification still passes (we get full
+//   TLS verification, not the weakened rejectUnauthorized:false).
+function buildSslConfig(): { rejectUnauthorized: boolean; ca?: string } | undefined {
+  if (process.env.NODE_ENV !== 'production') return undefined;
+  const ca = process.env.DATABASE_CA_CERT;
+  if (ca && ca.trim().length > 0) {
+    return { rejectUnauthorized: true, ca };
+  }
+  // DO App Platform dev databases don't reliably expose the CA cert
+  // through ${db.CA_CERT}. As an explicit opt-in for that path, accept
+  // a self-signed cert. The flag is set via the spec at .do/app.yaml
+  // for the dev-database tier ONLY; when upgrading to a managed cluster
+  // the operator should remove DATABASE_TRUST_SELF_SIGNED so the
+  // proper rejectUnauthorized:true + ca: ${db.CA_CERT} path takes effect.
+  if (process.env.DATABASE_TRUST_SELF_SIGNED === 'true') {
+    return { rejectUnauthorized: false };
+  }
+  return { rejectUnauthorized: true };
+}
+
+// Strip `sslmode=...` from the connection URL so pg-connection-string
+// doesn't construct its own ssl config that overrides ours. Without
+// this, DO's `?sslmode=require` URL causes pg to ignore our ssl.ca
+// and reject the self-signed chain — see DO deploy attempt
+// 24985167106 for the exact trace.
+function cleanConnectionString(url: string | undefined): string | undefined {
+  if (!url) return url;
+  // Remove the parameter wherever it appears (?sslmode=... or
+  // &sslmode=...) and tidy any leftover ?& or trailing ?.
+  return url
+    .replace(/[?&]sslmode=[^&]*/gi, (match) => (match.startsWith('?') ? '?' : ''))
+    .replace(/\?&/, '?')
+    .replace(/\?$/, '');
+}
+
 export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: cleanConnectionString(process.env.DATABASE_URL),
   // SECURITY: Enforce SSL in production to prevent credential interception
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: true } : undefined,
+  ssl: buildSslConfig(),
 });
 
 export const db = drizzle(pool, { schema });
