@@ -118,20 +118,25 @@ services:
         value: ${APP_URL}
         scope: RUN_TIME
 
-# Managed Postgres instance attached to the app. DO autowires
-# DATABASE_URL into the web service's RUN_TIME env (no manual env
-# entry needed — the binding is inferred).
+# Postgres attached to the app. DO autowires DATABASE_URL into the
+# web service's RUN_TIME env (no manual env entry needed — the
+# binding is inferred from `name: db`).
 #
 # `engine: PG` + `version: "16"` matches what the integration tests
 # spin up (postgres:16-alpine in server/__tests__/integration/setup.ts)
 # so dev / test / prod use the same major version.
+#
+# DEV DATABASE for first-deploy verification — `production: false`
+# provisions a free ephemeral Postgres bundled with the app. Data is
+# lost on app destroy/rebuild, so this is staging-quality only. Before
+# real customer data hits this app, upgrade by:
+#   1) doctl databases create financiar-db --engine pg --version 16 \
+#        --region fra1 --size db-s-1vcpu-1gb --num-nodes 1 --wait
+#   2) Edit this file: `production: false` → `true`, add
+#      `cluster_name: financiar-db`, `db_name: financiar`, `db_user: financiar`.
+#   3) Re-run `gh workflow run deploy-do.yml`.
 databases:
   - name: db
     engine: PG
-    production: true
     version: "16"
-    # Smallest paid tier; resize via the DO console once we have prod
-    # query-volume data. Dev tier costs ~$15/mo.
-    cluster_name: financiar-db
-    db_name: financiar
-    db_user: financiar
+    production: false
