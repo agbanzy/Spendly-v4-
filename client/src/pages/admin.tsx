@@ -95,6 +95,14 @@ export default function Admin() {
       bgColor: "bg-teal-100 dark:bg-teal-900/30",
     },
     {
+      title: "Daily Payout Limits",
+      description: "Per-currency override for the daily cap",
+      icon: Shield,
+      href: "/admin/payout-limits",
+      color: "text-emerald-600",
+      bgColor: "bg-emerald-100 dark:bg-emerald-900/30",
+    },
+    {
       title: "Exchange Rates",
       description: "Manage currency exchange rates",
       icon: ArrowUpDown,

@@ -43,6 +43,7 @@ import AdminOrganization from "@/pages/admin-organization";
 import AdminSecurity from "@/pages/admin-security";
 import AdminWallets from "@/pages/admin-wallets";
 import AdminPayouts from "@/pages/admin-payouts";
+import AdminPayoutLimits from "@/pages/admin-payout-limits";
 import AdminExchangeRates from "@/pages/admin-exchange-rates";
 import AdminDatabase from "@/pages/admin-database";
 import AdminLogin from "@/pages/admin-login";
@@ -176,6 +177,7 @@ function AppRouter() {
       <Route path="/admin/security">{() => <AdminRoute component={AdminSecurity} />}</Route>
       <Route path="/admin/wallets">{() => <AdminRoute component={AdminWallets} />}</Route>
       <Route path="/admin/payouts">{() => <AdminRoute component={AdminPayouts} />}</Route>
+      <Route path="/admin/payout-limits">{() => <AdminRoute component={AdminPayoutLimits} />}</Route>
       <Route path="/admin/exchange-rates">{() => <AdminRoute component={AdminExchangeRates} />}</Route>
       <Route path="/admin/database">{() => <AdminRoute component={AdminDatabase} />}</Route>
       <Route component={NotFound} />
