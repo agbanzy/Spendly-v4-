@@ -1,0 +1,71 @@
+name: Integration tests (nightly)
+
+# AUD-PR-009 — opt-in integration tests run via testcontainers Postgres.
+# The audit doc and `server/__tests__/integration/README.md` documented
+# two CI options: blocking PR check vs nightly cron. We chose nightly
+# because:
+#   - Each test file boots a Postgres container (5-15s cold start)
+#   - Running on every PR adds friction proportional to PR count
+#   - Failures are still surfaced (Slack alert via the `if: failure()`
+#     step at the bottom) but don't gate merges
+#
+# Manual triggers: workflow_dispatch lets anyone with write access run
+# the suite ad-hoc against a branch (eg. when touching storage layer).
+
+on:
+  schedule:
+    # 02:00 UTC daily — runs after the typical EU/UK end-of-day push
+    # window so a regression introduced today is caught by morning UTC.
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch / SHA to test (default: main)'
+        required: false
+        default: 'main'
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: Run testcontainers integration suite
+    runs-on: ubuntu-latest
+    # GitHub-hosted ubuntu-latest has Docker pre-installed and the
+    # daemon socket exposed at /var/run/docker.sock — testcontainers
+    # auto-discovers it without further config.
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Verify Docker daemon
+        run: |
+          docker version
+          docker info | head -20
+
+      - name: Install dependencies
+        # Same `npm install` reasoning as deploy.yml — registry drift
+        # on transitives makes `npm ci` flaky; lock is otherwise
+        # respected for everything that hasn't drifted.
+        run: npm install --no-audit --no-fund
+
+      - name: Run integration tests
+        run: npm run test:integration
+
+      - name: Capture container logs on failure
+        if: failure()
+        run: |
+          # If a Postgres container is still around, dump its logs to
+          # the workflow output for post-hoc debugging. testcontainers
+          # tears containers down on test exit; this catches the case
+          # where the test failed before teardown.
+          docker ps -a --filter ancestor=postgres:16-alpine --format '{{.ID}}' \
+            | xargs -r -I{} sh -c 'echo "=== container {} logs ===" && docker logs {} 2>&1 | tail -100'
