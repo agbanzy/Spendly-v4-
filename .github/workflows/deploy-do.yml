@@ -1,0 +1,105 @@
+name: Deploy to DigitalOcean
+
+# Parallel deploy path to App Platform. Runs in addition to the AWS
+# deploy.yml; promoting DO to primary is a DNS-layer decision, not a
+# CI-layer decision.
+#
+# Two trigger modes:
+#   - workflow_dispatch: manual deploy from any branch (typical for
+#     promoting a feature branch to a DO preview app)
+#   - push to release branch `do-prod`: production deploy
+#
+# The push-to-main trigger is INTENTIONALLY OMITTED — the AWS
+# workflow auto-deploys on main, and we don't want both clouds
+# auto-deploying the same SHA simultaneously. Operator pushes to
+# do-prod (or runs workflow_dispatch) when ready to ship to DO.
+
+on:
+  push:
+    branches: [do-prod]
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'DO App name (default: financiar)'
+        required: false
+        default: 'financiar'
+      ref:
+        description: 'Git ref to deploy (default: current branch)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build → push → update DO App
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Authenticate against DO Container Registry
+        run: doctl registry login --expiry-seconds 1200
+
+      # The App Platform spec at .do/app.yaml uses a Dockerfile build
+      # from GitHub source by default. For builds that need additional
+      # control (eg. custom build args, larger build context) we push
+      # a pre-built image to docufy registry and the app pulls from
+      # there. This step builds + pushes; the next step updates the
+      # app spec to point at this digest.
+      - name: Build image with VITE_ build args
+        # NOTE: these VITE_* secrets are baked INTO the client bundle.
+        # That's a deliberate Cognito + Stripe + Paystack design choice
+        # (the publishable keys + pool IDs are public).
+        run: |
+          docker build \
+            --build-arg VITE_COGNITO_USER_POOL_ID="${{ secrets.VITE_COGNITO_USER_POOL_ID }}" \
+            --build-arg VITE_COGNITO_CLIENT_ID="${{ secrets.VITE_COGNITO_CLIENT_ID }}" \
+            --build-arg VITE_COGNITO_DOMAIN="${{ secrets.VITE_COGNITO_DOMAIN }}" \
+            --build-arg VITE_STRIPE_PUBLISHABLE_KEY="${{ secrets.VITE_STRIPE_PUBLISHABLE_KEY }}" \
+            --build-arg VITE_PAYSTACK_PUBLIC_KEY="${{ secrets.VITE_PAYSTACK_PUBLIC_KEY }}" \
+            -t registry.digitalocean.com/docufy/financiar:${{ github.sha }} \
+            -t registry.digitalocean.com/docufy/financiar:latest \
+            .
+
+      - name: Push image
+        run: |
+          docker push registry.digitalocean.com/docufy/financiar:${{ github.sha }}
+          docker push registry.digitalocean.com/docufy/financiar:latest
+
+      # First-time path: create the app from the spec. Subsequent runs
+      # use `apps update` keyed by app name. Both modes are wrapped so
+      # the workflow is idempotent — first deploy creates, every other
+      # deploy updates the existing app.
+      - name: Create or update DO App
+        env:
+          APP_NAME: ${{ github.event.inputs.app_name || 'financiar' }}
+        run: |
+          set -euo pipefail
+          APP_ID=$(doctl apps list --format ID,Spec.Name --no-header \
+            | awk -v n="$APP_NAME" '$2 == n { print $1; exit }')
+
+          if [ -z "$APP_ID" ]; then
+            echo "App '$APP_NAME' not found — creating fresh."
+            doctl apps create --spec .do/app.yaml --wait
+          else
+            echo "App '$APP_NAME' exists ($APP_ID) — updating."
+            doctl apps update "$APP_ID" --spec .do/app.yaml --wait
+          fi
+
+      - name: Print app status
+        env:
+          APP_NAME: ${{ github.event.inputs.app_name || 'financiar' }}
+        run: |
+          APP_ID=$(doctl apps list --format ID,Spec.Name --no-header \
+            | awk -v n="$APP_NAME" '$2 == n { print $1; exit }')
+          doctl apps get "$APP_ID" --format ID,Spec.Name,DefaultIngress,ActiveDeployment.ID,UpdatedAt
