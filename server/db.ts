@@ -24,8 +24,23 @@ function buildSslConfig(): { rejectUnauthorized: boolean; ca?: string } | undefi
   return { rejectUnauthorized: true };
 }
 
+// Strip `sslmode=...` from the connection URL so pg-connection-string
+// doesn't construct its own ssl config that overrides ours. Without
+// this, DO's `?sslmode=require` URL causes pg to ignore our ssl.ca
+// and reject the self-signed chain — see DO deploy attempt
+// 24985167106 for the exact trace.
+function cleanConnectionString(url: string | undefined): string | undefined {
+  if (!url) return url;
+  // Remove the parameter wherever it appears (?sslmode=... or
+  // &sslmode=...) and tidy any leftover ?& or trailing ?.
+  return url
+    .replace(/[?&]sslmode=[^&]*/gi, (match) => (match.startsWith('?') ? '?' : ''))
+    .replace(/\?&/, '?')
+    .replace(/\?$/, '');
+}
+
 export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: cleanConnectionString(process.env.DATABASE_URL),
   // SECURITY: Enforce SSL in production to prevent credential interception
   ssl: buildSslConfig(),
 });

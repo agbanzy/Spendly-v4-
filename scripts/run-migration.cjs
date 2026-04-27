@@ -538,7 +538,13 @@ async function main() {
         ? { rejectUnauthorized: true, ca }
         : { rejectUnauthorized: true }
       : undefined;
-  const client = new Client({ connectionString: DATABASE_URL, ssl });
+  // Strip `sslmode=...` from the URL so pg-connection-string doesn't
+  // construct an ssl config that overrides ours. See server/db.ts for
+  // the same scrub.
+  const cleanedUrl = DATABASE_URL.replace(/[?&]sslmode=[^&]*/gi, (m) =>
+    m.startsWith('?') ? '?' : '',
+  ).replace(/\?&/, '?').replace(/\?$/, '');
+  const client = new Client({ connectionString: cleanedUrl, ssl });
   await client.connect();
   console.log('Connected to database.\n');
 
