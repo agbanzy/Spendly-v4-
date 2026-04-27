@@ -126,6 +126,14 @@ services:
       - key: DATABASE_URL
         value: ${db.DATABASE_URL}
         scope: RUN_TIME
+      # DATABASE_CA_CERT — DO managed Postgres uses a self-signed CA
+      # that's not in Node's default trust store. server/db.ts and
+      # scripts/run-migration.cjs both read this env and pass it as
+      # the pg client's ssl.ca so the cert chain still validates
+      # (rather than disabling cert verification).
+      - key: DATABASE_CA_CERT
+        value: ${db.CA_CERT}
+        scope: RUN_TIME
 
 # Postgres attached to the app. DO autowires DATABASE_URL into the
 # web service's RUN_TIME env (no manual env entry needed — the

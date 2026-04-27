@@ -528,7 +528,17 @@ async function main() {
   console.log(`Mode: ${mode}`);
   console.log(`Database: ${DATABASE_URL.replace(/:[^:@]+@/, ':***@')}\n`);
 
-  const client = new Client({ connectionString: DATABASE_URL });
+  // Mirror server/db.ts SSL handling so DO Managed Postgres (self-signed
+  // CA) works identically here. AWS RDS doesn't need the ca field; the
+  // standard CA bundle in Node already trusts it.
+  const ca = process.env.DATABASE_CA_CERT;
+  const ssl =
+    process.env.NODE_ENV === 'production'
+      ? ca && ca.trim().length > 0
+        ? { rejectUnauthorized: true, ca }
+        : { rejectUnauthorized: true }
+      : undefined;
+  const client = new Client({ connectionString: DATABASE_URL, ssl });
   await client.connect();
   console.log('Connected to database.\n');
 
