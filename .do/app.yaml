@@ -27,23 +27,17 @@ services:
     # from one process per the Dockerfile CMD. Vite-built static
     # assets are baked into the image at build time and served by
     # Express via its existing static-asset middleware.
-    dockerfile_path: Dockerfile
-
-    # Build context is the repo root. The Dockerfile multi-stage
-    # build produces dist/index.cjs (server) + dist/public/ (client
-    # static), then runs scripts/run-migration.cjs migrate before
-    # node dist/index.cjs.
-    source_dir: /
-
-    # GitHub source — DO App Platform watches the branch and rebuilds
-    # on every push. For prod, point this at a release branch (eg.
-    # `do-prod`) and gate releases via a separate CI workflow rather
-    # than auto-deploying on every main push. Default below targets
-    # `main`; change to a release branch when promoting from staging.
-    github:
-      repo: agbanzy/Spendly-v4-
-      branch: main
-      deploy_on_push: false
+    #
+    # The image is built + pushed by the deploy-do.yml workflow to
+    # `registry.digitalocean.com/docufy/financiar`. Using the registry
+    # tag (rather than a github: block + Dockerfile build) means
+    # 1) DO uses the exact image the workflow validated, and
+    # 2) deploys from feature branches work without changing this
+    # spec's branch reference.
+    image:
+      registry_type: DOCR
+      repository: financiar
+      tag: latest
 
     # Container shape. Start with basic-xxs ($5/mo, 512MB / 1 vCPU);
     # bump to basic-xs ($12/mo, 1GB / 1 vCPU) once we have prod
