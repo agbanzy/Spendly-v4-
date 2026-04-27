@@ -106,4 +106,6 @@ jobs:
         run: |
           APP_ID=$(doctl apps list --format ID,Spec.Name --no-header \
             | awk -v n="$APP_NAME" '$2 == n { print $1; exit }')
-          doctl apps get "$APP_ID" --format ID,Spec.Name,DefaultIngress,ActiveDeployment.ID,UpdatedAt
+          # `UpdatedAt` is no longer a valid column on `doctl apps get`
+          # in recent doctl releases — stick to columns that work.
+          doctl apps get "$APP_ID" --format ID,Spec.Name,DefaultIngress,ActiveDeployment.ID
