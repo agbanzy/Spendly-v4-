@@ -1,8 +1,22 @@
 name: Deploy to AWS
 
+# Auto-deploy on push to main is OFF. Primary deploy target is now
+# DigitalOcean App Platform (see .github/workflows/deploy-do.yml and
+# the live app at https://financiar-tz8qc.ondigitalocean.app).
+#
+# This workflow stays alive for two purposes:
+#   1) Pull-request CI gate — lint/typecheck/test still runs on every
+#      PR against main so we catch regressions before merge.
+#   2) Emergency / cutover AWS deploys — workflow_dispatch lets an
+#      operator manually deploy to AWS ECS if DO is down or we ever
+#      need A/B traffic split. Build & Deploy job gates on its own
+#      `if: github.event_name == 'push'` condition which is now
+#      always false (no push trigger) — to manually deploy via
+#      workflow_dispatch, that condition needs updating too.
+#
+# To re-arm auto-deploy on main: add back the `push: branches: [main]`
+# trigger AND update the Build & Deploy job's `if:` condition.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
