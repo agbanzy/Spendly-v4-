@@ -293,14 +293,20 @@ router.post("/public/invoices/:id/pay/paystack", async (req, res) => {
 // Record a payment against an invoice (supports partial payments)
 router.post("/invoices/:id/payments", requireAuth, async (req, res) => {
   try {
+    // S-F-02 — fail-closed when there's no company context. The previous
+    // `if (company && ...)` shape skipped the check entirely when
+    // resolveUserCompany returned null, letting any authenticated request
+    // with no company context read/mutate any invoice cross-tenant.
+    const company = await resolveUserCompany(req);
+    if (!company?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
     const invoice = await storage.getInvoice(param(req.params.id));
     if (!invoice) {
       return res.status(404).json({ error: "Invoice not found" });
     }
-
-    const company = await resolveUserCompany(req);
-    if (company && !await verifyCompanyAccess(invoice.companyId, company.companyId)) {
-      return res.status(403).json({ error: "Access denied" });
+    if (!await verifyCompanyAccess(invoice.companyId, company.companyId)) {
+      return res.status(404).json({ error: "Invoice not found" });
     }
 
     if (invoice.status === 'paid') {
@@ -375,14 +381,17 @@ router.post("/invoices/:id/payments", requireAuth, async (req, res) => {
 // List all payments for an invoice
 router.get("/invoices/:id/payments", requireAuth, async (req, res) => {
   try {
+    // S-F-02 — fail-closed when there's no company context.
+    const company = await resolveUserCompany(req);
+    if (!company?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
     const invoice = await storage.getInvoice(param(req.params.id));
     if (!invoice) {
       return res.status(404).json({ error: "Invoice not found" });
     }
-
-    const company = await resolveUserCompany(req);
-    if (company && !await verifyCompanyAccess(invoice.companyId, company.companyId)) {
-      return res.status(403).json({ error: "Access denied" });
+    if (!await verifyCompanyAccess(invoice.companyId, company.companyId)) {
+      return res.status(404).json({ error: "Invoice not found" });
     }
 
     const invoiceAmount = parseFloat(invoice.amount as string);
@@ -435,13 +444,18 @@ router.get("/invoices", requireAuth, async (req, res) => {
 
 router.get("/invoices/:id", requireAuth, async (req, res) => {
   try {
+    // S-F-02 — fail-closed when there's no company context. Return 404
+    // (not 403) for cross-tenant ids to avoid leaking which ids exist.
     const company = await resolveUserCompany(req);
+    if (!company?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
     const invoice = await storage.getInvoice(param(req.params.id));
     if (!invoice) {
       return res.status(404).json({ error: "Invoice not found" });
     }
-    if (company && !await verifyCompanyAccess(invoice.companyId, company.companyId)) {
-      return res.status(403).json({ error: "Access denied" });
+    if (!await verifyCompanyAccess(invoice.companyId, company.companyId)) {
+      return res.status(404).json({ error: "Invoice not found" });
     }
 
     // Enrich with payment tracking

@@ -304,7 +304,24 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
       });
     }
 
-    const perCompany = await isFeatureFlagOn('admin_per_company');
+    // S-F-03 (AUDIT_COUNTRY_PERSONA_ROLE_2026_05_17) — default to TRUE.
+    // The legacy path uses global `users.role` which is not company-
+    // scoped; an attacker with a stale global ADMIN role from any prior
+    // tenant relationship could pass requireAdmin for routes that don't
+    // independently verify company. Defaulting to TRUE means new
+    // deployments are safe-by-default; operators can still flip it OFF
+    // explicitly (with the obvious caveat in the logs below).
+    const perCompany = await isFeatureFlagOn('admin_per_company', { defaultValue: true });
+    if (!perCompany) {
+      // Loud warning every restart-to-request when the legacy path is
+      // active. Not fatal (operators may have a transition reason) but
+      // visible in CloudWatch / DO logs so it's not forgotten.
+      console.warn(
+        '[security] admin_per_company is OFF — falling back to global users.role check. ' +
+          'This is the LEGACY path; not safe for multi-tenant deployments. ' +
+          'See AUDIT_COUNTRY_PERSONA_ROLE_2026_05_17.md §S-F-03.',
+      );
+    }
 
     if (perCompany) {
       // ---- New path: company-membership role decides admin access ----
