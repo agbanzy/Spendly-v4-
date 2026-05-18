@@ -167,6 +167,31 @@ export interface IStorage {
     outcome: 'completed' | 'pending' | 'manual_review',
     lastError?: string,
   ): Promise<void>;
+
+  // DEF-STG3-WORKER-CRON — Admin queue view. Reads the pending wallet
+  // compensation rows for the operator dashboard. Filterable by status
+  // so the default view can surface stuck rows (manual_review) first.
+  // Paginated to avoid loading the entire queue when it's large.
+  listPendingWalletCompensations(filter?: {
+    status?: 'pending' | 'processing' | 'completed' | 'manual_review';
+    limit?: number;
+    offset?: number;
+  }): Promise<Array<{
+    id: string;
+    walletId: string;
+    amount: string;
+    currency: string;
+    originalReference: string;
+    reason: string;
+    failureKind: string;
+    attempts: number;
+    lastError: string | null;
+    lastAttemptAt: string | null;
+    status: string;
+    metadata: Record<string, unknown> | null;
+    createdAt: string;
+    updatedAt: string;
+  }>>;
   
   // Transaction status updates
   updateTransactionByReference(reference: string, data: Partial<Transaction>): Promise<Transaction | undefined>;
@@ -1146,6 +1171,52 @@ export class DatabaseStorage implements IStorage {
         updatedAt: new Date().toISOString(),
       } as any)
       .where(eq(pendingWalletCompensations.id, id));
+  }
+
+  /**
+   * DEF-STG3-WORKER-CRON — Admin queue view. Default order surfaces
+   * stuck (manual_review) rows first since those need operator action,
+   * then newest pending rows. Bounded by limit (max 200) so a runaway
+   * caller can't dump the entire queue into one response.
+   */
+  async listPendingWalletCompensations(filter?: {
+    status?: 'pending' | 'processing' | 'completed' | 'manual_review';
+    limit?: number;
+    offset?: number;
+  }): Promise<Array<{
+    id: string;
+    walletId: string;
+    amount: string;
+    currency: string;
+    originalReference: string;
+    reason: string;
+    failureKind: string;
+    attempts: number;
+    lastError: string | null;
+    lastAttemptAt: string | null;
+    status: string;
+    metadata: Record<string, unknown> | null;
+    createdAt: string;
+    updatedAt: string;
+  }>> {
+    const limit = Math.min(filter?.limit ?? 50, 200);
+    const offset = Math.max(filter?.offset ?? 0, 0);
+
+    let query = db.select().from(pendingWalletCompensations).$dynamic();
+    if (filter?.status) {
+      query = query.where(eq(pendingWalletCompensations.status, filter.status));
+    }
+    // Stuck rows first (manual_review then pending; ascending alphabetically
+    // gets that order), then newest within each bucket.
+    query = query
+      .orderBy(
+        sql`CASE status WHEN 'manual_review' THEN 0 WHEN 'pending' THEN 1 WHEN 'processing' THEN 2 ELSE 3 END`,
+        desc(pendingWalletCompensations.createdAt),
+      )
+      .limit(limit)
+      .offset(offset);
+    const rows = await query;
+    return rows as any;
   }
 
   // ==================== PAYMENT INTENT INDEX (LU-DD-2 / AUD-DD-MT-005) ====================
