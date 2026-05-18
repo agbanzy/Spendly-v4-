@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { AppStoreBadges } from "@/components/app-store-badges";
 import {
   ArrowRight,
   CreditCard,
@@ -304,7 +305,7 @@ export default function LandingPage() {
               elegant platform.
             </p>
 
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-12">
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8">
               <Link href="/signup">
                 <Button
                   size="lg"
@@ -321,6 +322,16 @@ export default function LandingPage() {
               >
                 Book a Demo
               </Button>
+            </div>
+
+            {/* Mobile app store badges — visible below the primary CTA so
+                visitors who prefer the native experience can install it
+                without a separate scroll. */}
+            <div className="flex flex-col items-center gap-3 mb-12">
+              <p className="text-xs uppercase tracking-widest text-muted-foreground font-sans">
+                Also available on
+              </p>
+              <AppStoreBadges orientation="row" size="md" />
             </div>
 
             <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-sm text-muted-foreground">
@@ -761,9 +772,13 @@ export default function LandingPage() {
                   alt="Financiar"
                 />
               </div>
-              <p className="text-sm text-muted-foreground leading-relaxed font-sans">
+              <p className="text-sm text-muted-foreground leading-relaxed font-sans mb-5">
                 The financial operating system for modern businesses.
               </p>
+              {/* Mobile app store badges (footer placement — always
+                  reachable regardless of scroll position). Smaller size
+                  than the hero so they fit the column width. */}
+              <AppStoreBadges orientation="column" size="sm" />
             </div>
 
             <div>
