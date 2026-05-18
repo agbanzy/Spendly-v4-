@@ -429,15 +429,43 @@ router.post("/payouts/:id/approve", requireAuth, requireAdmin, requirePin, async
     // Check if dual approval is needed
     if (amount >= dualApprovalThreshold) {
 
-      // Check if already has first approval
+      // STG3-A (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4 item 12) —
+      // typed dual-approval columns. The historical path stores both
+      // approvers in `metadata.firstApproval` / `metadata.secondApproval`
+      // JSONB, which makes:
+      //   - reporting hard (queries need ->> extractors and casts)
+      //   - schema evolution hard (typing the JSON in TypeScript is a
+      //     fragile parallel structure to maintain)
+      //   - access-control hard (can't put column-level grants on JSON
+      //     extractor expressions)
+      //
+      // The typed columns `firstApprovedBy` / `firstApprovedAt` /
+      // `approvedBy` / `approvedAt` / `approvalStatus` ALREADY EXIST in
+      // shared/schema.ts:971-973 but were not being written by this
+      // handler. This PR introduces **parallel-write** to both the typed
+      // columns AND the legacy JSONB. A future PR will switch reads to
+      // the typed columns, then a third PR will drop the JSONB. The
+      // deferred backfill migration 0020 lifts existing rows' JSONB
+      // into the typed columns.
+      //
+      // Reads still come from `metadata.firstApproval` to preserve the
+      // existing "first approver != second approver" check during the
+      // parallel-write soak window.
       const metadata = payout.metadata ? JSON.parse(JSON.stringify(payout.metadata)) : {};
+      const nowIso = new Date().toISOString();
+
       if (!metadata.firstApproval) {
-        // First approval - store it, keep as pending_second_approval
-        metadata.firstApproval = { by: userId, byName: userName, at: new Date().toISOString() };
+        // First approval — store it in BOTH the typed column AND the
+        // legacy JSONB; status stays pending_second_approval.
+        metadata.firstApproval = { by: userId, byName: userName, at: nowIso };
         const updatedPayout = await storage.updatePayout(payout.id, {
           status: 'pending_second_approval',
           metadata: metadata as any,
-        });
+          // Typed parallel-write (STG3-A)
+          firstApprovedBy: userId,
+          firstApprovedAt: nowIso,
+          approvalStatus: 'pending_second_approval',
+        } as any);
 
         await logAudit(
           'payout',
@@ -464,12 +492,17 @@ router.post("/payouts/:id/approve", requireAuth, requireAdmin, requirePin, async
         });
       }
 
-      metadata.secondApproval = { by: userId, byName: userName, at: new Date().toISOString() };
+      metadata.secondApproval = { by: userId, byName: userName, at: nowIso };
       const updatedPayout = await storage.updatePayout(payout.id, {
         status: 'approved',
         approvedBy: userId,
         metadata: metadata as any,
-      });
+        // Typed parallel-write (STG3-A) — second/final approval.
+        // approvedBy was already in the typed shape; approvedAt and
+        // approvalStatus are new on this code path.
+        approvedAt: nowIso,
+        approvalStatus: 'approved',
+      } as any);
 
       await logAudit(
         'payout',
