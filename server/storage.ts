@@ -135,6 +135,38 @@ export interface IStorage {
     lastError?: string;
     metadata?: Record<string, unknown>;
   }): Promise<boolean>;
+
+  // DEF-STG3-WALLET-WORKER — Atomic claim of the next pending compensation
+  // row for processing by the worker. Uses FOR UPDATE SKIP LOCKED so
+  // multiple worker instances can drain the queue in parallel without
+  // double-processing the same row (no leader-election needed for this
+  // queue size — see worker module for the scale limit).
+  //
+  // Returns null when no claimable rows exist (queue drained OR all
+  // pending rows are over the max-attempts ceiling).
+  claimNextPendingWalletCompensation(maxAttempts: number): Promise<{
+    id: string;
+    walletId: string;
+    amount: string;
+    currency: string;
+    originalReference: string;
+    reason: string;
+    failureKind: string;
+    attempts: number;
+    metadata: Record<string, unknown> | null;
+  } | null>;
+
+  // DEF-STG3-WALLET-WORKER — Finalize a compensation row. The worker
+  // calls this after attempting the credit-back:
+  //   - 'completed' → credit-back succeeded; row is terminal
+  //   - 'pending'   → credit-back failed; row goes back in the queue
+  //                   for a future worker tick to retry
+  //   - 'manual_review' → max attempts hit; ops must hand-resolve
+  finalizePendingWalletCompensation(
+    id: string,
+    outcome: 'completed' | 'pending' | 'manual_review',
+    lastError?: string,
+  ): Promise<void>;
   
   // Transaction status updates
   updateTransactionByReference(reference: string, data: Partial<Transaction>): Promise<Transaction | undefined>;
@@ -1028,6 +1060,92 @@ export class DatabaseStorage implements IStorage {
       if (error.code === '23505') return false;
       throw error;
     }
+  }
+
+  /**
+   * DEF-STG3-WALLET-WORKER — Atomic claim of the next pending row using
+   * FOR UPDATE SKIP LOCKED. Pattern:
+   *   1. SELECT one pending row with attempts < maxAttempts, lock it
+   *      (other workers SKIP this row), order by oldest first.
+   *   2. UPDATE that row to status='processing', bump attempts,
+   *      set last_attempt_at.
+   *   3. RETURN the updated row to the worker.
+   * All in one transaction so two workers can never claim the same row.
+   *
+   * Returns null when queue is drained or all candidates are over the
+   * max-attempts ceiling.
+   */
+  async claimNextPendingWalletCompensation(maxAttempts: number): Promise<{
+    id: string;
+    walletId: string;
+    amount: string;
+    currency: string;
+    originalReference: string;
+    reason: string;
+    failureKind: string;
+    attempts: number;
+    metadata: Record<string, unknown> | null;
+  } | null> {
+    const result = await db.execute(sql`
+      WITH claimed AS (
+        SELECT id
+        FROM pending_wallet_compensations
+        WHERE status = 'pending'
+          AND attempts < ${maxAttempts}
+        ORDER BY created_at
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      )
+      UPDATE pending_wallet_compensations p
+      SET status = 'processing',
+          attempts = p.attempts + 1,
+          last_attempt_at = now()::text,
+          updated_at = now()::text
+      FROM claimed
+      WHERE p.id = claimed.id
+      RETURNING p.id, p.wallet_id, p.amount, p.currency, p.original_reference,
+                p.reason, p.failure_kind, p.attempts, p.metadata
+    `);
+    const row = (result as any).rows?.[0];
+    if (!row) return null;
+    return {
+      id: row.id,
+      walletId: row.wallet_id,
+      amount: row.amount,
+      currency: row.currency,
+      originalReference: row.original_reference,
+      reason: row.reason,
+      failureKind: row.failure_kind,
+      attempts: row.attempts,
+      metadata: row.metadata,
+    };
+  }
+
+  /**
+   * DEF-STG3-WALLET-WORKER — Move a claimed row to its terminal or
+   * retry state. Outcomes:
+   *   completed     → credit-back succeeded; row is done.
+   *   pending       → credit-back failed; row goes back in the queue
+   *                   for the next worker tick (attempts counter is
+   *                   already bumped from the claim).
+   *   manual_review → max attempts hit; ops must hand-resolve via
+   *                   the admin queue view.
+   * Updates last_error + last_attempt_at for failure-case observability.
+   */
+  async finalizePendingWalletCompensation(
+    id: string,
+    outcome: 'completed' | 'pending' | 'manual_review',
+    lastError?: string,
+  ): Promise<void> {
+    await db.update(pendingWalletCompensations)
+      .set({
+        status: outcome,
+        // Cap lastError at 1024 chars — same convention as enqueue.
+        lastError: lastError ? lastError.slice(0, 1024) : null,
+        lastAttemptAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as any)
+      .where(eq(pendingWalletCompensations.id, id));
   }
 
   // ==================== PAYMENT INTENT INDEX (LU-DD-2 / AUD-DD-MT-005) ====================
