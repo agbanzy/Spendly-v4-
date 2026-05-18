@@ -104,6 +104,32 @@ const PRECHECKS = {
       'one row\'s reference (eg. append -retry-N). DO NOT silently delete the ' +
       'duplicate — the wallet balance reflects both debits.',
   },
+  '0020': {
+    label: '0020_payouts_backfill_typed_approval_columns.sql — STG3-A',
+    description:
+      'Lifts metadata.firstApproval / metadata.secondApproval JSONB into ' +
+      'the typed payouts columns (first_approved_by, first_approved_at, ' +
+      'approved_at, approval_status). Pre-condition: parallel-write code ' +
+      '(STG3-A) deployed for at least 24h. Migration aborts if the candidate ' +
+      'row count exceeds 100k.',
+    query: `
+      SELECT count(*) AS candidate_rows
+      FROM payouts
+      WHERE metadata IS NOT NULL
+        AND (metadata ? 'firstApproval' OR metadata ? 'secondApproval')
+        AND (
+          first_approved_by IS NULL
+          OR (approved_at IS NULL AND metadata ? 'secondApproval')
+        );
+    `,
+    pass: (row) => Number(row.candidate_rows) <= 100000,
+    explainPass: (row) =>
+      `Candidate rows = ${row.candidate_rows} (within the 100k cap). ` +
+      'Confirm STG3-A code has been deployed and soaked for >=24h, then promote.',
+    explainFail: (row) =>
+      `Candidate rows = ${row.candidate_rows}, exceeds the 100k cap in the migration\'s DO $$ guard. ` +
+      'Split into per-tenant batches (UPDATE WHERE company_id IN (...)) instead of promoting this migration as-is.',
+  },
 };
 
 function printBanner() {
@@ -150,7 +176,9 @@ async function runCheck(id) {
     const result = await client.query(spec.query);
     const row = result.rows[0] || {};
     if (spec.pass(row)) {
-      console.log('  PASS — ' + spec.explainPass);
+      // explainPass may be a static string or a function(row) — both supported.
+      const msg = typeof spec.explainPass === 'function' ? spec.explainPass(row) : spec.explainPass;
+      console.log('  PASS — ' + msg);
       console.log('');
       console.log(`  Next: node scripts/deferred-migration-helper.cjs promote ${id}`);
       return true;
