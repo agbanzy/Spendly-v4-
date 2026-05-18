@@ -297,6 +297,11 @@ router.post("/validate/bank-details", requireAuth, async (req, res) => {
   }
 });
 
+// Canonical "money out" endpoint. The semantically-overlapping
+// `/wallet/payout` route is being deprecated (see TP-HIGH-06) — that one
+// emits `X-Deprecated-Endpoint: true` and a `wallet_payout_legacy_call`
+// log line on every call. New clients should target this route. The
+// full consolidation (single MoneyMovement service for both) is STG3-B.
 router.post("/payment/transfer", requireAuth, requirePin, financialLimiter, async (req, res) => {
   try {
     const result = transferSchema.safeParse(req.body);
@@ -939,8 +944,43 @@ const walletPayoutSchema = z.object({
   frequency: z.enum(['once', 'weekly', 'monthly', 'quarterly', 'yearly']).optional().default('monthly'),
 });
 
+// TP-HIGH-06 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4 item 10) —
+// `/wallet/payout` is a second implementation of the same domain as
+// `/payment/transfer`. Both move money from a Spendly-controlled balance
+// to an external bank account; both call `paymentService.initiateTransfer`.
+// The duplication is a drift surface — any fix applied only to one
+// route can be bypassed by attackers using the other.
+//
+// Stage-2 intermediate (this PR):
+//   - Emit a structured `wallet_payout_legacy_call` log on every call so
+//     usage drift becomes observable in prod.
+//   - Add a `X-Deprecated-Endpoint: true` response header signalling
+//     clients to migrate to `/payment/transfer`.
+//   - This route still uses its own debit path (company_balances) and
+//     its own compensation contract (PR #5's atomicPayoutCompensateOnFailure
+//     — though not yet wired into the catch block here; tracked in
+//     STG3-B / TP-HIGH-07-payout follow-up).
+//
+// Stage-3 (STG3-B, deferred — see docs/audit-2026-05-17/TRANSFERS_AND_PAYOUTS_AUDIT.md):
+//   - Both routes become thin wrappers around a `MoneyMovement` service
+//     that exposes `process(intent: MoneyIntent) → MoneyOutcome`.
+//   - At that point this route is either deleted or kept as a stable
+//     compatibility shim that builds the same MoneyIntent shape.
 router.post("/wallet/payout", requireAuth, requirePin, financialLimiter, async (req, res) => {
   try {
+    // Signal deprecation on the response — clients should migrate to
+    // /payment/transfer. Header rather than 410 so we don't break
+    // existing integrations during the soak window.
+    res.setHeader('X-Deprecated-Endpoint', 'true');
+    res.setHeader('X-Deprecated-Successor', '/api/payment/transfer');
+
+    paymentLogger.warn('wallet_payout_legacy_call', {
+      route: '/wallet/payout',
+      successor: '/payment/transfer',
+      userId: (req as any).user?.uid,
+      userAgent: req.headers['user-agent'],
+    });
+
     const result = walletPayoutSchema.safeParse(req.body);
     if (!result.success) {
       return res.status(400).json({ error: "Invalid payout data", details: result.error.issues });
