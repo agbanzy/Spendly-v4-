@@ -32,6 +32,7 @@ import {
   type BusinessInsight, type InsertBusinessInsight,
   processedWebhooks,
   pendingDestructiveActions,
+  pendingWalletCompensations,
   paymentIntentIndex,
   type CreateTransaction, type CreateExpense, type CreateBill,
   type CreatePayroll, type CreateTeamMember,
@@ -116,9 +117,28 @@ export interface IStorage {
   // Webhook idempotency
   isWebhookProcessed(eventId: string): Promise<boolean>;
   markWebhookProcessed(eventId: string, provider: string, eventType?: string, metadata?: any): Promise<void>;
+  // TP-HIGH-09 — atomic claim variant: combines isWebhookProcessed +
+  // markWebhookProcessed into one ON CONFLICT DO NOTHING RETURNING op.
+  // Returns true when this caller is the first to claim the event.
+  claimWebhookForProcessing(eventId: string, provider: string, eventType?: string, metadata?: any): Promise<boolean>;
   // LU-DD-2 / AUD-DD-MT-005 — Server-issued payment-intent index
   createPaymentIntentIndex(input: InsertPaymentIntentIndex): Promise<PaymentIntentIndex | null>;
   getPaymentIntentIndex(provider: string, providerIntentId: string): Promise<PaymentIntentIndex | undefined>;
+
+  // TP-HIGH-07 — Pending wallet compensation queue. Enqueue a credit-back
+  // that needs to run out-of-band because the in-line refund failed.
+  // Returns true when this caller created the row; false when (walletId,
+  // originalReference) already had a row (ON CONFLICT silent no-op).
+  enqueuePendingWalletCompensation(input: {
+    walletId: string;
+    amount: number;
+    currency: string;
+    originalReference: string;
+    reason: string;
+    failureKind?: string;
+    lastError?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<boolean>;
   
   // Transaction status updates
   updateTransactionByReference(reference: string, data: Partial<Transaction>): Promise<Transaction | undefined>;
@@ -949,6 +969,118 @@ export class DatabaseStorage implements IStorage {
       if (error.code !== '23505') {
         throw error;
       }
+    }
+  }
+
+  /**
+   * TP-HIGH-09 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4) — atomic
+   * claim-then-process pattern for webhooks. The check-then-write
+   * pattern (isWebhookProcessed → side-effect → markWebhookProcessed)
+   * has a race window: two webhook deliveries arriving within
+   * milliseconds can BOTH pass the isWebhookProcessed check and BOTH
+   * run the side-effect, even though only one markWebhookProcessed
+   * INSERT will ultimately succeed thanks to the UNIQUE constraint
+   * on event_id.
+   *
+   * This helper closes that race by doing the INSERT FIRST and
+   * returning whether THIS caller is the winner:
+   *   - returns `true`: claim won; safe to proceed with side-effects
+   *   - returns `false`: another caller already claimed; skip side-effects
+   *
+   * Recommended pattern for new webhook handlers:
+   *   const won = await storage.claimWebhookForProcessing(eventId, provider, eventType, metadata);
+   *   if (!won) return; // already processed by another delivery
+   *   // ... side effects (credit-back-wallet, update payout status, etc.)
+   *
+   * Legacy check-then-write usages are left in place for back-compat;
+   * the UNIQUE constraint still prevents the double-INSERT, so the only
+   * exposure is for SIDE-EFFECTS that aren't themselves idempotent.
+   */
+  async claimWebhookForProcessing(
+    eventId: string,
+    provider: string,
+    eventType: string = 'unknown',
+    metadata?: any,
+  ): Promise<boolean> {
+    try {
+      const result = await db.insert(processedWebhooks).values({
+        eventId,
+        provider,
+        eventType,
+        metadata: metadata || null,
+      })
+        .onConflictDoNothing()
+        .returning({ id: processedWebhooks.id });
+      // RETURNING is empty when ON CONFLICT fired (already-processed).
+      return result.length > 0;
+    } catch (error: any) {
+      // Unique-violation that didn't get caught by ON CONFLICT (rare;
+      // typically a code-path mismatch with the constraint target) →
+      // treat as already-claimed for safety.
+      if (error.code === '23505') return false;
+      throw error;
+    }
+  }
+
+  // ==================== PENDING WALLET COMPENSATIONS (TP-HIGH-07) ====================
+
+  /**
+   * TP-HIGH-07 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4) — durable queue
+   * for wallet credit-backs that couldn't be applied in-line.
+   *
+   * The /payment/transfer flow runs:
+   *   1. atomic wallet debit (claim-protected, PR #48)
+   *   2. external provider call
+   *   3. if (2) throws → in-line creditWallet refund
+   *
+   * If step 3 itself throws (DB blip mid-route, network partition,
+   * advisory lock contention), the wallet stays debited and the money
+   * never left — a real user-visible loss. This method captures the
+   * compensation request to a queue; a worker drains it with backoff.
+   *
+   * Idempotency: the UNIQUE index on (wallet_id, original_reference)
+   * combined with ON CONFLICT DO NOTHING means a second enqueue for the
+   * same original transfer is a silent no-op. The first row keeps its
+   * attempts counter and last_error. Returns true on first enqueue,
+   * false on duplicate.
+   *
+   * The worker is not yet implemented — first observability pass: log
+   * + paginated admin view that surfaces pending rows. Worker added in
+   * a follow-up PR (STG2-C-2 in the audit plan).
+   */
+  async enqueuePendingWalletCompensation(input: {
+    walletId: string;
+    amount: number;
+    currency: string;
+    originalReference: string;
+    reason: string;
+    failureKind?: string;
+    lastError?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<boolean> {
+    try {
+      const result = await db.insert(pendingWalletCompensations).values({
+        walletId: input.walletId,
+        amount: String(input.amount),
+        currency: input.currency,
+        originalReference: input.originalReference,
+        reason: input.reason,
+        failureKind: input.failureKind || 'transfer_refund',
+        // Cap lastError at 1024 chars so a verbose stack trace doesn't
+        // bloat the row or leak credentials embedded deep in a message.
+        lastError: input.lastError ? input.lastError.slice(0, 1024) : null,
+        metadata: input.metadata || null,
+        status: 'pending',
+        attempts: 0,
+      })
+        .onConflictDoNothing()
+        .returning({ id: pendingWalletCompensations.id });
+      return result.length > 0;
+    } catch (error: any) {
+      // Treat unique-violation that bypassed ON CONFLICT (rare; code-path
+      // mismatch with the constraint target) as a silent dedup.
+      if (error.code === '23505') return false;
+      throw error;
     }
   }
 

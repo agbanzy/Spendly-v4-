@@ -884,6 +884,54 @@ export const walletTransactions = pgTable("wallet_transactions", {
   index("wallet_transactions_created_at_idx").on(t.createdAt),
 ]);
 
+// TP-HIGH-07 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4) — Pending wallet
+// compensations queue.
+//
+// When /payment/transfer's external provider call fails AFTER the wallet
+// has been debited, the route attempts an in-line `creditWallet` refund.
+// If THAT creditWallet itself throws (DB blip, network partition mid-tx),
+// the wallet stays debited and the money never left — a real user-visible
+// loss. This table is the durable record of compensations that need to
+// run; a worker drains it with exponential backoff and surfaces stuck
+// rows (status='manual_review') after `maxAttempts` exhausted.
+//
+// Mirrors the payouts-side `atomicPayoutCompensateOnFailure` pattern (PR #5)
+// but durably-queued, since wallets don't have a single
+// `company_balances` row to lock — the credit-back has to write a new
+// wallet_transactions ledger row.
+export const pendingWalletCompensations = pgTable("pending_wallet_compensations", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  walletId: text("wallet_id").notNull().references(() => wallets.id, { onDelete: 'cascade' }),
+  amount: decimal("amount", { precision: 16, scale: 2 }).notNull(),
+  currency: text("currency").notNull(),
+  // The reference of the original debit (e.g. TRF-{userId}-{ts}). Used
+  // by the worker to derive a UNIQUE-safe credit-back reference
+  // (REFUND-{originalReference}) — combined with the unique index on
+  // wallet_transactions.reference (PR #48, migration 0017), this means
+  // the worker can retry without producing a double-credit.
+  originalReference: text("original_reference").notNull(),
+  reason: text("reason").notNull(),
+  failureKind: text("failure_kind").notNull().default('transfer_refund'),
+  attempts: integer("attempts").notNull().default(0),
+  // Last error stays in plain text; structured fields would tempt
+  // PII leakage. Worker truncates to 1024 chars on write.
+  lastError: text("last_error"),
+  lastAttemptAt: text("last_attempt_at"),
+  status: text("status").notNull().default('pending'),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+}, (t) => [
+  index("pending_wallet_compensations_status_idx").on(t.status),
+  index("pending_wallet_compensations_wallet_id_idx").on(t.walletId),
+  // Uniqueness on (wallet_id, original_reference) prevents duplicate
+  // enqueue when the route's catch block races (eg. the wallet stays
+  // debited and a retry hits the same catch path). The unique index
+  // is the simplest backpressure — second enqueue silently no-ops via
+  // ON CONFLICT in the storage method.
+  uniqueIndex("pending_wallet_compensations_wallet_ref_unique_idx").on(t.walletId, t.originalReference),
+]);
+
 // Exchange Rates table - for currency conversion
 export const exchangeRates = pgTable("exchange_rates", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
