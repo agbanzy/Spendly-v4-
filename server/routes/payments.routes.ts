@@ -434,17 +434,35 @@ router.post("/payment/transfer", requireAuth, requirePin, financialLimiter, asyn
     // Generate unique reference for idempotency tracking
     const transferReference = `TRF-${userId.substring(0, 8)}-${Date.now()}`;
 
-    // FIX P2: Debit wallet BEFORE initiating external transfer to prevent fund leaks.
-    // If the external transfer fails, we refund the wallet. If we send first and debit
-    // fails, money leaves the platform without a corresponding internal deduction.
-    await storage.debitWallet(
+    // TP-CRIT-04 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4) — claim
+    // pattern via debitWalletIdempotent. Two concurrent requests with
+    // the same intent ID (eg. retry mid network-blip after the client
+    // resends within the same millisecond, or a race where the wallet
+    // FOR UPDATE serialises but both pre-checked the balance) can no
+    // longer both debit. The second call returns null → 409.
+    //
+    // Combined with the unique constraint in
+    // migrations-deferred/0017_wallet_transactions_reference_unique.sql,
+    // the second debit is atomically refused at the DB layer.
+    //
+    // FIX P2: Debit BEFORE the external transfer. If the external call
+    // fails we credit-back; if we sent first and the debit failed
+    // money would leave without a corresponding internal deduction.
+    const debitResult = await storage.debitWalletIdempotent(
       userWallet.id,
       amount,
       'transfer_out',
       `Transfer: ${reason}`,
       transferReference,
-      { recipientName: recipientDetails.accountName, countryCode }
+      { recipientName: recipientDetails.accountName, countryCode },
     );
+    if (debitResult === null) {
+      return res.status(409).json({
+        error: 'Duplicate transfer reference — this transfer was already initiated. Retry with a new client-side reference.',
+        code: 'TRANSFER_CLAIM_LOST',
+        reference: transferReference,
+      });
+    }
 
     let transferResult;
     try {

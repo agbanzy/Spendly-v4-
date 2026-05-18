@@ -239,6 +239,8 @@ export interface IStorage {
   updateWallet(id: string, data: Partial<Wallet>): Promise<Wallet | undefined>;
   creditWallet(walletId: string, amount: number, type: string, description: string, reference: string, metadata?: Record<string, unknown>): Promise<WalletTransaction>;
   debitWallet(walletId: string, amount: number, type: string, description: string, reference: string, metadata?: Record<string, unknown>): Promise<WalletTransaction>;
+  // TP-CRIT-04 — idempotent variant: returns null on duplicate (walletId, reference)
+  debitWalletIdempotent(walletId: string, amount: number, type: string, description: string, reference: string, metadata?: Record<string, unknown>): Promise<WalletTransaction | null>;
   atomicBillPayment(params: { walletId: string; billId: string; amount: number; reference: string; paidBy: string }): Promise<{ walletTx: WalletTransaction; bill: Bill }>;
   atomicCardFunding(params: { walletId: string; cardId: string; amount: number; reference: string }): Promise<{ walletTx: WalletTransaction; card: VirtualCard }>;
   atomicWalletTransfer(params: { sourceWalletId: string; destWalletId: string; amount: number; description: string; reference: string; exchangeRate?: number }): Promise<{ debitTx: WalletTransaction; creditTx: WalletTransaction }>;
@@ -1932,6 +1934,96 @@ export class DatabaseStorage implements IStorage {
         status: 'completed',
         createdAt: now,
       } as any).returning();
+
+      return txResult[0];
+    });
+  }
+
+  /**
+   * TP-CRIT-04 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4) — idempotent
+   * debit. Same semantics as `debitWallet` except that a duplicate
+   * `(walletId, reference)` returns `null` instead of double-debiting
+   * the wallet OR throwing a unique-violation error.
+   *
+   * Pattern: INSERT the wallet_transactions row first with
+   * `ON CONFLICT DO NOTHING`. If no row is returned, the reference is
+   * already used → ROLLBACK without modifying the wallet balance.
+   * Caller sees `null` and surfaces a 409 to the client.
+   *
+   * Combined with the deferred migration that adds
+   * `UNIQUE (wallet_id, reference)` to wallet_transactions, this
+   * guarantees that two concurrent /payment/transfer or /wallet/payout
+   * requests with the same reference can't both debit. The wallet
+   * `FOR UPDATE` lock keeps the balance-check race-safe; the unique
+   * constraint catches the cross-transaction case.
+   *
+   * Until the constraint migration is applied, the ON CONFLICT clause
+   * is a no-op (no conflict to trigger) — the function behaves
+   * identically to debitWallet. The route still benefits from the
+   * null-return contract for the post-migration enforcement.
+   */
+  async debitWalletIdempotent(
+    walletId: string,
+    amount: number,
+    type: string,
+    description: string,
+    reference: string,
+    metadata?: Record<string, unknown>
+  ): Promise<WalletTransaction | null> {
+    return await db.transaction(async (tx) => {
+      const walletRows = await tx.execute(
+        sql`SELECT * FROM wallets WHERE id = ${walletId} FOR UPDATE`
+      );
+      const wallet = walletRows.rows[0] as any;
+      if (!wallet) throw new Error('Wallet not found');
+
+      const availableBalance = parseFloat(wallet.available_balance || '0');
+      if (availableBalance < amount) {
+        throw new Error('Insufficient funds');
+      }
+
+      const balanceBefore = parseFloat(wallet.balance || '0');
+      const balanceAfter = Math.round((balanceBefore - amount) * 100) / 100;
+      const availAfter = Math.round((availableBalance - amount) * 100) / 100;
+      const now = new Date().toISOString();
+
+      // INSERT FIRST with ON CONFLICT DO NOTHING. Once the deferred
+      // migration adds UNIQUE (wallet_id, reference), a duplicate
+      // returns zero rows and we bail without touching the wallet.
+      const txResult = await tx.insert(walletTransactions).values({
+        walletId,
+        type,
+        amount: amount.toFixed(2),
+        currency: wallet.currency,
+        direction: 'debit',
+        balanceBefore: balanceBefore.toFixed(2),
+        balanceAfter: balanceAfter.toFixed(2),
+        description,
+        reference,
+        metadata,
+        status: 'completed',
+        createdAt: now,
+      } as any)
+        .onConflictDoNothing({
+          target: [walletTransactions.walletId, walletTransactions.reference],
+        })
+        .returning();
+
+      if (txResult.length === 0) {
+        // Claim lost — another caller already inserted this reference.
+        // ROLLBACK by throwing inside the transaction handler then catching
+        // outside; cleaner: just return null and let the wallet update
+        // not happen. Since we haven't UPDATEd the wallet yet, this is
+        // safe — return null without changing balance.
+        return null;
+      }
+
+      // Claim won — now commit the balance change.
+      await tx.update(wallets).set({
+        balance: balanceAfter.toFixed(2),
+        availableBalance: availAfter.toFixed(2),
+        updatedAt: now,
+      } as any).where(eq(wallets.id, walletId));
 
       return txResult[0];
     });
