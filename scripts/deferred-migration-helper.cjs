@@ -78,6 +78,32 @@ const PRECHECKS = {
       'DELETE FROM payouts WHERE id = \'<id>\' (if it was queue-poisoning artefact never ' +
       'processed). See migration header for details.',
   },
+  '0017': {
+    label: '0017_wallet_transactions_reference_unique.sql — TP-CRIT-04',
+    description:
+      'Refuses to create UNIQUE(wallet_id, reference) on wallet_transactions ' +
+      'if any duplicates exist. Investigate each duplicate before promoting — ' +
+      'real double-debits indicate the wallet balance is wrong and need a ' +
+      'compensating credit, not silent dedup.',
+    query: `
+      SELECT count(*) AS dupe_count FROM (
+        SELECT wallet_id, reference
+        FROM wallet_transactions
+        GROUP BY wallet_id, reference
+        HAVING COUNT(*) > 1
+      ) AS dupes;
+    `,
+    pass: (row) => Number(row.dupe_count) === 0,
+    explainPass: '0 duplicate (wallet_id, reference) pairs. Safe to add the UNIQUE index.',
+    explainFail: (row) =>
+      `Found ${row.dupe_count} duplicate (wallet_id, reference) groups. ` +
+      'Investigate via: SELECT wallet_id, reference, COUNT(*) FROM wallet_transactions ' +
+      'GROUP BY wallet_id, reference HAVING COUNT(*) > 1; ' +
+      'For each: if a real double-debit, write a compensating credit and zero out ' +
+      'the duplicate; if a legitimate retry the application meant to allow, rename ' +
+      'one row\'s reference (eg. append -retry-N). DO NOT silently delete the ' +
+      'duplicate — the wallet balance reflects both debits.',
+  },
 };
 
 function printBanner() {
