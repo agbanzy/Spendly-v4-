@@ -4,6 +4,7 @@ import { param, resolveUserCompany, verifyCompanyAccess, teamMemberSchema, teamM
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { storage } from "../storage";
 import { notificationService } from "../services/notification-service";
+import { checkRoleHierarchy } from "../lib/role-hierarchy";
 
 function getPermissionsForRole(role: string): string[] {
   const upper = (role || 'EMPLOYEE').toUpperCase();
@@ -15,6 +16,10 @@ function getPermissionsForRole(role: string): string[] {
   }
   return ['CREATE_EXPENSE'];
 }
+
+// S-F-01 helpers live in server/lib/role-hierarchy.ts so they can be
+// imported by tests without pulling in storage / db. See that file
+// for the rationale + the audit reference.
 
 const router = express.Router();
 
@@ -53,6 +58,17 @@ router.post("/team", requireAuth, requireAdmin, async (req, res) => {
     }
     const { name, email, role, department } = result.data;
 
+    const assignedRole = role || 'EMPLOYEE';
+
+    // S-F-01 — role hierarchy guard. Refuse if the caller would
+    // assign a role HIGHER than their own. Without this guard an
+    // ADMIN can invite a new OWNER and chain into a tenant takeover.
+    const callerRole = (req as any).adminUser?.role;
+    const hierarchyError = checkRoleHierarchy(callerRole, assignedRole);
+    if (hierarchyError) {
+      return res.status(hierarchyError.status).json(hierarchyError.body);
+    }
+
     // Resolve company context for the current user
     const companyCtx = await resolveUserCompany(req);
     const companyId = companyCtx?.companyId || null;
@@ -62,8 +78,6 @@ router.post("/team", requireAuth, requireAdmin, async (req, res) => {
     if (sameDepMember) {
       return res.status(400).json({ error: "This person is already in this department" });
     }
-
-    const assignedRole = role || 'EMPLOYEE';
 
     const member = await storage.createTeamMember({
       name,
@@ -137,9 +151,32 @@ router.patch("/team/:id", requireAuth, requireAdmin, async (req, res) => {
     if (!result.success) {
       return res.status(400).json({ error: "Invalid team member data", details: result.error.issues });
     }
+
+    // S-F-01 — role hierarchy guard on update. An ADMIN cannot promote
+    // a member to a role higher than ADMIN. Same rationale as POST /team.
+    const callerRole = (req as any).adminUser?.role;
+    const hierarchyError = checkRoleHierarchy(callerRole, result.data.role);
+    if (hierarchyError) {
+      return res.status(hierarchyError.status).json(hierarchyError.body);
+    }
+
     const originalMember = await storage.getTeamMember(param(req.params.id));
     if (!originalMember) {
       return res.status(404).json({ error: "Team member not found" });
+    }
+
+    // S-F-01 extension — also block demoting a member whose CURRENT role
+    // outranks the caller. Otherwise an ADMIN could demote the OWNER.
+    if (originalMember.role) {
+      const reversedError = checkRoleHierarchy(callerRole, originalMember.role);
+      if (reversedError) {
+        return res.status(403).json({
+          error: `Cannot modify a member whose role '${originalMember.role}' outranks your own role '${callerRole}'`,
+          code: 'ROLE_HIERARCHY_VIOLATION',
+          callerRole,
+          targetCurrentRole: originalMember.role,
+        });
+      }
     }
 
     // AUD-DD-TEAM-005 — last-admin guard. If the change demotes the
@@ -196,9 +233,25 @@ router.patch("/team/:id", requireAuth, requireAdmin, async (req, res) => {
 
 router.delete("/team/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
+    const target = await storage.getTeamMember(param(req.params.id));
+
+    // S-F-01 — block deleting a member whose role outranks the caller.
+    // Prevents ADMIN from removing OWNER as a takeover step.
+    const callerRole = (req as any).adminUser?.role;
+    if (target?.role) {
+      const reversedError = checkRoleHierarchy(callerRole, target.role);
+      if (reversedError) {
+        return res.status(403).json({
+          error: `Cannot remove a member whose role '${target.role}' outranks your own role '${callerRole}'`,
+          code: 'ROLE_HIERARCHY_VIOLATION',
+          callerRole,
+          targetCurrentRole: target.role,
+        });
+      }
+    }
+
     // AUD-DD-TEAM-005 — last-admin guard on delete. Same logic as on
     // patch: refuse to remove the last OWNER/ADMIN of a company.
-    const target = await storage.getTeamMember(param(req.params.id));
     if (target && (target as any).companyId && ['OWNER', 'ADMIN'].includes(String(target.role).toUpperCase())) {
       const team = await storage.getTeam((target as any).companyId);
       const otherAdminCount = team.filter((m: any) =>
