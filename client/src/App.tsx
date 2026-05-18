@@ -16,6 +16,7 @@ import { TourProvider } from "@/lib/tour-context";
 import NotFound from "@/pages/not-found";
 
 
+import Landing from "@/pages/landing";
 import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import Dashboard from "@/pages/dashboard";
@@ -259,7 +260,15 @@ function AppContent() {
   if (isPublicRoute) {
     return (
       <Switch>
-        <Route path="/">{() => <Redirect to={isAuthenticated ? "/dashboard" : "/login"} />}</Route>
+        {/*
+          Root path:
+            - Authenticated user → drop them straight into the app
+            - Guest → serve the marketing landing page (with /signup,
+              /login, and the mobile-app badges as CTAs). The previous
+              shape redirected guests to /login unconditionally, which
+              skipped the landing page entirely.
+        */}
+        <Route path="/">{() => isAuthenticated ? <Redirect to="/dashboard" /> : <Landing />}</Route>
         <Route path="/login">{() => <PublicRoute component={LoginPage} />}</Route>
         <Route path="/signup">{() => <PublicRoute component={SignupPage} />}</Route>
         <Route path="/forgot-password">{() => <PublicRoute component={ForgotPassword} />}</Route>
