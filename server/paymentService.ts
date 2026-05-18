@@ -3,6 +3,7 @@ import { paystackClient, validateTransferDetails, validateStripeBankDetails } fr
 import { Money, paymentLogger, validateCurrencyForProvider, mapPaymentError } from './utils/paymentUtils';
 import { storage } from './storage';
 import { withProviderRetry, isRetryable } from './lib/provider-retry';
+import { createMoneyMovementService, type MoneyMovementService } from './lib/money-movement';
 
 // Re-exported for parity with the lib module — callers historically import
 // from this file. The implementation lives in server/lib/provider-retry.ts
@@ -966,3 +967,35 @@ export const paymentService = {
     return getPaymentProvider(countryCode);
   },
 };
+
+// STG3-B-2 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4 item 11) — live
+// MoneyMovement service. The skeleton in server/lib/money-movement.ts
+// (PR #54) declared the contract and stubbed all the non-wallet_transfer
+// intent kinds. This is the runtime wiring: routes use this singleton
+// to orchestrate claim → debit → external → compensate without
+// duplicating the logic per-route.
+//
+// Today only `wallet_transfer` is implemented — see the skeleton's
+// header for the migration roadmap covering the other intent kinds.
+//
+// Constructed lazily so test files that import paymentService don't
+// pay the construction cost at module load. Use `getMoneyMovement()`
+// instead of touching the singleton directly so future changes (eg.
+// per-tenant service variants) have one place to land.
+let _moneyMovement: MoneyMovementService | undefined;
+export function getMoneyMovement(): MoneyMovementService {
+  if (!_moneyMovement) {
+    _moneyMovement = createMoneyMovementService({
+      storage: {
+        debitWalletIdempotent: storage.debitWalletIdempotent.bind(storage),
+        creditWallet: storage.creditWallet.bind(storage),
+        enqueuePendingWalletCompensation:
+          storage.enqueuePendingWalletCompensation.bind(storage),
+      },
+      provider: {
+        initiateTransfer: paymentService.initiateTransfer.bind(paymentService),
+      },
+    });
+  }
+  return _moneyMovement;
+}

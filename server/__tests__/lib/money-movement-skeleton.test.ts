@@ -101,6 +101,30 @@ describe('STG3-B — MoneyMovement skeleton: wallet_transfer happy path', () => 
     expect(callOrder).toEqual(['debit', 'provider']);
   });
 
+  it('exposes the raw provider result via outcome.providerResult (STG3-B-2 contract)', async () => {
+    // Routes pass provider-specific fields back to the client; the
+    // providerResult field is the contract that lets the per-route
+    // migrations (STG3-B-2 onwards) avoid losing those fields.
+    const storage = makeStubStorage();
+    const paystackShape = {
+      reference: 'TRF-pstk-77',
+      status: 'pending',
+      transfer_code: 'TRF-pstk-77',
+      amount: 10000,
+    };
+    const provider = makeStubProvider({
+      initiateTransfer: vi.fn().mockResolvedValue(paystackShape),
+    });
+    const svc = createMoneyMovementService({ storage, provider });
+
+    const outcome = await svc.process(baseIntent);
+
+    expect(outcome.kind).toBe('succeeded');
+    if (outcome.kind === 'succeeded') {
+      expect(outcome.providerResult).toEqual(paystackShape);
+    }
+  });
+
   it('falls back to providerReference=intent.reference when provider returns no id', async () => {
     const storage = makeStubStorage();
     const provider = makeStubProvider({

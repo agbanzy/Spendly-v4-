@@ -19,6 +19,7 @@ import {
   getRegionConfig,
   getCurrencyForCountry,
   getPaymentProvider,
+  getMoneyMovement,
 } from "../paymentService";
 import {
   getStripeClient,
@@ -434,29 +435,42 @@ router.post("/payment/transfer", requireAuth, requirePin, financialLimiter, asyn
     // Generate unique reference for idempotency tracking
     const transferReference = `TRF-${userId.substring(0, 8)}-${Date.now()}`;
 
-    // TP-CRIT-04 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4) — claim
-    // pattern via debitWalletIdempotent. Two concurrent requests with
-    // the same intent ID (eg. retry mid network-blip after the client
-    // resends within the same millisecond, or a race where the wallet
-    // FOR UPDATE serialises but both pre-checked the balance) can no
-    // longer both debit. The second call returns null → 409.
+    // STG3-B-2 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4 item 11) — the
+    // claim → debit → external → compensate orchestration now lives in
+    // the MoneyMovement service (server/lib/money-movement.ts, PR #54).
+    // This route is the FIRST production caller — proves the contract
+    // for the per-intent migrations to come (STG3-B-3 → B-6 will move
+    // /bills/pay, /expenses/:id/reimburse, etc.).
     //
-    // Combined with the unique constraint in
-    // migrations-deferred/0017_wallet_transactions_reference_unique.sql,
-    // the second debit is atomically refused at the DB layer.
+    // The service internally:
+    //   1. debitWalletIdempotent      (TP-CRIT-04, PR #48)
+    //   2. paymentService.initiateTransfer with payoutId metadata
+    //      (TP-CRIT-02 idempotency, PR #45; provider retry, PR #49)
+    //   3. on provider failure → creditWallet, then enqueue durable
+    //      compensation if that fails too (TP-HIGH-07, PR #51)
     //
-    // FIX P2: Debit BEFORE the external transfer. If the external call
-    // fails we credit-back; if we sent first and the debit failed
-    // money would leave without a corresponding internal deduction.
-    const debitResult = await storage.debitWalletIdempotent(
-      userWallet.id,
+    // It returns a discriminated MoneyOutcome that maps cleanly to HTTP:
+    //   - 'claim_lost'  → 409 with code TRANSFER_CLAIM_LOST
+    //   - 'compensated' → 502 with the provider error (the wallet has
+    //                      already been credited back, or the compensation
+    //                      is durably enqueued for the worker)
+    //   - 'succeeded'   → 200 with the provider result passed through
+    //                      for client back-compat
+    const moneyMovement = getMoneyMovement();
+    const outcome = await moneyMovement.process({
+      kind: 'wallet_transfer',
+      walletId: userWallet.id,
+      userId,
+      companyId: txCompany?.companyId,
       amount,
-      'transfer_out',
-      `Transfer: ${reason}`,
-      transferReference,
-      { recipientName: recipientDetails.accountName, countryCode },
-    );
-    if (debitResult === null) {
+      currency,
+      countryCode,
+      reason,
+      reference: transferReference,
+      recipientDetails,
+    });
+
+    if (outcome.kind === 'claim_lost') {
       return res.status(409).json({
         error: 'Duplicate transfer reference — this transfer was already initiated. Retry with a new client-side reference.',
         code: 'TRANSFER_CLAIM_LOST',
@@ -464,96 +478,25 @@ router.post("/payment/transfer", requireAuth, requirePin, financialLimiter, asyn
       });
     }
 
-    let transferResult;
-    try {
-      // TP-CRIT-02 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.2) —
-      // thread the per-request transferReference through as
-      // `metadata.payoutId` so paymentService.initiateTransfer can
-      // derive stable idempotency keys (Paystack `reference`,
-      // Stripe `idempotencyKey`) per AUD-DB-004/005/006 (PR #25).
-      //
-      // Without this, the AUD-DB fix from the payouts surface didn't
-      // apply to wallet-initiated transfers — a retried request mid
-      // network-blip would create a duplicate provider transfer.
-      // companyId is threaded too so the LU-DD-2 payment_intent_index
-      // writes get a tenant on the row (txCompany resolved earlier
-      // at line 374 for the daily-limit scope check).
-      transferResult = await paymentService.initiateTransfer(
-        amount,
-        recipientDetails,
-        countryCode,
-        reason,
-        {
-          payoutId: transferReference,
-          companyId: txCompany?.companyId,
-          userId,
-        },
-      );
-    } catch (transferError: any) {
-      // TP-HIGH-07 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4) — the
-      // external transfer failed. Try the in-line credit-back; if THAT
-      // also fails (DB blip, lock contention, anything), enqueue a
-      // durable compensation request so a worker can retry. Without
-      // this fallback the wallet stays debited and the money never
-      // left — real user-visible loss per the audit finding.
-      try {
-        await storage.creditWallet(
-          userWallet.id,
-          amount,
-          'transfer_refund',
-          `Refund: transfer failed - ${reason}`,
-          `REFUND-${transferReference}`,
-          { reason: transferError.message }
-        );
-      } catch (creditError: any) {
-        // In-line refund failed — durably enqueue the compensation.
-        // We log + enqueue but still throw the ORIGINAL transferError
-        // so the client sees the actual transfer failure cause
-        // (not the secondary credit-back failure).
-        try {
-          await storage.enqueuePendingWalletCompensation({
-            walletId: userWallet.id,
-            amount,
-            currency,
-            originalReference: transferReference,
-            reason,
-            failureKind: 'transfer_refund',
-            lastError: `creditWallet failed during transfer-error rollback: ${creditError.message}`,
-            metadata: {
-              transferError: transferError.message,
-              userId,
-              recipientName: recipientDetails.accountName,
-              countryCode,
-            },
-          });
-          paymentLogger.error('wallet_compensation_enqueued', {
-            walletId: userWallet.id,
-            amount,
-            currency,
-            originalReference: transferReference,
-            transferError: transferError.message,
-            creditError: creditError.message,
-          });
-        } catch (enqueueError: any) {
-          // Compensation queue itself unavailable — this is the worst
-          // case. Log loudly so ops can manually credit-back the user.
-          // Still throw the original error to the client.
-          paymentLogger.error('wallet_compensation_enqueue_failed', {
-            walletId: userWallet.id,
-            amount,
-            currency,
-            originalReference: transferReference,
-            transferError: transferError.message,
-            creditError: creditError.message,
-            enqueueError: enqueueError.message,
-          });
-        }
-      }
-      throw transferError;
+    if (outcome.kind === 'compensated') {
+      // Provider failed; compensation has run (in-line, durably enqueued,
+      // or — worst case — enqueue itself failed). The route's top-level
+      // catch translates the thrown error into the standard error
+      // response shape via mapPaymentError. Attach `compensation` so
+      // ops can correlate the log line that fired inside the service.
+      const err: any = new Error(outcome.providerError);
+      err.statusCode = 502;
+      err.compensation = outcome.compensation;
+      err.code = 'TRANSFER_PROVIDER_FAILED';
+      throw err;
     }
 
-    // Create transaction record with provider reference for webhook tracking
-    const providerRef = transferResult.reference || transferResult.transferId || transferReference;
+    // outcome.kind === 'succeeded' — keep the original transferResult
+    // shape for downstream code (createTransaction + the JSON response
+    // both reference fields on it). The provider result is opaque to
+    // the service but lossless through the outcome.
+    const transferResult: any = outcome.providerResult ?? {};
+    const providerRef = outcome.providerReference;
     await storage.createTransaction({
       type: 'transfer',
       amount: String(amount),

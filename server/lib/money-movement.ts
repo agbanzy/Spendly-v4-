@@ -126,7 +126,19 @@ export type MoneyIntent =
 // -------------------------------------------------------------------------
 
 export type MoneyOutcome =
-  | { kind: 'succeeded'; reference: string; providerReference: string }
+  | {
+      kind: 'succeeded';
+      reference: string;
+      providerReference: string;
+      /**
+       * Raw provider result (eg. the Paystack transfer object, Stripe
+       * Transfer / Payout). Optional — callers that only need the
+       * canonical providerReference can ignore it. Routes that pass
+       * provider-specific fields back to the client read this to preserve
+       * response shape during the per-route MoneyMovement migration.
+       */
+      providerResult?: unknown;
+    }
   | { kind: 'claim_lost'; reference: string; reason: 'duplicate' }
   | {
       kind: 'compensated';
@@ -366,5 +378,10 @@ async function processWalletTransfer(
 
   const providerReference =
     transferResult.reference || transferResult.transferId || intent.reference;
-  return { kind: 'succeeded', reference: intent.reference, providerReference };
+  return {
+    kind: 'succeeded',
+    reference: intent.reference,
+    providerReference,
+    providerResult: transferResult,
+  };
 }
