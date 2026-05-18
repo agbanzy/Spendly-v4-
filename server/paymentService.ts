@@ -991,6 +991,9 @@ export function getMoneyMovement(): MoneyMovementService {
         creditWallet: storage.creditWallet.bind(storage),
         enqueuePendingWalletCompensation:
           storage.enqueuePendingWalletCompensation.bind(storage),
+        // STG3-B-3 — bill_payment intent needs updateBill to mark the
+        // bill paid atomically with the wallet debit / compensation.
+        updateBill: storage.updateBill.bind(storage),
       },
       provider: {
         initiateTransfer: paymentService.initiateTransfer.bind(paymentService),

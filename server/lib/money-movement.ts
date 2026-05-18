@@ -87,11 +87,24 @@ export interface PayoutDisbursementIntent {
 export interface BillPaymentIntent {
   kind: 'bill_payment';
   billId: string;
-  companyId: string;
+  /** Human-readable bill name; populates transactions.description on success. */
+  billName: string;
+  companyId?: string;
   paidByUserId: string;
   amount: number;
   currency: string;
+  /** The wallet being debited. STG3-B-3 implements wallet path only — the
+   *  company-balance fallback path stays inline until a separate intent
+   *  shape covers it (see DEFERRED.md DEF-STG3-BILL-COMPANY-FALLBACK). */
   walletId: string;
+  /**
+   * Stable per-bill reference for both the wallet ledger row AND
+   * downstream transactions.reference. MUST be derived from billId
+   * (no Date.now() salt) so a retry of the same /bills/pay request
+   * is rejected by the (wallet_id, reference) UNIQUE constraint and
+   * the claim returns null. Pattern: `BILL-${billId}`.
+   */
+  reference: string;
 }
 
 export interface ExpenseReimbursementIntent {
@@ -208,6 +221,14 @@ export interface MoneyMovementStorage {
     lastError?: string;
     metadata?: Record<string, unknown>;
   }): Promise<boolean>;
+
+  // STG3-B-3 — used by bill_payment intent to mark the bill as paid
+  // after the wallet debit succeeds. Returning undefined is fine; the
+  // service only cares whether it threw.
+  updateBill(
+    id: string,
+    data: { status: string; [key: string]: unknown },
+  ): Promise<unknown>;
 }
 
 /**
@@ -239,8 +260,9 @@ export function createMoneyMovementService(deps: {
       switch (intent.kind) {
         case 'wallet_transfer':
           return processWalletTransfer(deps, intent);
-        case 'payout_disbursement':
         case 'bill_payment':
+          return processBillPayment(deps, intent);
+        case 'payout_disbursement':
         case 'expense_reimbursement':
         case 'payroll_disbursement':
           // Skeleton: these intent kinds are recognized at the type
@@ -383,5 +405,135 @@ async function processWalletTransfer(
     reference: intent.reference,
     providerReference,
     providerResult: transferResult,
+  };
+}
+
+// -------------------------------------------------------------------------
+// BillPayment orchestration (STG3-B-3) — wallet path only.
+//
+// Shape is similar to wallet_transfer but the "effect" step is an
+// internal DB write (mark bill paid) rather than an external provider
+// call. The compensation contract mirrors wallet_transfer:
+//   1. claim debit via debitWalletIdempotent (TP-CRIT-04 pattern;
+//      stable per-bill reference means a retried /bills/pay returns
+//      claim_lost instead of double-debiting)
+//   2. mark bill status='paid' via storage.updateBill
+//   3. on (2) failure → in-line creditWallet refund, then enqueue durable
+//      compensation if that also fails (TP-HIGH-07 pattern)
+//
+// What this intent does NOT cover (and intentionally so):
+//   - company-balance fallback path (when user has no personal wallet) —
+//     uses companyBalances UPDATE rather than wallet-ledger insert; the
+//     compensation queue is wallet-scoped so this would need either a
+//     parallel company-compensations queue or a different intent shape.
+//     Tracked in DEFERRED.md as DEF-STG3-BILL-COMPANY-FALLBACK.
+//   - external-charge path (paymentMethod !== 'wallet') — that creates
+//     a PaymentIntent for the user to pay, which is a CHARGE not a
+//     transfer. Different domain; MoneyMovement is the
+//     wallet/payout abstraction.
+// -------------------------------------------------------------------------
+
+async function processBillPayment(
+  deps: { storage: MoneyMovementStorage; provider: MoneyMovementProvider },
+  intent: BillPaymentIntent,
+): Promise<MoneyOutcome> {
+  // 1. Claim debit. Stable reference (`BILL-${billId}`) is the per-bill
+  // idempotency key — combined with the UNIQUE index on
+  // (wallet_id, reference) the second call returns null instead of
+  // producing a duplicate debit.
+  const debitResult = await deps.storage.debitWalletIdempotent(
+    intent.walletId,
+    intent.amount,
+    'bill_payment',
+    `Bill payment - ${intent.billName}`,
+    intent.reference,
+    { billId: intent.billId },
+  );
+  if (debitResult === null) {
+    return { kind: 'claim_lost', reference: intent.reference, reason: 'duplicate' };
+  }
+
+  // 2. Effect: mark bill as paid. If this throws, we need to credit-back
+  // (otherwise the wallet is debited but the bill is still unpaid).
+  try {
+    await deps.storage.updateBill(intent.billId, { status: 'paid' });
+  } catch (markPaidError: any) {
+    // Mirror wallet_transfer's two-tier compensation.
+    try {
+      await deps.storage.creditWallet(
+        intent.walletId,
+        intent.amount,
+        'transfer_refund',
+        `Refund: bill payment update failed - ${intent.billName}`,
+        `REFUND-${intent.reference}`,
+        { reason: markPaidError.message, billId: intent.billId },
+      );
+      return {
+        kind: 'compensated',
+        reference: intent.reference,
+        providerError: markPaidError.message,
+        compensation: 'in_line',
+      };
+    } catch (creditError: any) {
+      try {
+        await deps.storage.enqueuePendingWalletCompensation({
+          walletId: intent.walletId,
+          amount: intent.amount,
+          currency: intent.currency,
+          originalReference: intent.reference,
+          reason: `Bill payment ${intent.billId} failed mid-process`,
+          failureKind: 'bill_payment_refund',
+          lastError: `creditWallet failed during bill-payment rollback: ${creditError.message}`,
+          metadata: {
+            billId: intent.billId,
+            markPaidError: markPaidError.message,
+            paidByUserId: intent.paidByUserId,
+          },
+        });
+        paymentLogger.error('wallet_compensation_enqueued', {
+          walletId: intent.walletId,
+          amount: intent.amount,
+          currency: intent.currency,
+          originalReference: intent.reference,
+          markPaidError: markPaidError.message,
+          creditError: creditError.message,
+          intentKind: 'bill_payment',
+        });
+        return {
+          kind: 'compensated',
+          reference: intent.reference,
+          providerError: markPaidError.message,
+          compensation: 'enqueued',
+        };
+      } catch (enqueueError: any) {
+        paymentLogger.error('wallet_compensation_enqueue_failed', {
+          walletId: intent.walletId,
+          amount: intent.amount,
+          currency: intent.currency,
+          originalReference: intent.reference,
+          markPaidError: markPaidError.message,
+          creditError: creditError.message,
+          enqueueError: enqueueError.message,
+          intentKind: 'bill_payment',
+        });
+        return {
+          kind: 'compensated',
+          reference: intent.reference,
+          providerError: markPaidError.message,
+          compensation: 'enqueue_failed',
+        };
+      }
+    }
+  }
+
+  // Success — no provider reference (bill payment is internal). Use the
+  // intent.reference as both the canonical reference and the placeholder
+  // "providerReference" so callers that read providerReference still get
+  // a meaningful id.
+  return {
+    kind: 'succeeded',
+    reference: intent.reference,
+    providerReference: intent.reference,
+    providerResult: { billId: intent.billId, billName: intent.billName },
   };
 }

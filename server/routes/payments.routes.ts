@@ -666,14 +666,56 @@ router.post("/bills/pay", financialLimiter, requireAuth, requirePin, async (req,
           if (walletBalance < billAmount) {
             return res.status(400).json({ error: "Insufficient wallet balance", available: walletBalance, required: billAmount });
           }
-          await storage.debitWallet(
-            userWallet.id,
-            billAmount,
-            'bill_payment',
-            `Bill payment - ${bill.name}`,
-            `BILL-${billId}-${Date.now()}`,
-            { billId }
-          );
+
+          // STG3-B-3 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4 item 11) —
+          // the wallet path now flows through MoneyMovement.process().
+          // Two improvements over the prior inline code:
+          //
+          //   (a) Stable per-bill reference `BILL-${billId}` (not
+          //       `BILL-${billId}-${Date.now()}`). With the UNIQUE index
+          //       on wallet_transactions (wallet_id, reference) from
+          //       migrations-deferred/0017, a retried /bills/pay returns
+          //       claim_lost (409) instead of double-debiting. The
+          //       Date.now() salt was a latent TP-CRIT-04-class bug.
+          //
+          //   (b) If the subsequent updateBill('paid') call fails (DB
+          //       blip), the wallet is now reliably credited back —
+          //       in-line first, then to the durable compensation
+          //       queue (PR #51) — instead of leaving the wallet
+          //       debited and the bill unpaid.
+          const billReference = `BILL-${billId}`;
+          const outcome = await getMoneyMovement().process({
+            kind: 'bill_payment',
+            billId,
+            billName: bill.name,
+            companyId: (bill as any).companyId ?? undefined,
+            paidByUserId: userId,
+            amount: billAmount,
+            currency: billCurrency,
+            walletId: userWallet.id,
+            reference: billReference,
+          });
+
+          if (outcome.kind === 'claim_lost') {
+            return res.status(409).json({
+              error: 'This bill has already been paid (or a payment is in flight). Retry only if you are sure the prior attempt failed.',
+              code: 'BILL_PAYMENT_CLAIM_LOST',
+              reference: billReference,
+              billId,
+            });
+          }
+          if (outcome.kind === 'compensated') {
+            // updateBill failed mid-process; wallet has been (or will be)
+            // credited back via the compensation pipeline.
+            const err: any = new Error(outcome.providerError);
+            err.statusCode = 500;
+            err.code = 'BILL_PAYMENT_FAILED';
+            err.compensation = outcome.compensation;
+            throw err;
+          }
+          // outcome.kind === 'succeeded' — bill was atomically marked
+          // paid via storage.updateBill inside the service. Skip the
+          // additional storage.updateBill below.
           deducted = true;
         }
       }

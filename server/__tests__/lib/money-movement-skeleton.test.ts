@@ -19,6 +19,9 @@ function makeStubStorage(overrides?: Partial<MoneyMovementStorage>): MoneyMoveme
     debitWalletIdempotent: vi.fn().mockResolvedValue({ id: 'wt-1' }),
     creditWallet: vi.fn().mockResolvedValue(undefined),
     enqueuePendingWalletCompensation: vi.fn().mockResolvedValue(true),
+    // STG3-B-3 — bill_payment intent calls updateBill; default stub
+    // resolves so the wallet_transfer tests don't accidentally trip on it.
+    updateBill: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -268,18 +271,9 @@ describe('STG3-B — MoneyMovement skeleton: not-yet-implemented intent kinds', 
     await expect(svc.process(intent)).rejects.toBeInstanceOf(MoneyMovementNotImplementedError);
   });
 
-  it('throws MoneyMovementNotImplementedError for bill_payment', async () => {
-    const intent: MoneyIntent = {
-      kind: 'bill_payment',
-      billId: 'b-1',
-      companyId: 'co-1',
-      paidByUserId: 'u-1',
-      amount: 100,
-      currency: 'USD',
-      walletId: 'w-1',
-    };
-    await expect(svc.process(intent)).rejects.toBeInstanceOf(MoneyMovementNotImplementedError);
-  });
+  // STG3-B-3 implemented bill_payment; the not-implemented assertion
+  // moved out. New bill_payment behaviour is covered in
+  // money-movement-bill-payment.test.ts.
 
   it('throws MoneyMovementNotImplementedError for expense_reimbursement', async () => {
     const intent: MoneyIntent = {
@@ -307,17 +301,17 @@ describe('STG3-B — MoneyMovement skeleton: not-yet-implemented intent kinds', 
 
   it('error includes the intent kind so logs are diagnosable', async () => {
     const intent: MoneyIntent = {
-      kind: 'bill_payment',
-      billId: 'b-1', companyId: 'co-1', paidByUserId: 'u-1',
-      amount: 1, currency: 'USD', walletId: 'w-1',
+      kind: 'expense_reimbursement',
+      expenseId: 'e-1', companyId: 'co-1', beneficiaryUserId: 'u-1',
+      amount: 1, currency: 'USD',
     };
     try {
       await svc.process(intent);
       expect.fail('should have thrown');
     } catch (err: any) {
       expect(err).toBeInstanceOf(MoneyMovementNotImplementedError);
-      expect(err.message).toContain('bill_payment');
-      expect(err.intentKind).toBe('bill_payment');
+      expect(err.message).toContain('expense_reimbursement');
+      expect(err.intentKind).toBe('expense_reimbursement');
     }
   });
 });
