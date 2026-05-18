@@ -116,6 +116,10 @@ export interface IStorage {
   // Webhook idempotency
   isWebhookProcessed(eventId: string): Promise<boolean>;
   markWebhookProcessed(eventId: string, provider: string, eventType?: string, metadata?: any): Promise<void>;
+  // TP-HIGH-09 — atomic claim variant: combines isWebhookProcessed +
+  // markWebhookProcessed into one ON CONFLICT DO NOTHING RETURNING op.
+  // Returns true when this caller is the first to claim the event.
+  claimWebhookForProcessing(eventId: string, provider: string, eventType?: string, metadata?: any): Promise<boolean>;
   // LU-DD-2 / AUD-DD-MT-005 — Server-issued payment-intent index
   createPaymentIntentIndex(input: InsertPaymentIntentIndex): Promise<PaymentIntentIndex | null>;
   getPaymentIntentIndex(provider: string, providerIntentId: string): Promise<PaymentIntentIndex | undefined>;
@@ -949,6 +953,56 @@ export class DatabaseStorage implements IStorage {
       if (error.code !== '23505') {
         throw error;
       }
+    }
+  }
+
+  /**
+   * TP-HIGH-09 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4) — atomic
+   * claim-then-process pattern for webhooks. The check-then-write
+   * pattern (isWebhookProcessed → side-effect → markWebhookProcessed)
+   * has a race window: two webhook deliveries arriving within
+   * milliseconds can BOTH pass the isWebhookProcessed check and BOTH
+   * run the side-effect, even though only one markWebhookProcessed
+   * INSERT will ultimately succeed thanks to the UNIQUE constraint
+   * on event_id.
+   *
+   * This helper closes that race by doing the INSERT FIRST and
+   * returning whether THIS caller is the winner:
+   *   - returns `true`: claim won; safe to proceed with side-effects
+   *   - returns `false`: another caller already claimed; skip side-effects
+   *
+   * Recommended pattern for new webhook handlers:
+   *   const won = await storage.claimWebhookForProcessing(eventId, provider, eventType, metadata);
+   *   if (!won) return; // already processed by another delivery
+   *   // ... side effects (credit-back-wallet, update payout status, etc.)
+   *
+   * Legacy check-then-write usages are left in place for back-compat;
+   * the UNIQUE constraint still prevents the double-INSERT, so the only
+   * exposure is for SIDE-EFFECTS that aren't themselves idempotent.
+   */
+  async claimWebhookForProcessing(
+    eventId: string,
+    provider: string,
+    eventType: string = 'unknown',
+    metadata?: any,
+  ): Promise<boolean> {
+    try {
+      const result = await db.insert(processedWebhooks).values({
+        eventId,
+        provider,
+        eventType,
+        metadata: metadata || null,
+      })
+        .onConflictDoNothing()
+        .returning({ id: processedWebhooks.id });
+      // RETURNING is empty when ON CONFLICT fired (already-processed).
+      return result.length > 0;
+    } catch (error: any) {
+      // Unique-violation that didn't get caught by ON CONFLICT (rare;
+      // typically a code-path mismatch with the constraint target) →
+      // treat as already-claimed for safety.
+      if (error.code === '23505') return false;
+      throw error;
     }
   }
 

@@ -2,6 +2,12 @@ import { getUncachableStripeClient, getStripeClient } from './stripeClient';
 import { paystackClient, validateTransferDetails, validateStripeBankDetails } from './paystackClient';
 import { Money, paymentLogger, validateCurrencyForProvider, mapPaymentError } from './utils/paymentUtils';
 import { storage } from './storage';
+import { withProviderRetry, isRetryable } from './lib/provider-retry';
+
+// Re-exported for parity with the lib module — callers historically import
+// from this file. The implementation lives in server/lib/provider-retry.ts
+// so the test suite can import it without pulling in storage + db.
+export { withProviderRetry, isRetryable };
 
 // LU-DD-2 / AUD-DD-MT-005
 // Server-issued companyId index for payment intents. Best-effort write —
@@ -183,11 +189,18 @@ export const paymentService = {
         // same reference returns the original transfer rather than
         // creating a second one.
         const paystackReference = payoutId ? `payout-${payoutId}` : undefined;
-        const transfer = await paystackClient.initiateTransfer(
-          amount,
-          recipientResult.data.recipient_code,
-          reason,
-          paystackReference,
+        // TP-HIGH-08 — retry on transient errors. Paystack uses the
+        // reference field for dedup so a retry won't produce a
+        // duplicate transfer; the worst case is the request lands
+        // twice and the second call returns the original.
+        const transfer = await withProviderRetry(
+          'paystack.initiateTransfer',
+          () => paystackClient.initiateTransfer(
+            amount,
+            recipientResult.data.recipient_code,
+            reason,
+            paystackReference,
+          ),
         );
         // LU-DD-2: index by transfer_code (the canonical webhook key for
         // Paystack transfer events) AND by reference (some events use it).
@@ -237,14 +250,20 @@ export const paymentService = {
           const transferIdempotencyKey = payoutId
             ? `txfr-payout-${payoutId}`
             : `txfr-${recipientDetails.stripeAccountId}-${amount}-${Math.floor(Date.now() / 60000)}`;
-          const transfer = await stripe.transfers.create({
-            amount: Money.toMinor(amount),
-            currency: recipientDetails.currency || currency.toLowerCase(),
-            destination: recipientDetails.stripeAccountId,
-            description: reason,
-          }, {
-            idempotencyKey: transferIdempotencyKey,
-          });
+          // TP-HIGH-08 — retry the Connect transfer with the same
+          // idempotency key on transient errors. Stripe dedups by
+          // idempotencyKey so the retry won't double-transfer.
+          const transfer = await withProviderRetry(
+            'stripe.transfers.create',
+            () => stripe.transfers.create({
+              amount: Money.toMinor(amount),
+              currency: recipientDetails.currency || currency.toLowerCase(),
+              destination: recipientDetails.stripeAccountId,
+              description: reason,
+            }, {
+              idempotencyKey: transferIdempotencyKey,
+            }),
+          );
           // LU-DD-2: index Stripe Connect transfer by id
           await indexProviderIntent({
             provider: 'stripe',
@@ -315,26 +334,31 @@ export const paymentService = {
         // with the same payoutId returns the original payout from Stripe.
         const payoutIdempotencyKey = payoutId ? `payout-${payoutId}` : undefined;
         // Create a Stripe payout (requires the platform to have sufficient balance)
-        const payout = await stripe.payouts.create(
-          {
-            amount: Money.toMinor(amount),
-            currency: currency.toLowerCase(),
-            method: 'standard',
-            description: reason,
-            ...(destinationBankAccountId ? { destination: destinationBankAccountId } : {}),
-            metadata: {
-              recipientName: recipientDetails.accountName,
-              countryCode,
-              recipientAccount: recipientDetails.accountNumber || recipientDetails.iban || '',
-              recipientBank: recipientDetails.routingNumber || recipientDetails.sortCode || recipientDetails.bsb || '',
-              // LU-DD-2: thread the caller's companyId/userId into Stripe metadata
-              // so the resolver's fallback path still works for in-flight events.
-              ...((metadata?.companyId as string) ? { companyId: metadata!.companyId as string } : {}),
-              ...((metadata?.userId as string) ? { userId: metadata!.userId as string } : {}),
-              ...(payoutId ? { payoutId } : {}),
+        // TP-HIGH-08 — retry on transient. Same idempotency key on retry
+        // means Stripe returns the original payout, not a duplicate.
+        const payout = await withProviderRetry(
+          'stripe.payouts.create',
+          () => stripe.payouts.create(
+            {
+              amount: Money.toMinor(amount),
+              currency: currency.toLowerCase(),
+              method: 'standard',
+              description: reason,
+              ...(destinationBankAccountId ? { destination: destinationBankAccountId } : {}),
+              metadata: {
+                recipientName: recipientDetails.accountName,
+                countryCode,
+                recipientAccount: recipientDetails.accountNumber || recipientDetails.iban || '',
+                recipientBank: recipientDetails.routingNumber || recipientDetails.sortCode || recipientDetails.bsb || '',
+                // LU-DD-2: thread the caller's companyId/userId into Stripe metadata
+                // so the resolver's fallback path still works for in-flight events.
+                ...((metadata?.companyId as string) ? { companyId: metadata!.companyId as string } : {}),
+                ...((metadata?.userId as string) ? { userId: metadata!.userId as string } : {}),
+                ...(payoutId ? { payoutId } : {}),
+              },
             },
-          },
-          payoutIdempotencyKey ? { idempotencyKey: payoutIdempotencyKey } : undefined,
+            payoutIdempotencyKey ? { idempotencyKey: payoutIdempotencyKey } : undefined,
+          ),
         );
 
         // LU-DD-2: index Stripe payout by payout.id
