@@ -32,6 +32,7 @@ import {
   type BusinessInsight, type InsertBusinessInsight,
   processedWebhooks,
   pendingDestructiveActions,
+  pendingWalletCompensations,
   paymentIntentIndex,
   type CreateTransaction, type CreateExpense, type CreateBill,
   type CreatePayroll, type CreateTeamMember,
@@ -119,6 +120,21 @@ export interface IStorage {
   // LU-DD-2 / AUD-DD-MT-005 — Server-issued payment-intent index
   createPaymentIntentIndex(input: InsertPaymentIntentIndex): Promise<PaymentIntentIndex | null>;
   getPaymentIntentIndex(provider: string, providerIntentId: string): Promise<PaymentIntentIndex | undefined>;
+
+  // TP-HIGH-07 — Pending wallet compensation queue. Enqueue a credit-back
+  // that needs to run out-of-band because the in-line refund failed.
+  // Returns true when this caller created the row; false when (walletId,
+  // originalReference) already had a row (ON CONFLICT silent no-op).
+  enqueuePendingWalletCompensation(input: {
+    walletId: string;
+    amount: number;
+    currency: string;
+    originalReference: string;
+    reason: string;
+    failureKind?: string;
+    lastError?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<boolean>;
   
   // Transaction status updates
   updateTransactionByReference(reference: string, data: Partial<Transaction>): Promise<Transaction | undefined>;
@@ -949,6 +965,68 @@ export class DatabaseStorage implements IStorage {
       if (error.code !== '23505') {
         throw error;
       }
+    }
+  }
+
+  // ==================== PENDING WALLET COMPENSATIONS (TP-HIGH-07) ====================
+
+  /**
+   * TP-HIGH-07 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4) — durable queue
+   * for wallet credit-backs that couldn't be applied in-line.
+   *
+   * The /payment/transfer flow runs:
+   *   1. atomic wallet debit (claim-protected, PR #48)
+   *   2. external provider call
+   *   3. if (2) throws → in-line creditWallet refund
+   *
+   * If step 3 itself throws (DB blip mid-route, network partition,
+   * advisory lock contention), the wallet stays debited and the money
+   * never left — a real user-visible loss. This method captures the
+   * compensation request to a queue; a worker drains it with backoff.
+   *
+   * Idempotency: the UNIQUE index on (wallet_id, original_reference)
+   * combined with ON CONFLICT DO NOTHING means a second enqueue for the
+   * same original transfer is a silent no-op. The first row keeps its
+   * attempts counter and last_error. Returns true on first enqueue,
+   * false on duplicate.
+   *
+   * The worker is not yet implemented — first observability pass: log
+   * + paginated admin view that surfaces pending rows. Worker added in
+   * a follow-up PR (STG2-C-2 in the audit plan).
+   */
+  async enqueuePendingWalletCompensation(input: {
+    walletId: string;
+    amount: number;
+    currency: string;
+    originalReference: string;
+    reason: string;
+    failureKind?: string;
+    lastError?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<boolean> {
+    try {
+      const result = await db.insert(pendingWalletCompensations).values({
+        walletId: input.walletId,
+        amount: String(input.amount),
+        currency: input.currency,
+        originalReference: input.originalReference,
+        reason: input.reason,
+        failureKind: input.failureKind || 'transfer_refund',
+        // Cap lastError at 1024 chars so a verbose stack trace doesn't
+        // bloat the row or leak credentials embedded deep in a message.
+        lastError: input.lastError ? input.lastError.slice(0, 1024) : null,
+        metadata: input.metadata || null,
+        status: 'pending',
+        attempts: 0,
+      })
+        .onConflictDoNothing()
+        .returning({ id: pendingWalletCompensations.id });
+      return result.length > 0;
+    } catch (error: any) {
+      // Treat unique-violation that bypassed ON CONFLICT (rare; code-path
+      // mismatch with the constraint target) as a silent dedup.
+      if (error.code === '23505') return false;
+      throw error;
     }
   }
 
