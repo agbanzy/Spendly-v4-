@@ -490,15 +490,65 @@ router.post("/payment/transfer", requireAuth, requirePin, financialLimiter, asyn
         },
       );
     } catch (transferError: any) {
-      // External transfer failed — refund the wallet debit
-      await storage.creditWallet(
-        userWallet.id,
-        amount,
-        'transfer_refund',
-        `Refund: transfer failed - ${reason}`,
-        `REFUND-${transferReference}`,
-        { reason: transferError.message }
-      );
+      // TP-HIGH-07 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4) — the
+      // external transfer failed. Try the in-line credit-back; if THAT
+      // also fails (DB blip, lock contention, anything), enqueue a
+      // durable compensation request so a worker can retry. Without
+      // this fallback the wallet stays debited and the money never
+      // left — real user-visible loss per the audit finding.
+      try {
+        await storage.creditWallet(
+          userWallet.id,
+          amount,
+          'transfer_refund',
+          `Refund: transfer failed - ${reason}`,
+          `REFUND-${transferReference}`,
+          { reason: transferError.message }
+        );
+      } catch (creditError: any) {
+        // In-line refund failed — durably enqueue the compensation.
+        // We log + enqueue but still throw the ORIGINAL transferError
+        // so the client sees the actual transfer failure cause
+        // (not the secondary credit-back failure).
+        try {
+          await storage.enqueuePendingWalletCompensation({
+            walletId: userWallet.id,
+            amount,
+            currency,
+            originalReference: transferReference,
+            reason,
+            failureKind: 'transfer_refund',
+            lastError: `creditWallet failed during transfer-error rollback: ${creditError.message}`,
+            metadata: {
+              transferError: transferError.message,
+              userId,
+              recipientName: recipientDetails.accountName,
+              countryCode,
+            },
+          });
+          paymentLogger.error('wallet_compensation_enqueued', {
+            walletId: userWallet.id,
+            amount,
+            currency,
+            originalReference: transferReference,
+            transferError: transferError.message,
+            creditError: creditError.message,
+          });
+        } catch (enqueueError: any) {
+          // Compensation queue itself unavailable — this is the worst
+          // case. Log loudly so ops can manually credit-back the user.
+          // Still throw the original error to the client.
+          paymentLogger.error('wallet_compensation_enqueue_failed', {
+            walletId: userWallet.id,
+            amount,
+            currency,
+            originalReference: transferReference,
+            transferError: transferError.message,
+            creditError: creditError.message,
+            enqueueError: enqueueError.message,
+          });
+        }
+      }
       throw transferError;
     }
 

@@ -6,6 +6,7 @@ import { getStripeClient } from "./stripeClient";
 import { getPaymentProvider, getCurrencyForCountry } from "./paymentService";
 import { logger as baseLogger } from "./lib/logger";
 import { computeNextDate } from "./utils/recurring-dates";
+import { processPendingWalletCompensations } from "./lib/wallet-compensation-worker";
 
 // LU-002 / LU-003 / AUD-BE-001 / AUD-BE-004
 // Scheduler hardened to (a) acquire a Postgres advisory lock per tick so only
@@ -14,6 +15,10 @@ import { computeNextDate } from "./utils/recurring-dates";
 
 const logger = baseLogger.child({ module: "recurring-scheduler" });
 const SCHEDULER_LOCK_NAME = "financiar.recurring-scheduler";
+// DEF-STG3-WORKER-CRON — separate advisory lock so the compensation
+// drain doesn't contend with the bills/payroll scheduler. Different
+// cadence (5min vs 1h) and different concerns.
+const COMPENSATION_DRAIN_LOCK_NAME = "financiar.wallet-compensation-drain";
 
 // computeNextDate moved to server/utils/recurring-dates.ts
 // (AUD-DD-BILL-007 / AUD-DD-BILL-008) so unit tests can import it
@@ -348,6 +353,64 @@ export function stopRecurringScheduler() {
     clearInterval(schedulerInterval);
     schedulerInterval = null;
     logger.info("Recurring payment scheduler stopped");
+  }
+}
+
+// ==================== WALLET COMPENSATION DRAIN (DEF-STG3-WORKER-CRON) ====================
+//
+// Closes the loop on TP-HIGH-07 — drains pending_wallet_compensations
+// rows that the in-line creditWallet path couldn't apply. Independent
+// of the bills/payroll scheduler:
+//   - separate advisory lock (no cross-blocking with hourly bills tick)
+//   - 5-minute default cadence (vs. hourly) so stranded user wallets
+//     get repaired within one cron cycle even at low queue volume
+//   - the worker itself uses FOR UPDATE SKIP LOCKED so multiple ECS
+//     tasks won't double-process, but the advisory lock gives an
+//     additional belt-and-braces against accidental concurrent ticks
+//     on the same instance (e.g. if a tick takes > intervalMs)
+
+export async function runWalletCompensationDrain() {
+  const startedAt = Date.now();
+  const result = await withSchedulerLock(COMPENSATION_DRAIN_LOCK_NAME, async () => {
+    logger.info({ at: new Date().toISOString() }, "Wallet compensation drain tick start");
+    const r = await processPendingWalletCompensations({
+      claimNextPendingWalletCompensation: storage.claimNextPendingWalletCompensation.bind(storage),
+      creditWallet: storage.creditWallet.bind(storage),
+      finalizePendingWalletCompensation: storage.finalizePendingWalletCompensation.bind(storage),
+    });
+    logger.info(
+      { durationMs: Date.now() - startedAt, ...r },
+      "Wallet compensation drain tick complete",
+    );
+    return r;
+  });
+  return result;
+}
+
+let compensationDrainInterval: NodeJS.Timeout | null = null;
+
+export function startWalletCompensationDrainScheduler(intervalMs: number = 300000) {
+  if (compensationDrainInterval) {
+    clearInterval(compensationDrainInterval);
+  }
+  logger.info({ intervalMs }, "Starting wallet compensation drain scheduler");
+  // First tick fires immediately so an enqueued compensation at boot
+  // doesn't have to wait the full interval.
+  runWalletCompensationDrain().catch((err) =>
+    logger.error({ err }, "Initial wallet compensation drain failed"),
+  );
+  compensationDrainInterval = setInterval(() => {
+    runWalletCompensationDrain().catch((err) =>
+      logger.error({ err }, "Wallet compensation drain tick failed"),
+    );
+  }, intervalMs);
+}
+
+export function stopWalletCompensationDrainScheduler() {
+  if (compensationDrainInterval) {
+    clearInterval(compensationDrainInterval);
+    compensationDrainInterval = null;
+    logger.info("Wallet compensation drain scheduler stopped");
   }
 }
 

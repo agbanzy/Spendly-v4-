@@ -844,4 +844,38 @@ router.get("/audit-logs/:entityType/:entityId", requireAuth, requireAdmin, async
   }
 });
 
+// DEF-STG3-WORKER-CRON — Admin queue view for pending_wallet_compensations.
+// Ops uses this to spot stuck (manual_review) rows that the worker
+// couldn't drain after maxAttempts. Default sort surfaces manual_review
+// first, then newest pending. Bounded by limit (cap 200) to prevent
+// runaway response sizes.
+//
+// Query params:
+//   ?status=pending|processing|completed|manual_review   filter (optional)
+//   ?limit=50                                            page size, cap 200
+//   ?offset=0                                            pagination cursor
+router.get("/admin/wallet-compensations", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const allowedStatuses = ['pending', 'processing', 'completed', 'manual_review'] as const;
+    type AllowedStatus = typeof allowedStatuses[number];
+    const rawStatus = req.query.status as string | undefined;
+    const status = rawStatus && (allowedStatuses as readonly string[]).includes(rawStatus)
+      ? (rawStatus as AllowedStatus)
+      : undefined;
+
+    const limit = Number(req.query.limit);
+    const offset = Number(req.query.offset);
+
+    const rows = await storage.listPendingWalletCompensations({
+      status,
+      limit: Number.isFinite(limit) ? limit : undefined,
+      offset: Number.isFinite(offset) ? offset : undefined,
+    });
+    res.json({ rows, count: rows.length });
+  } catch (error: any) {
+    const mapped = mapPaymentError(error, 'admin');
+    res.status(mapped.statusCode).json({ error: mapped.userMessage });
+  }
+});
+
 export default router;

@@ -7,7 +7,10 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { apiLimiter } from "./middleware/rateLimiter";
 import { csrfProtection } from "./middleware/csrf";
-import { startRecurringScheduler } from "./recurringScheduler";
+import {
+  startRecurringScheduler,
+  startWalletCompensationDrainScheduler,
+} from "./recurringScheduler";
 import { logger, requestLogger } from "./lib/logger";
 import { startRetentionScheduler } from "./lib/data-retention";
 
@@ -201,6 +204,10 @@ app.use(requestLogger);
       log(`serving on port ${port}`);
       startRecurringScheduler(3600000);
       startRetentionScheduler();
+      // DEF-STG3-WORKER-CRON — 5-minute drain of pending_wallet_compensations.
+      // Independent of the hourly recurring scheduler (separate advisory
+      // lock, different cadence, different concerns).
+      startWalletCompensationDrainScheduler(300000);
     },
   );
 })();
