@@ -502,7 +502,15 @@ router.post("/payment/transfer", requireAuth, requirePin, financialLimiter, asyn
       throw transferError;
     }
 
-    // Create transaction record with provider reference for webhook tracking
+    // TP-HIGH-10 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.4 item 7) —
+    // Store provider reference in the dedicated `reference` column (which
+    // has an index — see schema.ts `transactions_reference_idx`) so
+    // webhook reconciliation in webhookHandlers.ts (calls
+    // storage.getTransactionByReference) can find this row via an
+    // indexed lookup instead of a description LIKE-scan. Previously the
+    // ref was written to `description` and `reference` was null, which
+    // meant transfer-status updates from provider webhooks silently
+    // failed to find the corresponding transactions row.
     const providerRef = transferResult.reference || transferResult.transferId || transferReference;
     await storage.createTransaction({
       type: 'transfer',
@@ -510,9 +518,9 @@ router.post("/payment/transfer", requireAuth, requirePin, financialLimiter, asyn
       fee: "0",
       status: 'processing',
       date: new Date().toISOString().split('T')[0],
-      description: providerRef, // Store provider reference in description for lookup
+      description: reason || 'Wallet-to-bank transfer',
       currency,
-      reference: null,
+      reference: providerRef,
       userId: (req as any).user?.uid || null,
     });
 

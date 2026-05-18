@@ -104,6 +104,31 @@ const PRECHECKS = {
       'one row\'s reference (eg. append -retry-N). DO NOT silently delete the ' +
       'duplicate — the wallet balance reflects both debits.',
   },
+  '0018': {
+    label: '0018_transactions_backfill_reference_from_description.sql — TP-HIGH-10',
+    description:
+      'Backfill transactions.reference from description for legacy ' +
+      '/payment/transfer rows. Reports the candidate row count. The ' +
+      'migration itself refuses to run if more than 50k rows would be ' +
+      'touched in one shot.',
+    query: `
+      SELECT count(*) AS candidate_rows
+      FROM transactions
+      WHERE type = 'transfer'
+        AND reference IS NULL
+        AND description ~ '^(TRF-|tr_|po_|trsf_)';
+    `,
+    // Reports candidate row count; only "fails" the check if the count
+    // exceeds the 50k cap that the migration itself enforces (so the
+    // operator hits the warning here, not at deploy time).
+    pass: (row) => Number(row.candidate_rows) <= 50000,
+    explainPass: (row) =>
+      `Candidate rows = ${row.candidate_rows} (within the 50k cap). ` +
+      'Review the count and decide whether to promote.',
+    explainFail: (row) =>
+      `Candidate rows = ${row.candidate_rows}, exceeds the 50k cap in the migration's DO $$ guard. ` +
+      'Run as a controlled batch (split the UPDATE by id ranges) instead of promoting this migration as-is.',
+  },
 };
 
 function printBanner() {
@@ -150,7 +175,9 @@ async function runCheck(id) {
     const result = await client.query(spec.query);
     const row = result.rows[0] || {};
     if (spec.pass(row)) {
-      console.log('  PASS — ' + spec.explainPass);
+      // explainPass may be a static string or a function(row) — both supported.
+      const msg = typeof spec.explainPass === 'function' ? spec.explainPass(row) : spec.explainPass;
+      console.log('  PASS — ' + msg);
       console.log('');
       console.log(`  Next: node scripts/deferred-migration-helper.cjs promote ${id}`);
       return true;
