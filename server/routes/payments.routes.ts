@@ -632,13 +632,29 @@ router.post("/bills/pay", financialLimiter, requireAuth, requirePin, async (req,
       }
 
       if (!deducted) {
-        // FIX P3: Verify the user belongs to the company before deducting from company balance
+        // FIX P3 + TP-CRIT-01 — scope balance read AND write by companyId.
+        //
+        // The previous code:
+        //   - getBalances() with no arg → singleton row return
+        //   - updateBalances({...}) with no companyId → singleton write
+        // Result: a user paying a bill from company-fallback would
+        // debit whichever tenant the storage layer's default points to,
+        // not their own. Same shape as the AUD-PR-001 payroll bug
+        // (storage.getPayroll() with no arg in /payroll/process).
         const userCompany = await resolveUserCompany(req);
         if (!userCompany?.companyId) {
           return res.status(403).json({ error: "Cannot deduct from company balance — no company association found" });
         }
 
-        const balances = await storage.getBalances();
+        // TP-CRIT-01 — also verify the bill itself belongs to the caller's
+        // company. Otherwise a user with no personal wallet could submit
+        // ANY bill id from any tenant and debit their own company's balance
+        // for it (cross-tenant data-injection, opposite-direction attack).
+        if ((bill as any).companyId && (bill as any).companyId !== userCompany.companyId) {
+          return res.status(404).json({ error: "Bill not found" });
+        }
+
+        const balances = await storage.getBalances(userCompany.companyId);
         let balanceField: string;
         if (billCurrency === 'USD') {
           balanceField = 'usd';
@@ -651,7 +667,7 @@ router.post("/bills/pay", financialLimiter, requireAuth, requirePin, async (req,
         if (currentBalance < billAmount) {
           return res.status(400).json({ error: "Insufficient wallet balance", available: currentBalance, required: billAmount, currency: billCurrency });
         }
-        await storage.updateBalances({ [balanceField]: String(currentBalance - billAmount) });
+        await storage.updateBalances({ [balanceField]: String(currentBalance - billAmount) }, userCompany.companyId);
       }
 
       await storage.updateBill(billId, { status: 'paid' });
