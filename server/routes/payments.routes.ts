@@ -412,11 +412,28 @@ router.post("/payment/transfer", requireAuth, requirePin, financialLimiter, asyn
 
     let transferResult;
     try {
+      // TP-CRIT-02 (AUDIT_TRANSFERS_PAYOUTS_2026_05_17 §4.2) —
+      // thread the per-request transferReference through as
+      // `metadata.payoutId` so paymentService.initiateTransfer can
+      // derive stable idempotency keys (Paystack `reference`,
+      // Stripe `idempotencyKey`) per AUD-DB-004/005/006 (PR #25).
+      //
+      // Without this, the AUD-DB fix from the payouts surface didn't
+      // apply to wallet-initiated transfers — a retried request mid
+      // network-blip would create a duplicate provider transfer.
+      // companyId is threaded too so the LU-DD-2 payment_intent_index
+      // writes get a tenant on the row (txCompany resolved earlier
+      // at line 374 for the daily-limit scope check).
       transferResult = await paymentService.initiateTransfer(
         amount,
         recipientDetails,
         countryCode,
-        reason
+        reason,
+        {
+          payoutId: transferReference,
+          companyId: txCompany?.companyId,
+          userId,
+        },
       );
     } catch (transferError: any) {
       // External transfer failed — refund the wallet debit
@@ -861,9 +878,26 @@ router.post("/wallet/payout", requireAuth, requirePin, financialLimiter, async (
 
     const { amount, countryCode, recipientDetails, reason } = result.data;
     const { currency } = getCurrencyForCountry(countryCode);
+    const userId = (req as any).user?.uid;
+    if (!userId) {
+      return res.status(401).json({ error: "User authentication required" });
+    }
 
-    // Get balance in the correct currency
-    const balances = await storage.getBalances();
+    // TP-CRIT-05 (NEW — discovered during TP-CRIT-02 sprint) — scope
+    // balance reads + writes by companyId. The previous code called
+    // storage.getBalances() with no argument (returns whichever row
+    // the storage default points to) AND tx.update(companyBalances).set(...)
+    // with NO WHERE clause (updates EVERY company's row). One user's
+    // payout was debiting EVERY tenant's balance. Catastrophic
+    // multi-tenant data corruption.
+    const payoutCompany = await resolveUserCompany(req);
+    if (!payoutCompany?.companyId) {
+      return res.status(403).json({ error: "Company context required" });
+    }
+    const companyIdForBalance = payoutCompany.companyId;
+
+    // Get balance in the correct currency (scoped to the caller's company)
+    const balances = await storage.getBalances(companyIdForBalance);
     let currentBalance = 0;
 
     // Map currency to balance field (temporary workaround for legacy balance structure)
@@ -883,21 +917,35 @@ router.post("/wallet/payout", requireAuth, requirePin, financialLimiter, async (
       });
     }
 
+    // TP-CRIT-02 — same idempotency thread-through as /payment/transfer.
+    // Without this, the AUD-DB-004/005/006 idempotency fixes from PR #25
+    // never apply to wallet payouts, so retries duplicate provider transfers.
+    const payoutReference = `WPO-${userId.substring(0, 8)}-${Date.now()}`;
     const transferResult = await paymentService.initiateTransfer(
       amount,
       recipientDetails,
       countryCode,
-      reason
+      reason,
+      {
+        payoutId: payoutReference,
+        companyId: companyIdForBalance,
+        userId,
+      },
     );
 
     // Wrap balance deduction + transaction record in a DB transaction
-    // to prevent balance/ledger mismatch if either step fails
+    // to prevent balance/ledger mismatch if either step fails.
     await db.transaction(async (tx) => {
-      // Deduct from correct currency balance
+      // Deduct from correct currency balance — SCOPED BY companyId.
+      // The previous UPDATE had no WHERE clause and would set every
+      // company's balance to the deducted amount. Now restricted to
+      // the caller's company.
       const balanceUpdate = (currency === 'USD' || ['US', 'CA'].includes(countryCode))
         ? { usd: String(currentBalance - amount) }
         : { local: String(currentBalance - amount) };
-      await tx.update(companyBalances).set(balanceUpdate as any);
+      await tx.update(companyBalances)
+        .set(balanceUpdate as any)
+        .where(eq(companyBalances.companyId, companyIdForBalance));
 
       await tx.insert(transactionsTable).values({
         type: 'payout',
@@ -907,12 +955,12 @@ router.post("/wallet/payout", requireAuth, requirePin, financialLimiter, async (
         date: new Date().toISOString().split('T')[0],
         description: reason,
         currency,
-        reference: null,
-        userId: (req as any).user?.uid || null,
+        reference: payoutReference,
+        userId,
+        companyId: companyIdForBalance,
       } as any);
     });
 
-    const userId = (req as any).user?.uid || 'system';
     try {
       const auditName = await getAuditUserName(req);
       await storage.createAuditLog({
